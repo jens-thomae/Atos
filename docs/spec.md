@@ -31,14 +31,14 @@ We are building a Linux-based desktop OS that looks as considered as macOS, feel
 The five priorities guide every decision. They are not strictly ranked, but when two conflict in practice, prefer them in this order:
 
 1. **Performance and stability.** A beautiful design that lags or glitches destroys trust. Nothing ships that misses the budgets in section 7.
-2. **Beautiful design that feels good.** Design follows the Design Language Brief. Legibility beats spectacle.
+2. **Beautiful design that feels good.** Design follows the design system. Legibility beats spectacle.
 3. **Familiar, with something new.** Windows, macOS and mobile users are productive in minutes. New ideas are added alongside familiar ones, never in place of them.
 4. **Integration.** Shell and native apps form one product, built on one toolkit and one design system.
 5. **Ownership and customisation.** Users can change anything. The OS warns but does not block, and warnings can be turned off.
 
 Positioning in one line: your computer — no account, no ads, no telemetry, nothing that breaks on update.
 
-The design language is specified separately in [docs/design-brief.md](design-brief.md). Agents doing UI work read it in full.
+The design system is not kept in this repository. The owner provides it when a task needs it; agents doing UI work use only its values and ask if it is missing.
 
 ## 3. Scope
 
@@ -90,7 +90,7 @@ This log records every architectural decision and its status. **Decided** entrie
 | D-003 | Apps distributed as Flatpak, Flathub as default remote | Decided | The de facto Linux app store; sandboxing and portals for permissions |
 | D-004 | Customisation only through config, tokens and defined extension points; no shell monkey-patching | Decided | Prevents the GNOME-extension breakage problem |
 | D-005 | No account required, no telemetry by default | Decided | Core positioning against Windows 11 |
-| D-006 | Primary UI toolkit: iced/libcosmic or Slint | Open | Resolve with a 4–6 week prototype of Files in both; measure frame time, memory, accessibility and agent productivity |
+| D-006 | Primary UI toolkit: iced/libcosmic or Slint | Open | Resolve by prototyping Files in each candidate, with no fixed timeline; the owner may add more candidates. Measure frame time, memory, accessibility and agent productivity |
 | D-007 | Relationship with COSMIC: collaborate upstream or fork | Open | Decides how much compositor, toolkit and app code we reuse |
 | D-008 | Base image technology: bootc or systemd-sysupdate; base distribution | Open | Needs a short comparison spike |
 | D-009 | Implementation language for system components: Rust | Proposed | Memory safety, matches iced, Slint and COSMIC |
@@ -175,7 +175,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 
 ## 7. Quality budgets
 
-These budgets are release blockers. They are measured automatically in CI on a reference laptop wherever possible; a change that breaks a budget is not merged. The numbers are proposed starting targets and can be tightened.
+These budgets are release blockers. They are measured automatically in CI on the reference hardware wherever possible: an Intel NUC 11 with a Celeron N5105, deliberately low-end; a change that breaks a budget is not merged. The numbers are proposed starting targets and can be tightened.
 
 | Area | Metric | Budget |
 | --- | --- | --- |
@@ -199,8 +199,8 @@ Work runs in five phases. A phase ends only when its gate is met and the owner s
 
 | Phase | Contents | Exit gate |
 | --- | --- | --- |
-| 0 · Foundations | Decide toolkit, COSMIC relationship, base image (D-006 to D-008). Repo, CI, budget harness, AGENTS.md, board set up | D-006 to D-008 decided; CI measures budgets |
-| 1 · Bootable base | Signed image with updates and rollback, compositor, installer. Minimal shell: dock-taskbar, launcher, control centre | Boots and updates on the reference laptop |
+| 0 · Foundations | Decide toolkit, COSMIC relationship, base image (D-006 to D-008). Repo, CI, budget harness, board set up | D-006 to D-008 decided; CI measures budgets |
+| 1 · Bootable base | Signed image with updates and rollback, compositor, installer. Minimal shell: dock-taskbar, launcher, control centre | Boots and updates on the reference hardware |
 | 2 · Core experience | Full shell, command palette, three window modes. Files, Settings, Terminal, Text Editor on the toolkit | Owner daily-drives it for two weeks |
 | 3 · App suite and software | Remaining v1 apps, Software app, search and indexer. Phone integration, privacy page, first-run flow | Every v1 feature works; zero known crashers |
 | 4 · Public beta | Extension API, theming, certified hardware list. Public docs and SDK for third-party developers | Release checklist met; public beta ships |
@@ -258,7 +258,7 @@ A card is done only when all of these hold:
 - **Small cards.** One card is about one session of work: a single feature slice with a clear finish line.
 - **Context in files, not chat.** Anything an agent needs to know must be in this spec, the repo or the card.
 - **Separate building from reviewing.** The agent that wrote the code never approves it.
-- **One owner per component at a time.** Two agents never edit the same component in parallel.
+- **One owner per component at a time.** Two agents never edit the same component in parallel. Spikes in separate directories under `spikes/` may run in parallel.
 - **Escalate instead of guessing.** An unclear requirement becomes a question on the card and the card moves to **Blocked**.
 
 ## 10. Project management
@@ -269,7 +269,7 @@ What lives where:
 
 | Lives in | Contents | Changed by |
 | --- | --- | --- |
-| `docs/spec.md` (this file) and `docs/design-brief.md` | Mission, scope, architecture, decisions, budgets, agent rules, design language | Owner, or agents via approved proposals |
+| `docs/spec.md` (this file) | Mission, scope, architecture, decisions, budgets, agent rules | Owner, or agents via approved proposals |
 | `CLAUDE.md` (and optionally `AGENTS.md`) at the repo root | A one-page summary of section 1 and links into `docs/`, read automatically by coding agents | Owner |
 | Board (GitHub Projects) | Task cards, status, handoff notes | Planner, builder and reviewer agents; owner |
 | Repository | Code, tests, component specs, budget checks | Builder agents through reviewed pull requests |
@@ -278,7 +278,7 @@ What lives where:
 
 1. **Backlog:** ideas and future work; not yet specified.
 2. **Ready:** fully specified cards an agent can start without asking anything.
-3. **In progress:** one agent assigned; limit of one card per component.
+3. **In progress:** one agent assigned; limit of one card per component, except spike cards working in separate `spikes/` directories.
 4. **Blocked:** waiting on a decision or another card; the question is on the card.
 5. **Review:** pull request open; a reviewer agent and then the owner check it.
 6. **Done:** merged and accepted.
@@ -290,7 +290,7 @@ A card moves to **Ready** only when every field of the task template (`.github/I
 ```markdown
 Component: C5 Native apps
 Phase: 2
-Spec links: §6 C5, §7 Apps budgets, Design Brief "Native app patterns"
+Spec links: §6 C5, §7 Apps budgets
 Depends on: #120
 Goal: One sentence on the user-visible outcome.
 Acceptance criteria:

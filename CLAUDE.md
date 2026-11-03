@@ -11,7 +11,7 @@ Read in this order before writing any code:
 3. Your task card (GitHub issue): `gh issue view <number> --comments`. Read the **last handoff note** first.
 4. The spec sections linked on the card, usually §6 (your component) and §7 (quality budgets).
 5. `docs/spec.md` §5 (decisions log) for anything your task touches.
-6. For any UI work: `docs/design-brief.md` in full.
+6. For any UI work: the owner provides the design system when relevant. Use only its values; if it is missing, ask on the card.
 
 If you have no task card, stop and ask the owner. Do not choose work yourself.
 
@@ -20,7 +20,7 @@ If you have no task card, stop and ask the owner. Do not choose work yourself.
 - **One card, nothing else.** Work only on your assigned card. Anything else you notice becomes a new issue (`gh issue create`), not an unasked change.
 - **Decided means binding.** Never contradict a *Decided* entry in the decisions log. If you think one is wrong, add a *Proposed* entry in a comment on the card and move the card to Blocked.
 - **Never invent requirements.** If the spec or card is silent or ambiguous, write the question on the card, move it to Blocked and stop.
-- **Do not edit `docs/spec.md`, `docs/design-brief.md` or this file.** Propose changes in a card comment; only the owner changes them.
+- **Do not edit `docs/spec.md` or this file.** Propose changes in a card comment; only the owner changes them.
 - **Stay in your component.** Do not modify code owned by another component (C1–C11) unless the card says so.
 - **Budgets are release blockers.** A change that breaks a quality budget in §7 is not done, even if it works.
 - **Never mark your own work approved.** A separate reviewer agent and the owner accept work.
@@ -81,7 +81,7 @@ gh pr create --fill                     # open a PR from the current branch
 ## Repository layout (proposed, update as it is created)
 
 ```
-docs/            spec.md, design-brief.md, per-component docs
+docs/            spec.md, decisions/, per-component docs
 components/      one directory per component, named by ID
   c1-base/  c2-compositor/  c3-shell/  c4-toolkit/  c5-apps/
   c6-search/  c7-software/  c8-settings/  c9-connectivity/
