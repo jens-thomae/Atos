@@ -5,7 +5,7 @@ Card: #1 · Facts checked: 2026-11-03
 
 ## Context
 
-Spec §2 ranks performance and stability first, and §7 makes "0 known crashers" a release blocker. The OS integrates proven Linux pieces and writes only what defines the experience (§3), so most of our own code will be the compositor (C2), shell (C3), toolkit (C4), native apps (C5) and the daemons and tools behind them. D-006 (toolkit) is open between iced/libcosmic and Slint, both written in Rust. D-007 (COSMIC) is open, and COSMIC is written in Rust. `CLAUDE.md` already treats Rust as the convention; this document records why, and where the boundary sits.
+Spec §2 ranks performance and stability first, and §7 makes "0 known crashers" a release blocker. The OS integrates proven Linux pieces and writes only what defines the experience (§3), so most of our own code will be the compositor (C2), shell (C3), toolkit (C4), native apps (C5) and the daemons and tools behind them. D-006 (toolkit) is open between iced/libcosmic and Slint, both written in Rust. D-007 (COSMIC) is open, and COSMIC is written in Rust [3][10]. `CLAUDE.md` already treats Rust as the convention; this document records why, and where the boundary sits.
 
 **What "system component" means here (recommended scope).** Any code we write that ships in the image or is the product: compositor, shell, toolkit, native apps, background services (search and indexer, connectivity, privacy), the `os` command-line tool, Settings, Software and the installer (C1–C11).
 
@@ -24,9 +24,9 @@ Anything else needs a new decision entry.
 
 | Criterion | Rust | C | C++ |
 | --- | --- | --- | --- |
-| Memory safety | Safe by default; `unsafe` is opt-in and greppable. Android reports memory-safety bugs fell below 20% of new vulnerabilities and roughly 1000× lower vulnerability density in Rust than in its C/C++ code [1] | None by the language; relies on review, sanitizers, fuzzing | Better tools (RAII, smart pointers) but no compile-time guarantee |
+| Memory safety | Safe by default; `unsafe` is opt-in and greppable. Android reports memory-safety bugs fell below 20% of new vulnerabilities and a 1000× reduction in memory-safety vulnerability density compared with its C/C++ code [1] | None by the language; relies on review, sanitizers, fuzzing | Better tools (RAII, smart pointers) but no compile-time guarantee |
 | Wayland libraries | [wayland-rs] 0.31.15 (Jul 2026) [2]; [Smithay] compositor library, v0.7.0 (Jun 2025), used by [cosmic-comp] and [niri], both of which track Smithay git revisions ahead of the last release [3][4] | Reference [libwayland] is C [5]; [wlroots] is C, v0.20.2 (Jul 2026), still 0.x with breaking releases [6]; [Mutter] is C [7] | [KWin] is C++ [8], but is a full compositor tied to Plasma and Qt, not a reusable library |
-| Toolkit fit (D-006) | [iced] 0.14 (Dec 2025) [9], [libcosmic] [10] and [Slint] 1.18 (Sep 2026) [11] are Rust-native | GTK is C, but GTK is not a D-006 candidate | Qt is C++, not a D-006 candidate; Slint has C++ bindings |
+| Toolkit fit (D-006) | [iced] 0.14 (Dec 2025) [9], [libcosmic] [10] and [Slint] 1.18 (Sep 2026) [11] are Rust-native | GTK is C [16], but GTK is not a D-006 candidate | Qt is C++ [17], not a D-006 candidate; Slint has C++ bindings [18] |
 | Agent productivity | The compiler rejects whole classes of mistakes (lifetimes, data races, unhandled enum cases) before review, which suits agents that cannot remember earlier sessions. Android measured ~4× lower rollback rate and ~25% less review time for Rust changes vs C++ [1] | Bugs surface at runtime or under sanitizers; a reviewer agent must catch them | Very large language surface; many idioms per task, harder for agents to stay consistent |
 
 A fourth option, **Rust plus wlroots through bindings**, would keep a C compositor core. It loses most of the safety argument in the most crash-sensitive component and adds an FFI layer; it is only worth revisiting if Smithay blocks a §6 C2 requirement.
@@ -44,7 +44,7 @@ Wider signal: the Linux kernel declared Rust no longer experimental at the 2025 
 - Use `edition = "2024"`, whose default resolver `"3"` prefers dependency versions compatible with `rust-version` (Rust 1.84+) [15].
 - Exception for crates we publish for third-party developers (the SDK, §8 Phase 4): support the latest stable minus two (N-2), one of the policies Cargo's docs suggest [13].
 
-Today's candidate dependencies already require Rust 1.87 to 1.95 (Smithay 1.87, niri 1.87, iced 1.93, libcosmic 1.93, Slint 1.95, cosmic-comp 1.95) [3][4][9][10][11], so an older MSRV would bring no benefit.
+Today's candidate dependencies already require Rust 1.80.1 to 1.92 in their latest releases (Smithay 0.7.0: 1.80.1, iced 0.14.0: 1.88, Slint 1.18.1: 1.92) [19], and 1.87 to 1.95 on their default branches (Smithay 1.87, niri 1.87, iced 1.93, libcosmic 1.93, Slint 1.95, cosmic-comp 1.95) [3][4][9][10][11]. The default-branch numbers are what applies if we pin git revisions (see Consequences). Either way, an older MSRV would bring no benefit.
 
 ## Consequences
 
@@ -78,6 +78,10 @@ Today's candidate dependencies already require Rust 1.87 to 1.95 (Smithay 1.87, 
 13. Cargo Book, "Rust version": <https://doc.rust-lang.org/cargo/reference/rust-version.html>
 14. Rust blog, releases: <https://blog.rust-lang.org/releases/>
 15. Cargo Book, "Dependency resolution", resolver versions: <https://doc.rust-lang.org/cargo/reference/resolver.html>
+16. GTK repository: <https://gitlab.gnome.org/GNOME/gtk>
+17. Qt Base repository: <https://code.qt.io/cgit/qt/qtbase.git/> (mirror: <https://github.com/qt/qtbase>)
+18. Slint C++ API documentation: <https://docs.slint.dev/latest/docs/cpp/>
+19. crates.io `rust-version` of the cited releases: <https://crates.io/api/v1/crates/smithay/0.7.0>, <https://crates.io/api/v1/crates/iced/0.14.0>, <https://crates.io/api/v1/crates/slint/1.18.1>
 
 [wayland-rs]: https://github.com/Smithay/wayland-rs
 [Smithay]: https://github.com/Smithay/smithay
