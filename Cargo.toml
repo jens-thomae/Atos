@@ -1,6 +1,6 @@
 [workspace]
 # Add each new crate here explicitly; see README.md.
-members = ["tools/placeholder"]
+members = ["tools/budgets"]
 # Spikes are throwaway experiments with their own dependencies (spec §9).
 exclude = ["spikes"]
 resolver = "3"
