@@ -55,10 +55,11 @@ One window, one process, written in Rust against the toolkit's public API. Every
    - Size: bytes in decimal units with one decimal (`345.7 kB`, `1.0 MB`, `120 B`); folders show `Folder`.
    - Modified: `YYYY-MM-DD HH:MM` in local time.
    - Text only. No icons.
-   - One row is selected at a time; a single click selects it.
+   - At most one row is selected; a single click selects it.
+   - On start and after every navigation (into a folder, up, or to a place) no row is selected and the list is scrolled to the top.
    - If the toolkit has a virtualised list widget, use it. If it has none, the prototype may build one from public API; the README states how many lines that took.
 4. **Navigate into and up folders.** Double-click or Enter on a folder row opens it. *Up*, Backspace and Alt+Up go to the parent. On a file row, double-click and Enter print `SPIKE_OPEN <absolute path>` on stdout and do nothing else. A folder that cannot be read shows its error message in the list area instead of rows; the app does not crash.
-5. **Keyboard navigation of the list.** Up and Down move the selection by one row, Page Up and Page Down by one visible page, Home and End to the first and last row; the selected row is always scrolled into view. Tab and Shift+Tab move focus between sidebar, Up button and list. In the sidebar, Up and Down move between places and Enter activates one. Focus is visible.
+5. **Keyboard navigation of the list.** Up and Down move the selection by one row, Page Up and Page Down by one visible page, Home and End to the first and last row; with no row selected, Down or Home selects the first row and End the last. The selected row is always scrolled into view. On start, keyboard focus is on the list. Tab and Shift+Tab move focus in the order sidebar → Up button → list. When focus enters the sidebar it lands on *Home*. In the sidebar, Up and Down move between places and Enter activates one; focus stays in the sidebar. Focus is visible.
 6. **Context menu with 3 actions.** Right-click on a row selects it and opens a menu at the pointer; the Menu key or Shift+F10 opens it for the selected row. The menu opens with *Open* focused; Up and Down move between items, Enter activates, Escape closes. The actions:
    - *Open*: the same as double-click on that row.
    - *Copy Path*: puts the row's absolute path as text on the system clipboard.
@@ -131,10 +132,10 @@ The result:
 - `small/`: folders `docs/` (with `2026/november/` inside, for navigating three levels down and back up) and `empty/`; files `notes-1.txt`, `notes-2.txt`, `notes-3.txt`, `photo.png`, `report.pdf`, `with space.md`, `Ünïcödé.txt` with fixed sizes from 0 B to 1 MB. All modified 2026-01-01 00:00 UTC.
 - `10k/`: exactly 10,000 entries, `item-00001` to `item-10000`. Every 100th is an empty folder (100 folders); the rest are files with extensions cycling through `png`, `pdf`, `rs`, `md`, `txt`, sizes `i × 7919 mod 1,048,576` bytes and modified times one minute apart.
 
-To check that two machines made the same tree, compare this digest (Linux, GNU `find`); #12 records it with its results:
+To check that two machines made the same tree, compare this digest (Linux, GNU `find`); #12 records it with its results. It prints times in UTC and sizes for files only, because a folder's size depends on the file system:
 
 ```sh
-(cd <dir> && find . -printf '%p %y %s %TY%Tm%Td%TH%TM\n' | LC_ALL=C sort | sha256sum)
+(cd <dir> && TZ=UTC find . \( -type f -printf '%p f %s %TY%Tm%Td%TH%TM\n' \) -o \( -type d -printf '%p d %TY%Tm%Td%TH%TM\n' \) | LC_ALL=C sort | sha256sum)
 ```
 
 ## 6. Environments
@@ -150,10 +151,17 @@ All candidates are measured in the same environment in the same run, and results
 **Compositor for measurements.** Key injection for the keyboard walkthrough needs the `virtual-keyboard-unstable-v1` protocol. The named default is sway with the headless backend and the pixman (software) renderer, with `wtype` for keys:
 
 ```sh
-WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway
+WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway -c d006-sway.conf
 ```
 
-with one output at 1920 × 1080, 60 Hz, scale 1. If the dev VM from #16 has only another headless compositor, #12 installs sway there and says so. On the reference hardware #12 uses sway on the real display (DRM backend) at its native refresh rate.
+where `d006-sway.conf` is:
+
+```text
+output HEADLESS-1 mode 1920x1080@60Hz scale 1
+for_window [title="^Files$"] floating enable
+```
+
+so there is one output at 1920 × 1080, 60 Hz, scale 1, and the prototype floats at its own 1280 × 800 size instead of being tiled to fill the output. If the dev VM from #16 has only another headless compositor, #12 installs sway there and says so. On the reference hardware #12 uses sway on the real display (DRM backend) at its native refresh rate.
 
 ## 7. Metrics
 
@@ -161,8 +169,8 @@ Every number is the median of at least 5 runs, with the minimum and maximum repo
 
 | # | Metric | How | Tool |
 | --- | --- | --- | --- |
-| M1 | Cold start | `budgets <binary> <fixture>/small`: time from spawn to `BUDGET_FIRST_FRAME`. Budget §7: ≤ 300 ms | `tools/budgets` (#8) |
-| M2 | 10,000-item first paint | `budgets <binary> <fixture>/10k`: the same marker, with the 10k folder as start folder. Budget §7: ≤ 500 ms. This includes app start-up, so it is stricter than the budget | `tools/budgets` |
+| M1 | Cold start | `budgets ./d006-small`, where `d006-small` is the wrapper below for `<fixture>/small`: time from spawn to `BUDGET_FIRST_FRAME`. Budget §7: ≤ 300 ms | `tools/budgets` (#8) |
+| M2 | 10,000-item first paint | `budgets ./d006-10k` (wrapper for `<fixture>/10k`): the same marker, with the 10k folder as start folder. Budget §7: ≤ 500 ms. This includes app start-up, so it is stricter than the budget | `tools/budgets` |
 | M3 | Idle RSS | From the M1 runs: `VmRSS` 5 s after the first frame, decimal MB. Reported against the 800 MB desktop budget and compared between candidates | `tools/budgets` |
 | M4 | Idle CPU | From the M1 runs with `--cpu-window full` (5 minutes), percent of one core. Budget §7: ≤ 1 % | `tools/budgets` |
 | M5 | Frame time while scrolling | See below. Report p50, p95, p99 frame interval and dropped frames | `WAYLAND_DEBUG=client` |
@@ -171,11 +179,20 @@ Every number is the median of at least 5 runs, with the minimum and maximum repo
 | M8 | Agent extensibility | [Section 8](#8-agent-extensibility-test) | #13 procedure |
 | M9 | Build | Clean release build time (`cargo clean` then `cargo build --release`, wall time), binary size (stripped), number of crates in `Cargo.lock`, lines of Rust and markup in the prototype (blank and comment lines excluded) | `cargo`, `strip`, `wc` |
 
-M1 to M4 use the harness as it is. It passes no arguments to the app, so `<binary> <folder>` above means a wrapper script `#!/bin/sh` + `exec <binary> <folder>`; `exec` keeps the PID, so the harness measures the app and not the shell. On CI and in the VM the page cache is warm; a true cold cache comes with #17.
+M1 to M4 use the harness as it is. It passes no arguments to the app, so each start folder gets a two-line wrapper script:
+
+```sh
+#!/bin/sh
+exec <binary> <folder>
+```
+
+`exec` keeps the PID, so the harness measures the app and not the shell. Call the wrapper with a path that contains a `/` (such as `./d006-small`), because the harness otherwise looks the name up in `PATH`.
+
+If a run hits the harness's 3 s marker timeout (exit status 2, no reading), #12 records M1 or M2 for that run as `> 3000 ms (timeout)` and counts it as a gate fail. M3 and M4 are then taken from the `small` runs only. On CI and in the VM the page cache is warm; a true cold cache comes with #17.
 
 ### M5: frame time while scrolling
 
-Run `D006_AUTOSCROLL=1 WAYLAND_DEBUG=client <binary> <fixture>/10k`. The Wayland client library logs every request with a millisecond timestamp. Take the timestamps of `wl_surface.commit` on the window's main surface (the surface with the most commits) between the first commit after `BUDGET_FIRST_FRAME` and `D006_AUTOSCROLL_DONE`. Frame interval = difference between consecutive commits.
+Run `D006_AUTOSCROLL=1 WAYLAND_DEBUG=client <binary> <fixture>/10k > run.log 2>&1`. The Wayland client library logs every request with a millisecond timestamp on stderr; the markers go to stdout, flushed, and stderr is unbuffered, so one file keeps them in order. Take the timestamps of `wl_surface.commit` on the window's main surface (the surface with the most commits) between the first commit after `BUDGET_FIRST_FRAME` and `D006_AUTOSCROLL_DONE`. Frame interval = difference between consecutive commits.
 
 - Report p50, p95 and p99 of the interval in ms, and the count of dropped frames: intervals longer than 1.5 × the output's refresh period (25 ms at 60 Hz).
 - This measures how fast the app produces frames, which is what the toolkit controls. Presentation latency and compositor pacing belong to C2 and Phase 1.
@@ -208,15 +225,15 @@ The focused control must carry the `focused` state. Result: a table of controls 
 
 Start `<binary> <fixture>/small`, inject keys with `wtype`, and after each step check the expected result through the AT-SPI tree (selected or focused node), not through screenshots. Each step is pass or fail; a failed step does not stop the walkthrough (reset by restarting the app at that step's start state if needed).
 
-1. Focus is in the list on start, or reaches it with Tab. Down selects `docs`.
+1. Focus is on the list at start and no row is selected. Down selects `docs`.
 2. Enter opens `docs`; path label is `<fixture>/small/docs`.
-3. Enter on `2026`, then Enter on `november`: path ends in `docs/2026/november`.
+3. Down selects `2026`, Enter opens it; Down selects `november`, Enter opens it: path ends in `docs/2026/november`, no row selected.
 4. Backspace goes to `docs/2026`; Alt+Up goes to `docs`.
-5. Tab and Shift+Tab reach the sidebar and the Up button; Down in the sidebar reaches *File system*; Enter opens `/`.
-6. In the sidebar, *Start folder* and Enter return to `small`.
+5. Shift+Tab focuses the Up button; Shift+Tab again focuses *Home* in the sidebar; Down focuses *File system*; Enter opens `/`.
+6. Down focuses *Start folder*; Enter returns to `small`; Tab twice focuses the list.
 7. In the list, End selects `Ünïcödé.txt` (byte order puts it last); Home selects `docs`.
 8. Shift+F10 opens the context menu; Down twice and Enter opens *Properties*; Escape closes the dialog and focus returns to the list.
-9. Menu key on `notes-1.txt`, Down once (*Copy Path*), Enter: the clipboard holds the file's absolute path (check with `wl-paste`).
+9. Down twice selects `notes-1.txt`; Menu key, Down once (*Copy Path*), Enter: the clipboard holds the file's absolute path (check with `wl-paste`).
 10. Escape closes an open context menu without action.
 11. Enter on `notes-1.txt` prints `SPIKE_OPEN <fixture>/small/notes-1.txt`.
 12. With `<fixture>/10k` open: End selects `item-09999.md` (the last file; folders sort first), Home selects `item-00100`, and Page Down and Page Up move by one page; each step shows its result in under one second.
@@ -228,8 +245,9 @@ Measures how well an agent with no project memory extends a prototype using only
 ### Setup
 
 - One fresh subagent per run, the same model and settings for every candidate (record the model ID). It has no conversation history and no access to this repository beyond the copy below.
-- Its working directory is a fresh copy of `spikes/d006-<name>/` without git history and without the README's notes (keep only the build command), plus a fixture made with [the script](#5-fixture).
-- Allowed web sources: the toolkit's official documentation site, its API docs on docs.rs, its repository (source and examples) and its `llms.txt` if one exists. #13 lists the exact URLs per candidate in the results. Nothing else: no search engines, forums or other projects' code.
+- Its working directory is a fresh copy of `spikes/d006-<name>/` without git history and without the README's notes (keep only the build command), plus a fixture made with [the script](#5-fixture). The copy lives outside the repository and outside any mount of it (for example a directory on the dev VM's own disk), so the subagent cannot read this brief or another candidate's prototype; it is given only that path.
+- Before the run, #13 runs `cargo fetch` in the copy. The subagent builds offline (`CARGO_NET_OFFLINE=true`, and `{BUILD_COMMAND}` includes `--offline`), so cargo needs no network during the run.
+- Allowed web sources: the toolkit's official documentation site, its API docs (docs.rs; for libcosmic, which is not on crates.io, the hosted rustdoc at <https://pop-os.github.io/libcosmic/cosmic/>), its repository (source and examples) and its `llms.txt` if one exists. #13 lists the exact URLs per candidate in the results. Nothing else: no search engines, forums or other projects' code.
 - It can build and run the app in the dev VM (#16) and use the `wtype` and AT-SPI tools from section 7.
 - Limit: 90 minutes of wall time per run. The run stops there and counts as not completed.
 - 3 runs per candidate, alternating candidates (A, B, A, B, A, B).
@@ -248,7 +266,7 @@ Do not use any other website. Do not add crates other than what {TOOLKIT} alread
 
 Add both features below, following the existing code's style.
 
-1. Tabs. A tab bar above the file list. Ctrl+T opens a new tab showing the current
+1. Tabs. A tab bar named "Tabs" above the file list. Ctrl+T opens a new tab showing the current
    folder. Ctrl+W closes the current tab (not the last one). Ctrl+Tab and
    Ctrl+Shift+Tab switch to the next and previous tab. Clicking a tab switches to it.
    Each tab has its own folder and selection. A tab's label is its folder's name
@@ -278,7 +296,7 @@ After the run, #13 (not the subagent) checks the result on a new fixture copy. T
 4. Find `notes-1` and Replace with `notes-2` disables *Rename* and names the conflict.
 5. Find `notes` and Replace with `a/b` disables *Rename*.
 6. Cancel and Escape change nothing on disk.
-7. The tab bar, each tab, the dialog, both text fields and both buttons appear in the AT-SPI tree with names equal to their labels.
+7. The tab bar (named `Tabs`), each tab, the dialog, both text fields and both buttons appear in the AT-SPI tree with names equal to their labels.
 
 ### What #13 records per run
 
@@ -319,7 +337,7 @@ A transcript summary per run goes into `docs/decisions/D-006-agent-test.md`; the
 | | Licence | Compare | #14 |
 | | Project health: release cadence, maintainers, versioned releases | Compare | #14 |
 
-Until the reference hardware (#17) is available, gate rows for performance are filled from CI and marked *provisional*.
+Until the reference hardware (#17) is available, gate rows for performance are filled from CI and marked *provisional*. A provisional gate fail is reported but does not by itself rule out a candidate before #17 numbers exist.
 
 ## 10. Decisions made in this document
 
@@ -336,8 +354,9 @@ For the owner to confirm, since the spec does not settle them:
 
 The owner accepted all six as written, with these details:
 
-- Item 4: the dev VM from #16 ships weston only, which lacks `virtual-keyboard-unstable-v1`. #12 may add `sway` and `wtype` to the package list in `tools/dev-vm/atos.yaml`. #12 reuses the AT-SPI dump from `tools/dev-vm/smoke.sh` as the base for the M6 script.
+- Item 4: the dev VM from #16 ships weston only, which lacks `virtual-keyboard-unstable-v1`. #12 may add `sway` and `wtype` to the package list in `tools/dev-vm/atos.yaml`. #12 reuses the AT-SPI dump from `tools/dev-vm/smoke.sh` as the base for the M6 script. Both `tools/dev-vm/` paths come from #16 (PR #23), which #10 to #12 depend on.
 - Item 5: the agent-test subagents use the same model as the project's builder agents; #13 records its model ID.
+- Harness timeout (from review of PR #22): a run that hits the harness's 3 s marker timeout is recorded as `> 3000 ms (timeout)` and counts as a gate fail; M3 and M4 are then taken from the `small` runs only.
 
 ## Sources
 
