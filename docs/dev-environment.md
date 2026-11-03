@@ -14,6 +14,7 @@ limactl shell atos                         # interactive shell
 limactl stop atos / limactl delete atos    # stop, or throw it away
 ```
 
+- Measured on the M1 Max (2026-11-03): first `vm up` from scratch 1 min 27 s (including the ~600 MB image download); restart of a stopped VM 11 s.
 - The main checkout (including `.claude/worktrees/*`) is mounted read-write at the same path as on the host, so `vm run` works from any directory inside it.
 - Build output goes to `~/target/<checkout path>` on the VM disk (`CARGO_TARGET_DIR`), not to the shared `target/`: Linux and macOS artifacts must not mix, and the shared folder is slow for builds.
 - The Rust toolchain comes from `rust-toolchain.toml`; `cargo-nextest` is the version pinned in `.github/workflows/ci.yml` (`vm up` fails if they drift apart).
