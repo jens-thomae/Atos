@@ -1,0 +1,42 @@
+# Lima template for the Atos dev VM (card #16, docs/dev-environment.md).
+# Do not start it directly: `tools/dev-vm/vm up` adds the repository mount.
+minimumLimaVersion: 2.0.0
+
+# Ubuntu 24.04 matches the CI runner (ubuntu-24.04). Not a D-008 choice.
+base: template:_images/ubuntu-24.04
+
+vmType: vz
+mountType: virtiofs
+cpus: 4
+memory: 8GiB
+disk: 50GiB
+
+containerd:
+  system: false
+  user: false
+
+provision:
+  # Lima reruns provisioning on every boot; apt-get install is idempotent.
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      # build-essential, pkg-config: crates with C dependencies.
+      # weston: headless Wayland compositor (pixman software renderer) plus
+      #   weston-simple-shm and weston-screenshooter.
+      # at-spi2-core, gir1.2-atspi-2.0, python3-gi: AT-SPI bus and the tree dump in smoke.sh.
+      # zenity: a small GTK app that exposes an accessibility tree.
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        build-essential pkg-config curl ca-certificates git \
+        weston at-spi2-core gir1.2-atspi-2.0 python3-gi zenity
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      # The toolchain itself comes from rust-toolchain.toml, see `vm up`.
+      if ! command -v rustup >/dev/null && [ ! -x ~/.cargo/bin/rustup ]; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --profile minimal --default-toolchain none
+      fi
