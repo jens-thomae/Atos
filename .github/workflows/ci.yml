@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Nightly run: the idle-CPU budget over its full 5-minute window (spec §7).
+  schedule:
+    - cron: "0 3 * * *"
 
 permissions:
   contents: read
@@ -44,3 +47,15 @@ jobs:
       - run: cargo nextest run
       # nextest does not run doctests.
       - run: cargo test --doc
+
+      # Quality budgets (spec §7, docs/budgets.md). Fails the job on a breach.
+      - name: Budgets
+        timeout-minutes: 10
+        # Explicit `bash` adds pipefail, so `tee` does not hide a breach.
+        shell: bash
+        env:
+          # `full` is the §7 window (limits::IDLE_CPU_WINDOW_S).
+          CPU_WINDOW: ${{ github.event_name == 'schedule' && 'full' || '10' }}
+        run: |
+          cargo build --release -p budgets
+          target/release/budgets target/release/budget-test-app --cpu-window "$CPU_WINDOW" | tee -a "$GITHUB_STEP_SUMMARY"
