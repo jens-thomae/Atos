@@ -1,0 +1,36 @@
+WARNING: debug protocol has been enabled. This is a potential denial-of-service attack vector and information leak.
+could not load cursor 'dnd-move'
+could not load cursor 'dnd-copy'
+could not load cursor 'dnd-none'
+could not load cursor 'dnd-move'
+could not load cursor 'dnd-copy'
+could not load cursor 'dnd-none'
+dbus-daemon[10032]: [session uid=501 pid=10032] Activating service name='org.a11y.Bus' requested by ':1.0' (uid=501 pid=10045 comm="zenity --info --title=Atos smoke --text=Hello from" label="unconfined")
+dbus-daemon[10032]: [session uid=501 pid=10032] Successfully activated service 'org.a11y.Bus'
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: vkCreateInstance failed (VK_ERROR_INCOMPATIBLE_DRIVER)
+libEGL warning: egl: failed to create dri2 screen
+dbus-daemon[10060]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=501 pid=10045 comm="zenity --info --title=Atos smoke --text=Hello from" label="unconfined")
+dbus-daemon[10060]: Successfully activated service 'org.a11y.atspi.Registry'
+SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
+screenshot: /Users/jens/Dev/Atos/.claude/worktrees/t-16-dev-vm-6b472e/tools/dev-vm/out/screenshot.png
+application 'zenity'
+  dialog 'Atos smoke'
+    panel ''
+      panel ''
+        panel ''
+          label 'Atos smoke'
+          panel ''
+            panel ''
+              image ''
+              label 'Hello from the dev VM'
+        separator ''
+        panel ''
+          push button 'OK'
+            label 'OK'
+smoke: ok

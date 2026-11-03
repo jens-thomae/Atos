@@ -1,0 +1,30 @@
+time="2026-11-03T23:49:22+01:00" level=info msg="Terminal is not available, proceeding without opening an editor"
+time="2026-11-03T23:49:22+01:00" level=info msg="Starting the instance `atos-check` with internal VM driver `vz`"
+time="2026-11-03T23:49:22+01:00" level=info msg="Attempting to download the image" arch=aarch64 digest="sha256:1d6bffe64b848468ac97f821d369a4846d983de1800ccf6b5ec8853e85cefc55" location="https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img"
+time="2026-11-03T23:49:22+01:00" level=info msg="Using cache `/Users/jens/Library/Caches/lima/download/by-url-sha256/8b0792f7ce936da399a685f0df1bec82cd529a1163d97430fb5c8025bd9bb464/imgconv/raw`"
+time="2026-11-03T23:49:22+01:00" level=info msg="Resize instance atos-check's disk from 3.5GiB to 50GiB"
+time="2026-11-03T23:49:22+01:00" level=info msg="[hostagent] TCP (except for SSH) and UDP port forwarding is disabled"
+time="2026-11-03T23:49:22+01:00" level=info msg="[hostagent] hostagent socket created at /Users/jens/.lima/atos-check/ha.sock"
+time="2026-11-03T23:49:22+01:00" level=info msg="[hostagent] Starting VZ (hint: to watch the boot progress, see `/Users/jens/.lima/atos-check/serial*.log`)"
+time="2026-11-03T23:49:22+01:00" level=info msg="[hostagent] [VZ] - vm state change: running"
+time="2026-11-03T23:49:30+01:00" level=info msg="[hostagent] SSH server does not seem to be running on vsock port, using usernet forwarder"
+time="2026-11-03T23:49:30+01:00" level=info msg="SSH Local Port: 49677"
+time="2026-11-03T23:49:30+01:00" level=info msg="[hostagent] Waiting for the essential requirement 1 of 3: `ssh`"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] The essential requirement 1 of 3 is satisfied"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] Waiting for the essential requirement 2 of 3: `user session is ready for ssh`"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] The essential requirement 2 of 3 is satisfied"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] Waiting for the essential requirement 3 of 3: `Explicitly start ssh ControlMaster`"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] The essential requirement 3 of 3 is satisfied"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] Waiting for the guest agent to be running"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] Guest agent is running"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] Time sync: guest agent is alive, starting time synchronization"
+time="2026-11-03T23:49:31+01:00" level=info msg="[hostagent] Waiting for the final requirement 1 of 1: `boot scripts must have finished`"
+time="2026-11-03T23:49:36+01:00" level=info msg="[hostagent] Time sync: guest clock adjusted (was 301ms off)"
+time="2026-11-03T23:50:08+01:00" level=info msg="READY. Run `limactl shell atos-check` to open the shell."
+info: syncing channel updates for 1.99.1-aarch64-unknown-linux-gnu
+info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+info: downloading 5 components
+info: the active toolchain `1.99.1-aarch64-unknown-linux-gnu` has been installed
+info: it's active because: overridden by '/Users/jens/Dev/Atos/rust-toolchain.toml'
+/tmp/nextest.tgz: OK
+ATOS_VM=atos-check tools/dev-vm/vm up  0.14s user 0.20s system 0% cpu 54.233 total
