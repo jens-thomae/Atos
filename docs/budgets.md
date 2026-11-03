@@ -8,16 +8,18 @@ How the quality budgets in [`spec.md` §7](spec.md#7-quality-budgets) are measur
 
 ```sh
 cargo build --release -p budgets
-target/release/budgets <app> [--cpu-window <seconds>]   # default window: 10 s
+target/release/budgets <app> [--cpu-window <seconds>|full]   # default 10 s; full = §7's 5 minutes
 ```
 
-It prints a Markdown table (metric, budget, measured, result) and exits with 1 if a budget is breached, 2 if it could not measure.
+It prints a Markdown table (metric, budget, measured, result) and exits with 1 if a budget is breached, 2 if it could not measure: no marker within 3 s (10× the cold-start budget), or the app exited before a reading.
 
 1. **Cold start:** time from spawning the app to the line `BUDGET_FIRST_FRAME` on its stdout. An app prints that line when its first usable frame is presented.
-2. **Idle RSS:** `VmRSS` from `/proc/<pid>/status`, 5 s after the first frame.
+2. **Idle RSS:** `VmRSS` from `/proc/<pid>/status`, 5 s after the first frame, in decimal MB (10^6 bytes).
 3. **Idle CPU:** user plus system time from `/proc/<pid>/stat` over the CPU window that starts right after, in percent of one core.
 
-`budget-test-app` (in the same crate) is a stand-in app: it prints the marker, holds 4 MB and sleeps.
+Current limits: only the launched process is measured, so CPU and memory of its child processes are not counted. The app must flush stdout right after printing the marker; a pipe is block-buffered in C and GTK apps by default.
+
+`budget-test-app` (in the same crate) is a stand-in app: it prints the marker, holds 4 MB and sleeps. `BUDGET_TEST_APP_MODE` makes it misbehave for the tests in `tools/budgets/tests/`.
 
 ## In CI
 

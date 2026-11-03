@@ -54,7 +54,8 @@ jobs:
         # Explicit `bash` adds pipefail, so `tee` does not hide a breach.
         shell: bash
         env:
-          CPU_WINDOW: ${{ github.event_name == 'schedule' && 300 || 10 }}
+          # `full` is the §7 window (limits::IDLE_CPU_WINDOW_S).
+          CPU_WINDOW: ${{ github.event_name == 'schedule' && 'full' || '10' }}
         run: |
           cargo build --release -p budgets
           target/release/budgets target/release/budget-test-app --cpu-window "$CPU_WINDOW" | tee -a "$GITHUB_STEP_SUMMARY"

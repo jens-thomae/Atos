@@ -12,6 +12,8 @@ pub mod limits {
     pub const IDLE_RAM_MB: f64 = 800.0;
     /// System: idle desktop CPU, in percent of one core, averaged over 5 minutes.
     pub const IDLE_CPU_PERCENT: f64 = 1.0;
+    /// System: the 5-minute window for `IDLE_CPU_PERCENT`, in seconds.
+    pub const IDLE_CPU_WINDOW_S: u64 = 300;
     /// Accessibility: text contrast for body text.
     pub const CONTRAST_BODY: f64 = 4.5;
     /// Accessibility: text contrast for large text.
@@ -46,7 +48,7 @@ fn relative_luminance([r, g, b]: [u8; 3]) -> f64 {
     0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
 }
 
-/// Resident set size in MB from the text of `/proc/<pid>/status`.
+/// Resident set size in decimal MB (10^6 bytes) from the text of `/proc/<pid>/status`.
 pub fn parse_vm_rss_mb(status: &str) -> Option<f64> {
     let kb: f64 = status
         .lines()
@@ -56,7 +58,8 @@ pub fn parse_vm_rss_mb(status: &str) -> Option<f64> {
         .trim()
         .parse()
         .ok()?;
-    Some(kb / 1024.0)
+    // The kernel's "kB" is KiB (1024 bytes).
+    Some(kb * 1024.0 / 1_000_000.0)
 }
 
 /// User plus system CPU time in clock ticks from the text of `/proc/<pid>/stat`.
@@ -96,6 +99,10 @@ mod tests {
         assert!(!contrast_passes(grey_on_white, false));
         assert!(contrast_passes(grey_on_white, true));
         assert!(contrast_passes(contrast_ratio([0x76; 3], [0xff; 3]), false));
+        // #949494 on white is about 3.03:1, just enough for large text.
+        let just_large = contrast_ratio([0x94; 3], [0xff; 3]);
+        assert!(contrast_passes(just_large, true));
+        assert!(!contrast_passes(just_large, false));
         // #959595 on white is about 2.9:1, too low even for large text.
         assert!(!contrast_passes(contrast_ratio([0x95; 3], [0xff; 3]), true));
     }
@@ -103,7 +110,7 @@ mod tests {
     #[test]
     fn parses_vm_rss() {
         let status = "Name:\tapp\nVmPeak:\t  9000 kB\nVmRSS:\t    2048 kB\nThreads:\t1\n";
-        assert_eq!(parse_vm_rss_mb(status), Some(2.0));
+        assert_eq!(parse_vm_rss_mb(status), Some(2.097152));
         assert_eq!(parse_vm_rss_mb("Name:\tapp\n"), None);
     }
 
