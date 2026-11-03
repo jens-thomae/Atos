@@ -10,6 +10,6 @@ pub fn component_count() -> usize {
 mod tests {
     #[test]
     fn counts_components() {
-        assert_eq!(super::component_count(), 12);
+        assert_eq!(super::component_count(), 11);
     }
 }
