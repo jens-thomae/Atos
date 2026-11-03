@@ -1,0 +1,2 @@
+# Default rustfmt style; stable options only.
+style_edition = "2024"
