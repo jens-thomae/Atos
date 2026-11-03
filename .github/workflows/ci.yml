@@ -51,6 +51,8 @@ jobs:
       # Quality budgets (spec §7, docs/budgets.md). Fails the job on a breach.
       - name: Budgets
         timeout-minutes: 10
+        # Explicit `bash` adds pipefail, so `tee` does not hide a breach.
+        shell: bash
         env:
           CPU_WINDOW: ${{ github.event_name == 'schedule' && 300 || 10 }}
         run: |
