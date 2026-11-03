@@ -1,6 +1,6 @@
 # D-009: Rust as the implementation language for system components
 
-Status: **Proposed** (see `docs/spec.md` §5). This write-up recommends; the owner decides.
+Status: **Decided** by the owner on 2026-11-03 (see `docs/spec.md` §5 and "Owner decision" below).
 Card: #1 · Facts checked: 2026-11-03
 
 ## Context
