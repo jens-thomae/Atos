@@ -1,0 +1,47 @@
+#!/bin/bash
+# Atos dev VM (Lima). See docs/dev-environment.md.
+#   vm up            create or start the VM, install the Rust toolchain and nextest
+#   vm run <cmd...>  run a command in the VM, in the same directory as on the host
+#   vm smoke         headless Wayland screenshot and AT-SPI tree check
+# Everything else (stop, delete, shell): limactl ... atos
+# ATOS_VM=<name> uses another instance, e.g. a throwaway one to test atos.yaml.
+set -euo pipefail
+
+NAME="${ATOS_VM:-atos}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# The main checkout, so its worktrees (.claude/worktrees/*) are mounted too.
+REPO="$(cd "$(git -C "$HERE" rev-parse --git-common-dir)/.." && pwd)"
+
+# Same version as NEXTEST_VERSION in .github/workflows/ci.yml; the sha256 is for the aarch64 tarball.
+NEXTEST_VERSION=0.9.150
+NEXTEST_SHA256=9164568e9840c6509177086828ac7d3178c2d8feb0658b4d2bff62fa620e98c8
+
+command -v limactl >/dev/null || { echo "limactl not found: brew install lima" >&2; exit 1; }
+
+# Runs in $PWD on the host's path. Build output goes to the VM disk: Linux
+# artifacts must not mix with the macOS target/, and virtiofs is slow for it.
+in_vm() {
+  limactl shell --workdir "$PWD" "$NAME" -- bash -lc \
+    'export CARGO_TARGET_DIR="$HOME/target$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; "$@"' bash "$@"
+}
+
+case "${1:-}" in
+  up)
+    if ! limactl list -q | grep -qx "$NAME"; then
+      limactl start --tty=false --name="$NAME" \
+        --set ".mounts=[{\"location\":\"$REPO\",\"writable\":true}]" "$HERE/atos.yaml"
+    else
+      limactl start --tty=false "$NAME"
+    fi
+    grep -q "NEXTEST_VERSION: $NEXTEST_VERSION\$" "$REPO/.github/workflows/ci.yml" \
+      || { echo "nextest version differs from ci.yml: update NEXTEST_* in $0" >&2; exit 1; }
+    cd "$REPO"
+    in_vm sh -c "rustup toolchain install && cargo nextest --version 2>/dev/null | grep -q ' $NEXTEST_VERSION' || {
+      curl -fsSL -o /tmp/nextest.tgz https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-aarch64-unknown-linux-gnu.tar.gz &&
+      echo '$NEXTEST_SHA256  /tmp/nextest.tgz' | sha256sum --check &&
+      tar -xzf /tmp/nextest.tgz -C ~/.cargo/bin && rm /tmp/nextest.tgz; }"
+    ;;
+  run) shift; in_vm "$@" ;;
+  smoke) in_vm "$HERE/smoke.sh" ;;
+  *) sed -n '2,6p' "$0" >&2; exit 2 ;;
+esac
