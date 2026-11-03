@@ -4,9 +4,10 @@
 #   vm run <cmd...>  run a command in the VM, in the same directory as on the host
 #   vm smoke         headless Wayland screenshot and AT-SPI tree check
 # Everything else (stop, delete, shell): limactl ... atos
+# ATOS_VM=<name> uses another instance, e.g. a throwaway one to test atos.yaml.
 set -euo pipefail
 
-NAME=atos
+NAME="${ATOS_VM:-atos}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # The main checkout, so its worktrees (.claude/worktrees/*) are mounted too.
 REPO="$(cd "$(git -C "$HERE" rev-parse --git-common-dir)/.." && pwd)"

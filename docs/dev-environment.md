@@ -20,6 +20,21 @@ limactl stop atos / limactl delete atos    # stop, or throw it away
 - The Rust toolchain comes from `rust-toolchain.toml`; `cargo-nextest` is the version pinned in `.github/workflows/ci.yml` (`vm up` fails if they drift apart).
 - The VM is Ubuntu 24.04 to match the CI runner. It is a dev tool only, not a choice of base distribution (D-008), and may change after D-008.
 - The mount is set when the VM is created. After moving the checkout: `limactl delete atos && tools/dev-vm/vm up`.
+- `ATOS_VM=atos-check tools/dev-vm/vm up` creates a separate instance, for example to test a change to `atos.yaml` without touching `atos`. Delete it afterwards with `limactl delete -f atos-check`.
+
+## Pinned inputs
+
+Everything `vm up` downloads is pinned and checked, except apt packages:
+
+- Ubuntu cloud image: dated `release-YYYYMMDD` URL plus sha256 digest in `atos.yaml`, with no fallback. Ubuntu removes dated images after some months; bumping the URL and digest (from that release's `SHA256SUMS`) is then a deliberate edit, followed by a fresh VM.
+- `rustup-init`: version and sha256 in `atos.yaml`; rustup self-update is disabled. The toolchain it installs is checked by rustup against the signed channel manifest.
+- `cargo-nextest`: version and sha256 in `tools/dev-vm/vm`.
+- apt packages are not pinned. They come from the Ubuntu archive, which apt verifies by signature; acceptable for a dev VM.
+
+## Security
+
+- Only the main checkout is mounted, read-write. That includes `.git/`: code running in the VM can write `.git/hooks/*` or `.git/config`, which then run on the host at the next git command. The VM is not a sandbox; do not run untrusted code in it.
+- No ports are forwarded from the VM to the host; SSH agent and X11 forwarding are off.
 
 ## Smoke check
 

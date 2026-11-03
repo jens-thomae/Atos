@@ -3,7 +3,12 @@
 minimumLimaVersion: 2.0.0
 
 # Ubuntu 24.04 matches the CI runner (ubuntu-24.04). Not a D-008 choice.
-base: template:_images/ubuntu-24.04
+# Pinned by URL and digest, no fallback: bumping it is a deliberate edit.
+# Digest from the release's SHA256SUMS.
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: aarch64
+    digest: "sha256:1d6bffe64b848468ac97f821d369a4846d983de1800ccf6b5ec8853e85cefc55"
 
 vmType: vz
 mountType: virtiofs
@@ -14,6 +19,13 @@ disk: 50GiB
 containerd:
   system: false
   user: false
+
+# Nothing in the VM is reachable from the host's ports.
+portForwards:
+  - guestIP: 0.0.0.0 # any guest address
+    guestPortRange: [1, 65535]
+    proto: any
+    ignore: true
 
 provision:
   # Lima reruns provisioning on every boot; apt-get install is idempotent.
@@ -35,8 +47,17 @@ provision:
     script: |
       #!/bin/bash
       set -eux -o pipefail
+      # Pinned rustup-init; sha256 from its .sha256 file on static.rust-lang.org.
       # The toolchain itself comes from rust-toolchain.toml, see `vm up`.
-      if ! command -v rustup >/dev/null && [ ! -x ~/.cargo/bin/rustup ]; then
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-          | sh -s -- -y --profile minimal --default-toolchain none
+      RUSTUP_VERSION=1.29.3
+      RUSTUP_SHA256=9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282
+      if [ ! -x ~/.cargo/bin/rustup ]; then
+        curl -fsSL -o /tmp/rustup-init \
+          "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/aarch64-unknown-linux-gnu/rustup-init"
+        echo "$RUSTUP_SHA256  /tmp/rustup-init" | sha256sum --check
+        chmod +x /tmp/rustup-init
+        /tmp/rustup-init -y --profile minimal --default-toolchain none
+        rm /tmp/rustup-init
       fi
+      # rustup stays at the pinned version.
+      ~/.cargo/bin/rustup set auto-self-update disable
