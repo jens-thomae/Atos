@@ -103,7 +103,8 @@ Not defined yet. Phase 0 sets up the build, test, lint and budget-check commands
 
 ## Conventions
 
-- Language for system components: Rust (decision D-009, proposed). Do not add another language without a decision.
+- Language for system components and native apps: Rust (decision D-009, decided). Do not add another language without a decision.
+- Add a third-party crate only when it is clearly trustworthy, maintained and stable, and worth its size. Justify each new dependency in the pull request (D-009).
 - Use the terms in the glossary (`docs/spec.md` §11) exactly, in code, docs and cards.
 - Design values come only from design tokens. No hard-coded colours, sizes, radii or animation timings.
 - No telemetry, network calls home or account requirements, ever (D-005).

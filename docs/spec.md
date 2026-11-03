@@ -93,7 +93,7 @@ This log records every architectural decision and its status. **Decided** entrie
 | D-006 | Primary UI toolkit: iced/libcosmic or Slint | Open | Resolve by prototyping Files in each candidate, with no fixed timeline; the owner may add more candidates. Measure frame time, memory, accessibility and agent productivity |
 | D-007 | Relationship with COSMIC: collaborate upstream or fork | Open | Decides how much compositor, toolkit and app code we reuse |
 | D-008 | Base image technology: bootc or systemd-sysupdate; base distribution | Open | Needs a short comparison spike |
-| D-009 | Implementation language for system components: Rust | Proposed | Memory safety, matches iced, Slint and COSMIC |
+| D-009 | Implementation language for system components, native apps included: Rust | Decided | Memory safety, matches iced, Slint and COSMIC. Third-party crates are approved case by case. See `docs/decisions/D-009-rust.md` |
 | D-010 | Configuration format: TOML or KDL | Proposed | Human-editable and diff-friendly |
 
 ## 6. Component specifications

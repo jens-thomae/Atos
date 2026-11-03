@@ -61,6 +61,15 @@ Today's candidate dependencies already require Rust 1.80.1 to 1.92 in their late
 3. If D-006 picks Slint, is its `.slint` markup accepted as data rather than as a second language?
 4. Should C bindings to existing system libraries be limited to well-known crates (for example `input`, `pipewire`, `zbus`), or decided case by case?
 
+## Owner decision (2026-11-03)
+
+D-009 is **Decided**: Rust is the implementation language for system components. Answers to the open questions:
+
+1. Native apps (C5) count as system components and are written in Rust.
+2. MSRV is the latest stable Rust for the product workspace; published SDK crates support N-2.
+3. If D-006 picks Slint, `.slint` markup counts as data, not as a second language.
+4. Third-party crates, including bindings to system libraries, are approved case by case. Add one only when it is clearly trustworthy, maintained and stable, and when it is worth its size; justify it in the pull request. Prefer fewer dependencies over convenience.
+
 ## Sources
 
 1. Google Security Blog, "Rust in Android: move fast and fix things", 2025-11-13: <https://blog.google/security/rust-in-android-move-fast-fix-things/>
