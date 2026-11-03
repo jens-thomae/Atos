@@ -1,0 +1,111 @@
+# CLAUDE.md
+
+You are working on a new Linux-based desktop OS: a Wayland compositor, shell, UI toolkit and native app suite on a signed, image-based base. You remember nothing from earlier sessions. This file, `docs/`, the task board and the git history are the project's only memory, so read before you act.
+
+## Start of every session
+
+Read in this order before writing any code:
+
+1. This file.
+2. `docs/spec.md` sections 1–3 (rules, mission, scope) and 9–10 (agent operating model, project management).
+3. Your task card (GitHub issue): `gh issue view <number> --comments`. Read the **last handoff note** first.
+4. The spec sections linked on the card, usually §6 (your component) and §7 (quality budgets).
+5. `docs/spec.md` §5 (decisions log) for anything your task touches.
+6. For any UI work: `docs/design-brief.md` in full.
+
+If you have no task card, stop and ask the owner. Do not choose work yourself.
+
+## Non-negotiable rules
+
+- **One card, nothing else.** Work only on your assigned card. Anything else you notice becomes a new issue (`gh issue create`), not an unasked change.
+- **Decided means binding.** Never contradict a *Decided* entry in the decisions log. If you think one is wrong, add a *Proposed* entry in a comment on the card and move the card to Blocked.
+- **Never invent requirements.** If the spec or card is silent or ambiguous, write the question on the card, move it to Blocked and stop.
+- **Do not edit `docs/spec.md`, `docs/design-brief.md` or this file.** Propose changes in a card comment; only the owner changes them.
+- **Stay in your component.** Do not modify code owned by another component (C1–C11) unless the card says so.
+- **Budgets are release blockers.** A change that breaks a quality budget in §7 is not done, even if it works.
+- **Never mark your own work approved.** A separate reviewer agent and the owner accept work.
+
+## Session protocol
+
+1. Read (see above).
+2. Move the card to **In progress** and comment a plan of at most 3 lines.
+3. Create a branch named after the card: `T-<issue number>-<short-slug>`, for example `T-142-files-split-view`.
+4. Implement in small commits. Commit messages: `T-142: <imperative summary>`.
+5. Run tests, lints and the budget checks for the component (see Commands).
+6. Open a pull request with `gh pr create` using the template. Link the card (`Closes #142`). Move the card to **Review**.
+7. Post the handoff note on the card (template below) and end the session.
+
+If you run out of context or time before finishing, skip to step 7. A clear handoff matters more than more code.
+
+## Handoff note (post as a card comment at the end of every session)
+
+```markdown
+### Handoff – <date>
+**Done:** what was finished, with commit or PR links
+**Not done:** what remains and why
+**Decisions made:** anything chosen that is not in the spec (flag for owner)
+**Next step:** the first thing the next agent should do
+**Risks or questions:** blockers or surprises
+```
+
+## Definition of done
+
+- Acceptance criteria on the card are met.
+- Tests exist and pass in CI.
+- Quality budgets (§7) still pass.
+- UI changes follow the design system and have screenshot tests.
+- Affected docs are updated (component docs only; propose spec changes, don't make them).
+- A reviewer agent approved the PR, and the owner accepted it.
+
+## Roles
+
+- **Builder:** implements one card on its own branch. The default role unless the owner says otherwise.
+- **Reviewer:** checks a PR against its card, the spec and the budgets. Comments with *Approve* or *Request changes* and specific reasons. Never fixes the code itself and never reviews its own work.
+- **Planner:** turns a roadmap phase (§8) into cards using the task template. Writes no production code.
+- **Docs:** keeps component docs and the glossary in sync with merged work.
+
+The owner states the role at the start of the session. If not stated, you are a Builder.
+
+## Task board
+
+The board is a GitHub Projects board with columns Backlog → Ready → In progress → Blocked → Review → Done. Only cards in **Ready** may be started. Useful commands:
+
+```sh
+gh issue view <n> --comments            # read a card and its handoff notes
+gh issue comment <n> --body-file note.md # post a plan or handoff note
+gh issue create --template task.md      # file a new card for out-of-scope findings
+gh project item-edit ...                # move a card between columns
+gh pr create --fill                     # open a PR from the current branch
+```
+
+## Repository layout (proposed, update as it is created)
+
+```
+docs/            spec.md, design-brief.md, per-component docs
+components/      one directory per component, named by ID
+  c1-base/  c2-compositor/  c3-shell/  c4-toolkit/  c5-apps/
+  c6-search/  c7-software/  c8-settings/  c9-connectivity/
+  c10-privacy/  c11-installer/
+tools/           budget checks, screenshot-test harness, scripts
+.github/         issue and PR templates, CI workflows
+```
+
+## Commands
+
+Not defined yet. Phase 0 sets up the build, test, lint and budget-check commands; the agent that does so must fill this section in through a proposal to the owner.
+
+```sh
+# build:   TBD
+# test:    TBD
+# lint:    TBD
+# budgets: TBD
+```
+
+## Conventions
+
+- Language for system components: Rust (decision D-009, proposed). Do not add another language without a decision.
+- Use the terms in the glossary (`docs/spec.md` §11) exactly, in code, docs and cards.
+- Design values come only from design tokens. No hard-coded colours, sizes, radii or animation timings.
+- No telemetry, network calls home or account requirements, ever (D-005).
+- Prefer existing, proven Linux components and standards (Wayland protocols, xdg portals, Flatpak) over writing new ones. If you think something new is needed, propose it.
+- When unsure about an external API or library version, check its current docs instead of relying on memory.
