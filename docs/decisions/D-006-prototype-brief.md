@@ -1,6 +1,6 @@
 # D-006: Files prototype brief and evaluation method
 
-Status: **Proposed** method for the D-006 spike (`docs/spec.md` §5). Accepted when the owner merges its pull request.
+Status: method for the D-006 spike (`docs/spec.md` §5). The choices in [section 10](#10-decisions-made-in-this-document) are confirmed by the owner; the document is accepted when its pull request is merged.
 Card: #9 · Facts checked: 2026-11-03
 
 D-006 is resolved by building the same small Files app in each candidate toolkit and measuring all of them the same way. This document is the contract for that. It is written before any prototype code exists and does not change while the spike runs; a change needs the owner and applies to every candidate.
@@ -331,6 +331,13 @@ For the owner to confirm, since the spec does not settle them:
 4. sway headless with `wtype` as the measurement compositor, and `WAYLAND_DEBUG` commit timestamps for frame time.
 5. The agent test: tabs plus batch rename, 3 runs per candidate, 90-minute limit.
 6. The scoring table has gates and comparisons but no numeric weights; #14 argues the trade-offs in prose.
+
+### Owner decision (2026-11-03)
+
+The owner accepted all six as written, with these details:
+
+- Item 4: the dev VM from #16 ships weston only, which lacks `virtual-keyboard-unstable-v1`. #12 may add `sway` and `wtype` to the package list in `tools/dev-vm/atos.yaml`. #12 reuses the AT-SPI dump from `tools/dev-vm/smoke.sh` as the base for the M6 script.
+- Item 5: the agent-test subagents use the same model as the project's builder agents; #13 records its model ID.
 
 ## Sources
 
