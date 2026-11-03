@@ -1,0 +1,6 @@
+[toolchain]
+# Latest stable (D-009). Upgrade in a dedicated card, together with
+# `rust-version` in Cargo.toml.
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,19 @@
+[workspace]
+# Add each new crate here explicitly; see README.md.
+members = ["tools/placeholder"]
+# Spikes are throwaway experiments with their own dependencies (spec §9).
+exclude = ["spikes"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+# Latest stable, same as rust-toolchain.toml (D-009).
+rust-version = "1.99.1"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+# Every `unsafe` block needs a `// SAFETY:` comment (D-009).
+undocumented_unsafe_blocks = "deny"
