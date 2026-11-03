@@ -25,4 +25,4 @@ cargo test
 
 ## Spikes
 
-`spikes/` holds short experiments, such as the toolkit prototypes for D-006. It is excluded from the workspace (`exclude` in the root `Cargo.toml`), so a spike can pull in dependencies and fail to build without breaking the checks above. Each spike lives in `spikes/<name>/`, is its own Cargo project with its own `Cargo.lock`, and is built from its own directory. Spike code never ships; anything worth keeping moves into a component through a card.
+`spikes/` holds short experiments, such as the toolkit prototypes for D-006. It is excluded from the workspace (`exclude` in the root `Cargo.toml`), so a spike can pull in dependencies and fail to build without breaking the checks above. Each spike lives in `spikes/<name>/`, is its own Cargo project with its own `Cargo.lock`, and is built from its own directory. `cargo new spikes/<name>` still adds the spike to `members` in the root `Cargo.toml`; remove that entry before committing. Spike code never ships; anything worth keeping moves into a component through a card.
