@@ -30,7 +30,7 @@ Since the card was written, the spec gained three things that weigh on this deci
 | [Smithay/smithay](https://github.com/Smithay/smithay) | Compositor library (lower layer) | C2 | MIT | v0.7.0 (2025-06-24); cosmic-comp pins a git revision through `[patch.crates-io]` ([`Cargo.toml`](https://github.com/pop-os/cosmic-comp/blob/cb86b9ec6f18ca2d2ad3b39426a57ab850867070/Cargo.toml)) | |
 | [iced-rs/iced](https://github.com/iced-rs/iced) | Toolkit (lower layer) | C4 | MIT | 0.14.0 (2025-12-07); `master` is 0.15.0-dev | |
 
-**Release cadence.** COSMIC ships as "Epoch" releases tagged across all repositories: Epoch 1.0.0 on 2025-12-10, then a release every one to two weeks ([cosmic-epoch releases](https://github.com/pop-os/cosmic-epoch/releases): 1.0.3 on 2026-01-20 … 1.10.0 on 2026-10-08, 1.11.0 on 2026-10-20). The README says Pop!_OS "typically receives updates to individual submodules before they're tagged" ([README](https://github.com/pop-os/cosmic-epoch/blob/e98f8289a22f9e612feee7d4c6ba197782db154b/README.md)). libcosmic has no API releases at all; apps track its git `master` (cosmic-files and cosmic-comp depend on `git = "https://github.com/pop-os/libcosmic"` without a revision). **There is no stable libcosmic API to pin to.**
+**Release cadence.** COSMIC ships as "Epoch" releases tagged across all repositories: Epoch 1.0.0 on 2025-12-10, then usually a release every one to two weeks, with gaps of up to six weeks (1.0.8 on 2026-02-24, 1.0.9 on 2026-04-07) ([cosmic-epoch releases](https://github.com/pop-os/cosmic-epoch/releases): 1.0.3 on 2026-01-20 … 1.10.0 on 2026-10-08, 1.11.0 on 2026-10-20). The README says Pop!_OS "typically receives updates to individual submodules before they're tagged" ([README](https://github.com/pop-os/cosmic-epoch/blob/e98f8289a22f9e612feee7d4c6ba197782db154b/README.md)). libcosmic has no API releases at all; apps track its git `master` (cosmic-files and cosmic-comp depend on `git = "https://github.com/pop-os/libcosmic"` without a revision). **There is no stable libcosmic API to pin to.**
 
 **Trademark.** The [COSMIC trademark policy](https://github.com/pop-os/cosmic-epoch/blob/e98f8289a22f9e612feee7d4c6ba197782db154b/TRADEMARK.md) (effective 2024-06-03) reserves the `cosmic-` package namespace and `com.system76.` app IDs for official software and asks third parties to use `cosmic-ext-`. A fork must be renamed and must not imply endorsement. This is a naming cost, not a blocker.
 
@@ -82,7 +82,7 @@ Use cosmic-comp, libcosmic, cosmic-files and the shell pieces as they are, confi
 
 - **Reuse per component.** C2: cosmic-comp unchanged. C3: cosmic-panel, applets, launcher, workspaces. C4: libcosmic. C5: cosmic-files and the other COSMIC apps.
 - **Licence.** We redistribute GPL-3.0-only and MPL-2.0 code unmodified; obligations are source availability and notices. No constraint on our own code beyond linking libcosmic (MPL-2.0 is file-level, so our own files may use any licence).
-- **Cadence and API stability.** We follow Epoch releases every one to two weeks and libcosmic `master` with no API versioning. Our code built on libcosmic breaks whenever upstream changes an API.
+- **Cadence and API stability.** We follow Epoch releases (usually every one to two weeks) and libcosmic `master` with no API versioning. Our code built on libcosmic breaks whenever upstream changes an API.
 - **Design system and window modes.** Our design system can only be applied where COSMIC's theme (`cosmic-theme`) has a matching value; layout, components and motion stay COSMIC's. Scroll tiling and HDR depend on upstream priorities (#322 open for 30 months, #1384 for 18).
 - **How the gaps get fixed.** They don't, by us. The [AI policy](#13-upstream-contribution-policy-decisive-for-option-a) forbids LLM-generated issues and PRs, so the agents that build Atos cannot file the accessibility, role, scroll-tiling or MCP work upstream. Only the owner, writing by hand, could contribute, and then still at upstream's pace and discretion.
 - **C12.** MCP servers for files, windows and settings would have to live inside COSMIC apps and cosmic-comp, which we cannot change upstream; we could only wrap them from outside (D-Bus, Wayland protocols). The accessibility-tree fallback does not work today (empty tree, `a11y` disabled in cosmic-files), so assistants could not operate COSMIC apps at all.
@@ -107,7 +107,7 @@ Keep our own forks, renamed per the trademark policy, carry our patches, and mer
   - Scrolling (libcosmic): turn on the existing `wgpu` feature first (configuration, no patch); measure on the NUC before patching anything.
   - Scroll tiling and HDR (cosmic-comp): own layout and render code in our fork.
 - **C12.** The fork can add MCP servers directly in cosmic-comp (window list, focus, move, workspace and mode switch) and in cosmic-files (file operations), with the permission broker in between. The compositor's existing libei, a11y and image-capture paths are the right places for the indicator, input confirmation and stop switch. The accessibility fallback for our libcosmic apps depends on the patch above.
-- **Maintenance cost.** High and growing: three to five long-lived forks with daily upstream activity, no way to upstream our fixes, and divergence that only grows. cosmic-comp is the most valuable fork; libcosmic and cosmic-files the most expensive per benefit.
+- **Maintenance cost.** High and growing: three to five long-lived forks with daily upstream activity, no way to upstream our fixes, and divergence that only grows. Each fork also pins a set of git dependencies and needs its own security watch (see the costs in [section 6](#6-recommendation-for-the-owner-to-decide)). cosmic-comp is the most valuable fork; libcosmic and cosmic-files the most expensive per benefit.
 
 ### (c) Use only the lower layers (Smithay, iced) and own everything above
 
@@ -137,12 +137,12 @@ Build the compositor on Smithay and the shell, toolkit layer and apps ourselves.
 | C12 MCP and a11y fallback | Wrapped from outside; fallback broken | Built in, fallback after our patch | Built in from the start |
 | Licence of our C2–C5 code | Any (we only redistribute) | GPL-3.0-only for forked apps and compositor, MPL-2.0 for libcosmic files | Any |
 | API stability | None (libcosmic git `master`) | We control merges | Semver lower layers |
-| Ongoing maintenance | Low code, full dependence | High, grows with divergence | Moderate, no merges |
+| Ongoing maintenance | Low code, full dependence | High, grows with divergence; git dependency pins and an own security watch | Moderate, no merges; security watch on crates.io deps only |
 | Up-front cost | Lowest | Low to moderate | Highest (compositor) |
 
 ## 4. Our §6 requirements against COSMIC today
 
-"Meets" means present upstream on 2026-11-05 per the linked source; it does not mean measured by us.
+"Meets" means present upstream on 2026-11-05 per the linked source; it does not mean measured by us. "Not checked" means I found no source either way and did not test it. The table covers every §6 requirement of C2, C3, C4 and C5, plus the C10, C12 and §7 items the options affect.
 
 | Requirement (§6) | COSMIC | Evidence |
 | --- | --- | --- |
@@ -151,18 +151,28 @@ Build the compositor on Smithay and the shell, toolkit layer and apps ourselves.
 | C2 HDR | Not met | [#1384](https://github.com/pop-os/cosmic-comp/issues/1384) open |
 | C2 per-monitor fractional scaling | Meets | [`fractional_scale.rs`](https://github.com/pop-os/cosmic-comp/blob/cb86b9ec6f18ca2d2ad3b39426a57ab850867070/src/wayland/handlers/fractional_scale.rs) |
 | C2 three window modes per workspace | Partly: floating and tiling per workspace; no scroll tiling | [layouts](https://github.com/pop-os/cosmic-comp/tree/cb86b9ec6f18ca2d2ad3b39426a57ab850867070/src/shell/layout), [#322](https://github.com/pop-os/cosmic-epoch/issues/322) |
+| C2 mode switch with Super+T or from the dock-taskbar | Partly: a rebindable "toggle tiling of the active workspace" action exists (`ToggleTiling` in [`action.rs`](https://github.com/pop-os/cosmic-settings-daemon/blob/108e095779549931e7ce109429255a1341c70b7c/config/src/shortcuts/action.rs#L137-L138)); only two modes, and its default key is COSMIC's, not Super+T | default binding not checked |
+| C2 variable refresh rate, HDR, 120 Hz+ frame pacing | 120 Hz+ pacing: not checked (no upstream measurement found; high-refresh bugs exist, e.g. [#1334](https://github.com/pop-os/cosmic-comp/issues/1334), [#2997](https://github.com/pop-os/cosmic-comp/issues/2997)). VRR and HDR: rows above | |
+| C2 workspaces per monitor | Meets: per-display workspaces, with a spanned alternative | [#1832](https://github.com/pop-os/cosmic-comp/issues/1832) (bug in switching between the two modes) |
+| C2 gestures track the touchpad 1:1 | Partly: swipe gestures for next and previous workspace, with velocity tracking ([`gestures/mod.rs`](https://github.com/pop-os/cosmic-comp/blob/cb86b9ec6f18ca2d2ad3b39426a57ab850867070/src/input/gestures/mod.rs)); configurable gestures and an overview gesture are open PRs ([#2838](https://github.com/pop-os/cosmic-comp/pull/2838), [#2824](https://github.com/pop-os/cosmic-comp/pull/2824)); 1:1 tracking not checked | |
 | C2 animations use our motion tokens | Conflicts: animation timings are cosmic-comp's own; even a speed setting is still a request ([#376](https://github.com/pop-os/cosmic-comp/issues/376), open) | needs a fork patch |
-| C3 dock-taskbar, launcher, workspaces overview | Partly: COSMIC's panel/dock, launcher and workspaces in their own layout | repos in 1.2 |
+| C3 dock-taskbar, optional top bar, launcher, control centre, notification centre, overview | Partly: COSMIC has a panel and dock, launcher, applets and workspaces overview in its own layout; control centre and notification centre exist as panel applets, not in our form | repos in 1.2 |
 | C3 command palette, three layout presets, cheat sheet | Not met in COSMIC's form | none found |
+| C3 privacy indicator for camera, microphone, screen capture | Not met: requested in [cosmic-applets#1232](https://github.com/pop-os/cosmic-applets/issues/1232), open since 2025-12-14 | |
+| C3 every shell action has a rebindable shortcut and appears in the command palette | Partly: shell actions are rebindable shortcuts ([`action.rs`](https://github.com/pop-os/cosmic-settings-daemon/blob/108e095779549931e7ce109429255a1341c70b7c/config/src/shortcuts/action.rs)); no command palette, so the second half is not met | |
 | C4 one toolkit for shell and apps | Meets (libcosmic everywhere) | repos in 1.2 |
 | C4 implements our design system and tokens | Conflicts: `cosmic-theme` is COSMIC's design | [libcosmic](https://github.com/pop-os/libcosmic) |
-| C4 AccessKit, screen reader, keyboard | Partly at best: AccessKit wired in but tree not published; some widgets not focusable | 1.5, [#1098](https://github.com/pop-os/libcosmic/issues/1098) |
+| C4 AccessKit, screen reader, keyboard, high contrast | Partly at best: AccessKit wired in but tree not published; some widgets not focusable; high contrast not checked | 1.5, [#1098](https://github.com/pop-os/libcosmic/issues/1098) |
 | C4 complete accessibility tree (C12 fallback) | Not met | D-006 M6 26/26 missing; [#1429](https://github.com/pop-os/libcosmic/issues/1429) |
 | C4 llms.txt, Markdown API docs | Not met | D-006 agent test §5 |
+| C4 one runnable example per widget | Partly: 14 examples ([`examples/`](https://github.com/pop-os/libcosmic/tree/7cd76ae3160cbd26ae89a4c01e64eda21f648c7f/examples)) for 52 entries in `src/widget/` | counted at `7cd76ae3` |
+| C4 matching GTK and Qt themes | Partly: `cosmic-theme` exports COSMIC's theme to GTK 4, Qt (kdeglobals) and qt5ct/qt6ct ([`output/`](https://github.com/pop-os/libcosmic/tree/7cd76ae3160cbd26ae89a4c01e64eda21f648c7f/cosmic-theme/src/output)); it exports COSMIC's design, not ours, so we would replace the values | |
 | C4 headless inspection and screenshot harness | Not met upstream | none found |
 | C5 Files: tabs, network mounts, search | Meets | [`tab.rs`](https://github.com/pop-os/cosmic-files/blob/3868a8e3ac65f7572861c4668cee4564ac473974/src/tab.rs), [`mounter/gvfs.rs`](https://github.com/pop-os/cosmic-files/blob/3868a8e3ac65f7572861c4668cee4564ac473974/src/mounter/gvfs.rs), [`scan/search.rs`](https://github.com/pop-os/cosmic-files/blob/3868a8e3ac65f7572861c4668cee4564ac473974/src/scan/search.rs) |
 | C5 Files: spacebar preview, undoable operations | Partly | [#1566](https://github.com/pop-os/cosmic-files/issues/1566), [#306](https://github.com/pop-os/cosmic-files/issues/306) |
 | C5 Files: split view, tags, batch rename | Not met | [#260](https://github.com/pop-os/cosmic-files/issues/260); none found for tags or batch rename |
+| C5 context menus open in one frame; third-party actions load asynchronously in a submenu | Not checked for frame time (not in D-006's measurements). No third-party file-action API found in cosmic-files | |
+| C5 the other v1 apps, each on C4 and a shared app skeleton | Partly: COSMIC has [Terminal](https://github.com/pop-os/cosmic-term), [Text Editor](https://github.com/pop-os/cosmic-edit), [Settings](https://github.com/pop-os/cosmic-settings), [Store](https://github.com/pop-os/cosmic-store), [Screenshot](https://github.com/pop-os/cosmic-screenshot) and [Player](https://github.com/pop-os/cosmic-player) (all GPL-3.0), each on libcosmic's application framework; not compared feature by feature | beyond what this card asks |
 | §7 Files scrolling, no dropped frames | Not met on the default build on the NUC; `wgpu` build unmeasured | D-006 M5 |
 | §7 cold start, idle RAM, idle CPU | Meets for libcosmic (49 ms, 34 MB, 0.00 %) | D-006 M1–M4 |
 | C10 / C12 screen capture and input go through permissioned paths | Partly: `security_context`, image capture, libei exist; no per-assistant permissions | [handlers](https://github.com/pop-os/cosmic-comp/tree/cb86b9ec6f18ca2d2ad3b39426a57ab850867070/src/wayland/handlers) |
@@ -186,7 +196,7 @@ D-006 (toolkit) is open and decided in #14; this section only shows how the two 
 Why:
 
 1. **Option (a) is closed to us.** COSMIC bans LLM-generated issues and PRs, and enforces it. An agent-built OS cannot depend on upstream fixing what we need.
-2. **cosmic-comp is the one piece worth its fork cost.** A compositor is the most expensive and hardware-sensitive thing to rebuild, Phase 1 needs one that boots on the NUC, and cosmic-comp already has floating and tiling per workspace, Xwayland, fractional scaling, VRR, libei, an a11y protocol and image capture. Its visual surface is small, so our design system costs a small patch. Our additions (scroll tiling, HDR, motion tokens, C12 window and input hooks) mostly sit in its layout and render code.
+2. **cosmic-comp is the one piece worth its fork cost.** A compositor is the most expensive and hardware-sensitive thing to rebuild, Phase 1 needs one that boots on the NUC, and cosmic-comp already has floating and tiling per workspace, Xwayland, fractional scaling, VRR, libei, an a11y protocol and image capture. Its visual surface is small, so our design system costs a small patch. Most of our additions (scroll tiling, motion tokens, C12 window and input hooks) sit in its layout and input code. **HDR is the exception: it is a large patch** across the renderer, colour management and output (KMS) paths, and upstream's own attempt is still open after 18 months (#1384).
 3. **The shell, apps and toolkit are where Atos differs.** COSMIC's shell has a different layout, cosmic-files has a different feature set and disables accessibility, and libcosmic's design and accessibility are not ours. Forking them buys code we would mostly rewrite and then merge against daily.
 4. **C12 favours owning the layers assistants use.** MCP servers, the permission broker hooks, the action log and a complete accessibility tree are easiest to get right in code we own. The compositor is the exception, because its agent hooks (libei, a11y, capture) already exist.
 
@@ -194,6 +204,18 @@ What this costs:
 
 - Our C2 code is **GPL-3.0-only** for good. Fine for a separate compositor process, but the owner should confirm it fits the project licence.
 - We carry cosmic-comp merges ourselves (138 upstream commits in 90 days) and rename it per the trademark policy.
+- **The narrow fork is not narrow in dependencies.** cosmic-comp's `Cargo.lock` at `cb86b9ec` has 703 packages, 39 of them from 14 git repositories ([`Cargo.toml`](https://github.com/pop-os/cosmic-comp/blob/cb86b9ec6f18ca2d2ad3b39426a57ab850867070/Cargo.toml), [`Cargo.lock`](https://github.com/pop-os/cosmic-comp/blob/cb86b9ec6f18ca2d2ad3b39426a57ab850867070/Cargo.lock)):
+  - 16 crates from libcosmic git (`libcosmic`, `cosmic-config`, `iced_tiny_skia`, `iced_graphics` and the rest of the pop-os/iced fork, which is 685 commits behind upstream iced), with no revision in `Cargo.toml`, so only the lock file pins them.
+  - Smithay from a git revision (`8a27023`) through `[patch.crates-io]`, not a release, plus `smithay-egui`.
+  - pop-os forks of `softbuffer`, `smithay-clipboard`, `window_clipboard` and `freedesktop-icons`, plus `cosmic-protocols`, `cosmic-settings-daemon`, `cosmic-randr`, `dbus-settings-bindings`, `id-tree`, `rust-atomicwrites` and `cryoglyph`.
+
+  Each merge from upstream therefore means moving all of these pins forward together, because cosmic-comp `master` expects the libcosmic and Smithay heads of the same day. **Effort per merge is unknown.** Measure it on the first merge (hours spent, conflicts, failing builds) and set the merge rhythm from that.
+- **Security fixes must not wait for the merge rhythm.** A compositor sees all input and screen contents (C10, C12). None of cosmic-comp, libcosmic, pop-os/iced, Smithay or cosmic-epoch has a `SECURITY.md` or any published GitHub security advisory (repository advisories API, 2026-11-05: 0 each), so there is no announcement channel to subscribe to. The RustSec database behind `cargo audit` ([rustsec.org](https://rustsec.org/)) covers crates.io releases, so the 39 git-sourced crates are outside it; our CI runs no `cargo audit` or `cargo deny` yet. So we need:
+  - an owner for watching upstream: a scheduled job that lists new upstream commits in cosmic-comp, libcosmic, pop-os/iced and Smithay touching input, capture, session lock, `security_context` or protocol parsing, for an agent to triage;
+  - cherry-picking security-relevant fixes into the fork as soon as they are found, outside the regular merges, with a target time the owner sets (for example, within a week);
+  - `cargo audit` or `cargo deny` in CI for the crates.io part of the tree.
+
+  These are new Phase 1 cards, not part of this one.
 - cosmic-comp's internal libcosmic UI must be restyled or replaced, whatever D-006 picks.
 
 If the owner prefers no fork at all, option (c) everywhere is the alternative. It costs a compositor built on Smithay before Phase 1 can pass its gate.
@@ -203,7 +225,7 @@ If the owner prefers no fork at all, option (c) everywhere is the alternative. I
 If the recommendation is accepted:
 
 - **D-007** becomes "Fork cosmic-comp (renamed) as the base of C2; C3–C5 own code on the D-006 toolkit; no upstream contributions by agents".
-- **New cards** (the planner writes them; not created here): set up the cosmic-comp fork and rename; a merge-from-upstream routine with a fixed rhythm (for example every Epoch release); scroll tiling in the fork; design tokens for the compositor's own UI; C12 window-actions MCP server in the compositor (after D-012).
+- **New cards** (the planner writes them; not created here): set up the cosmic-comp fork and rename; a merge-from-upstream routine with a fixed rhythm (for example every Epoch release), whose first run records the effort; an upstream security watch with cherry-picks outside the rhythm, and `cargo audit`/`cargo deny` in CI; scroll tiling in the fork; design tokens for the compositor's own UI; C12 window-actions MCP server in the compositor (after D-012).
 - **Licence**: the project needs a licence decision that accepts GPL-3.0-only for C2.
 - **D-006**: libcosmic's evaluation should add the `wgpu` measurement and the cost of carrying an accessibility patch (section 5). I filed no card for this; the owner or planner may.
 - **Docs**: `docs/components/c2-compositor/` should record the fork point (upstream commit) and every downstream patch.
