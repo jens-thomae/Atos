@@ -24,6 +24,7 @@ export component AppWindow inherits Window {
     callback fill-properties(int);
     callback autoscroll-done();
     callback menu-opened();
+    callback first-frame();
 
     // Which Tab stop has focus: 0 sidebar, 1 Up button, 2 list. StandardTableView
     // reports no focus state, so the app tracks it to draw the list's focus border.
@@ -70,6 +71,16 @@ export component AppWindow inherits Window {
         menu-row = row;
         menu.show(at);
         menu-opened();
+    }
+
+    // First-frame trigger for the software renderer (no rendering notifier there): the first change
+    // of animation-tick(), the per-frame clock, once armed. Disarmed after it fires, so idle stays idle.
+    property <bool> first-armed;
+    property <bool> first-done;
+    property <duration> first-tick: (first-armed && !first-done) ? animation-tick() : 0ms;
+    public function arm-first-frame() { first-armed = true; }
+    changed first-tick => {
+        if first-armed && !first-done { first-done = true; first-frame(); }
     }
 
     // Autoscroll (D006_AUTOSCROLL=1): driven by animation-tick(), Slint's per-frame clock.

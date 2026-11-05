@@ -1,21 +1,42 @@
 #!/bin/bash
 # D-006 measurements M1–M7 (docs/decisions/D-006-prototype-brief.md §7) for both Files prototypes.
 # Needs: sway wtype wl-clipboard grim dbus-run-session at-spi2-core python3-gi gir1.2-atspi-2.0 eglinfo
-# Usage: measure.sh <d006-iced> <d006-slint> <budgets> <out-dir>
+# Usage: measure.sh <bin-dir> <out-dir>
+#   <bin-dir> holds budgets, d006-iced, d006-iced-wgpu (libcosmic --features wgpu) and d006-slint.
+#   Four variants: iced, iced-wgpu, slint (femtovg on GL) and slint-sw (Slint software renderer,
+#   SLINT_BACKEND=winit-software).
 #   D006_RUNS         runs per number (default 5, the brief's minimum)
 #   D006_CPU_WINDOW   idle-CPU window in seconds, or `full` (5 min, §7; default)
+#   D006_RENDERER     sway's renderer: `pixman` (software, default) or `gles2` on the GPU's render node
+#                     (D006_RENDER_DEVICE, default /dev/dri/renderD128). Option A of D-006 §3.3.
+#   D006_COMPOSITOR   `existing`: do not start sway; use the running compositor (WAYLAND_DISPLAY,
+#                     SWAYSOCK). Option B: tools/d006/sway-drm.conf.
+#   D006_GPU_PATTERN  regex a renderer string must match to count as GPU (default `Intel`). Only for
+#                     testing the gate logic on software renderers (e.g. `llvmpipe`).
+#   D006_A11Y_VARIANTS  variants that get M6/M7 (default `iced slint`: the tree is renderer-independent)
 set -euo pipefail
 
 # Own session bus: fresh AT-SPI bus, nothing leaks into or out of the host session.
 [ -n "${D006_BUS:-}" ] || D006_BUS=1 exec dbus-run-session -- "$0" "$@"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ICED=$(realpath "$1"); SLINT=$(realpath "$2"); BUDGETS=$(realpath "$3")
-mkdir -p "$4"; OUT=$(realpath "$4")
+BIN=$(realpath "$1"); BUDGETS="$BIN/budgets"
+mkdir -p "$2"; OUT=$(realpath "$2")
 RUNS=${D006_RUNS:-5}; WINDOW=${D006_CPU_WINDOW:-full}
-WORK=$(mktemp -d); export XDG_RUNTIME_DIR="$WORK/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"
+RENDERER=${D006_RENDERER:-pixman}; COMPOSITOR=${D006_COMPOSITOR:-own}
+A11Y=${D006_A11Y_VARIANTS:-iced slint}
+WORK=$(mktemp -d)
+# Own compositor: private runtime dir. Existing compositor: keep the real one (its socket lives there).
+[ "$COMPOSITOR" = existing ] || { export XDG_RUNTIME_DIR="$WORK/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"; }
 trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$WORK"' EXIT
-APPS="iced:$ICED slint:$SLINT"
+# Variant wrappers: name, environment, binary. `exec` keeps the PID (the harness measures the PID).
+mkdir -p "$WORK/v"
+variant() { printf '#!/bin/sh\nexec env %s %s "$@"\n' "$2" "$BIN/$3" >"$WORK/v/$1"; chmod +x "$WORK/v/$1"; }
+variant iced "" d006-iced
+variant iced-wgpu "" d006-iced-wgpu
+variant slint "" d006-slint
+variant slint-sw "SLINT_BACKEND=winit-software" d006-slint
+APPS="iced:$WORK/v/iced iced-wgpu:$WORK/v/iced-wgpu slint:$WORK/v/slint slint-sw:$WORK/v/slint-sw"
 
 # --- environment -------------------------------------------------------------
 {
@@ -29,27 +50,56 @@ APPS="iced:$ICED slint:$SLINT"
   echo "sway: $(sway --version)"; echo "wtype: $(dpkg -s wtype 2>/dev/null | sed -n 's/^Version: //p')"
   echo "mesa: $(dpkg -s libgl1-mesa-dri 2>/dev/null | sed -n 's/^Version: //p')"
   echo "runs: $RUNS  cpu_window: $WINDOW"
-  echo "iced: $(sha256sum "$ICED" | cut -c1-16)  slint: $(sha256sum "$SLINT" | cut -c1-16)"
+  echo "compositor: $COMPOSITOR  sway_renderer: $RENDERER"
+  echo "gpu_pattern: ${D006_GPU_PATTERN:-Intel}"
+  for b in d006-iced d006-iced-wgpu d006-slint; do echo "$b: $(sha256sum "$BIN/$b" | cut -c1-16)"; done
 } >"$OUT/environment.txt"
 
-# --- compositor: sway, headless backend, pixman (software) renderer ------------
-WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
-  sway -c "$HERE/sway.conf" >"$OUT/sway.log" 2>&1 &
-for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/wayland-1" ] && break; [ -S "$XDG_RUNTIME_DIR/wayland-0" ] && break; sleep 0.1; done
-export WAYLAND_DISPLAY=$(cd "$XDG_RUNTIME_DIR" && ls -d wayland-? | head -1)
-export SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock)
+# --- compositor: own sway (headless; pixman or gles2) or the running one ------------
+if [ "$COMPOSITOR" = existing ]; then
+  : "${WAYLAND_DISPLAY:?D006_COMPOSITOR=existing needs a running compositor}" "${SWAYSOCK:?needs SWAYSOCK}"
+else
+  case "$RENDERER" in
+    pixman) ;;
+    gles2) export WLR_RENDER_DRM_DEVICE="${D006_RENDER_DEVICE:-/dev/dri/renderD128}" ;;
+    *) echo "D006_RENDERER must be pixman or gles2" >&2; exit 1 ;;
+  esac
+  WLR_BACKENDS=headless WLR_RENDERER=$RENDERER WLR_LIBINPUT_NO_DEVICES=1 \
+    sway -c "$HERE/sway.conf" >"$OUT/sway.log" 2>&1 &
+  for _ in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/wayland-1" ] && break; [ -S "$XDG_RUNTIME_DIR/wayland-0" ] && break; sleep 0.1; done
+  export WAYLAND_DISPLAY=$(cd "$XDG_RUNTIME_DIR" && ls -d wayland-? | head -1)
+  export SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock)
+fi
 output_info() { swaymsg -t get_outputs | python3 -c "
 import json, sys
 o = json.load(sys.stdin)[0]; m = o['current_mode']
 print('output: %s %dx%d@%.0fHz scale %s' % (o['name'], m['width'], m['height'], m['refresh'] / 1000, o['scale']))"; }
 output_info >>"$OUT/environment.txt"
-# Which GL renderer the apps get (llvmpipe = software; on the NUC possibly a GPU driver through the render node).
-eglinfo -B 2>/dev/null | grep 'OpenGL ES profile renderer' | sort -u | sed 's/^/egl: /' >>"$OUT/environment.txt" || true
+# Renderer proof, part 1: the GL renderer the Wayland platform gives clients of this compositor. Only
+# that block counts: the GBM and device platforms report the GPU whatever the compositor does.
+{ eglinfo -B 2>/dev/null | awk '/platform:$/ { p = ($0 ~ /^Wayland platform:/) } p && /OpenGL ES profile renderer/' \
+    | sort -u | sed 's/^[^:]*: */egl: /'; } >"$OUT/egl.txt" || true
+[ -s "$OUT/egl.txt" ] || echo "egl: none (no renderer line in the Wayland platform block)" >"$OUT/egl.txt"
+cat "$OUT/egl.txt" >>"$OUT/environment.txt"; rm "$OUT/egl.txt"
+
+# Renderer proof, part 2: each variant's own renderer line (stderr, `D006_RENDERER: ...`). Needs a
+# launch of its own: iced queries the adapter only when D006_RENDERER_PROBE is set, so the measured
+# runs below never pay for it.
+mkdir -p "$OUT/renderer"
 
 # --- fixture --------------------------------------------------------------------
 FX="$WORK/fx"; sh "$HERE/../../spikes/d006-fixture/make-fixture.sh" "$FX"
 (cd "$FX" && TZ=UTC find . \( -type f -printf '%p f %s %TY%Tm%Td%TH%TM\n' \) -o \( -type d -printf '%p d %TY%Tm%Td%TH%TM\n' \) | LC_ALL=C sort | sha256sum) \
   | sed 's/^/fixture digest: /' >>"$OUT/environment.txt"
+
+for a in $APPS; do
+  n=${a%%:*}; b=${a#*:}
+  D006_RENDERER_PROBE=1 "$b" "$FX/small" >/dev/null 2>"$OUT/renderer/$n.txt" & pid=$!
+  for _ in $(seq 200); do grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" && break; kill -0 $pid 2>/dev/null || break; sleep 0.1; done
+  kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true
+  grep -h '^D006_RENDERER:' "$OUT/renderer/$n.txt" | sed "s/^D006_RENDERER:/renderer $n:/" >>"$OUT/environment.txt" || true
+  grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" || echo "renderer $n: none" >>"$OUT/environment.txt"
+done
 
 # --- M1–M4: harness ---------------------------------------------------------------
 # Wrappers from the brief: exec keeps the PID. Paths contain a `/`.
@@ -93,6 +143,7 @@ busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status ScreenRead
 mkdir -p "$OUT/m6" "$OUT/m7"
 for a in $APPS; do
   n=${a%%:*}; b=${a#*:}
+  case " $A11Y " in *" $n "*) ;; *) continue ;; esac
   python3 -I "$HERE/atspi.py" m6 "$n" "$b" "$FX" "$OUT/m6" || echo "M6 $n failed"
   python3 -I "$HERE/atspi.py" m7 "$n" "$b" "$FX" "$OUT/m7" || echo "M7 $n failed"
 done

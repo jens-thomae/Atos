@@ -10,6 +10,13 @@ publish = false
 jiff = "0.2"
 # D-006 brief §2: exact revision, default features (a11y included).
 libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f" }
+# Only for `iced::system::information()` (adapter and backend name, the renderer proof of #36): the
+# `sysinfo` feature of the same iced that libcosmic uses (same git source, so one crate).
+iced = { git = "https://github.com/pop-os/libcosmic", rev = "daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f", features = ["sysinfo"] }
+
+[features]
+# GPU renderer (D-006 §3.3): libcosmic's `wgpu` feature. Off by default: the default build is tiny-skia.
+wgpu = ["libcosmic/wgpu"]
 
 # Own workspace: spikes stay out of the main one (root Cargo.toml), also from a worktree.
 [workspace]

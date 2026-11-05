@@ -84,7 +84,7 @@ sudo bash -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc
 
 ## 7. Packages for the D-006 measurements (#12)
 
-[`.github/workflows/d006-measure.yml`](../.github/workflows/d006-measure.yml) starts the two Files prototypes in a headless sway compositor, injects keys and reads their accessibility trees. That needs, once, as the owner:
+[`.github/workflows/d006-measure.yml`](../.github/workflows/d006-measure.yml) starts the Files prototypes in a headless sway compositor, injects keys and reads their accessibility trees. That needs, once, as the owner:
 
 ```sh
 sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core mesa-utils
@@ -98,7 +98,72 @@ sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-
 | `libgl1-mesa-dri`, `libegl1`, `fontconfig`, `fonts-dejavu-core` | OpenGL ES through Mesa's software rasteriser (Slint's femtovg renderer) and a font |
 | `dbus-daemon`, `mesa-utils` | A private session bus per run; `eglinfo`, to record which GL renderer (llvmpipe or a GPU driver) the apps get |
 
-The `runner` user is unprivileged and has no login session, so sway runs with its headless backend and the software renderer, not on the N5105's display. Measurements therefore do not exercise the GPU (see `docs/decisions/D-006-measurements.md`). Run all measurements with `gh workflow run d006-measure.yml -f nuc=true` or the label `d006-nuc` on a pull request; the job takes about 1 h 20 min (idle CPU over the full 5 minutes, 5 runs per prototype).
+Without the GPU steps below the `runner` user has no login session, so sway could only run headless with the software renderer. The `measure-nuc` job now measures on the GPU (sway `gles2` on `/dev/dri/renderD128`, four variants: libcosmic default, libcosmic `wgpu`, Slint default, Slint software renderer) and **fails at its package check until the owner has done option A below**. Run it with `gh workflow run d006-measure.yml -f nuc=true` or the label `d006-nuc` on a pull request; the job takes about 2 h 15 min (idle CPU over the full 5 minutes, 5 runs per variant). The job summary evaluates the gates G1–G5 of [`D-006-toolkit.md`](decisions/D-006-toolkit.md#41-the-gpu-gates-exact) per variant and marks a variant **not measured** unless both the compositor's Wayland `egl:` line and the app's own renderer line show the Intel driver.
+
+## GPU measurements (D-006, #36)
+
+Owner steps, once the card #36 is merged and before the run. Do this while no job is running, since step 3 restarts the runner. Everything is undone afterwards.
+
+**Option A (recommended): give the runner the render node.**
+
+1. Check whether the Vulkan driver is already there. If `dpkg -s` prints `Status: install ok installed`, skip step 2 and the last line of the undo.
+
+   ```sh
+   dpkg -s mesa-vulkan-drivers 2>/dev/null | grep '^Status' || echo "not installed"
+   ```
+
+2. Install the Intel Vulkan driver (for libcosmic's `wgpu` build). Note the "NEW packages" line apt prints, for the undo.
+
+   ```sh
+   sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers
+   ```
+
+3. Let the runner open the GPU's render node, and restart the runner so it picks this up:
+
+   ```sh
+   sudo usermod -aG render runner
+   sudo systemctl restart 'actions.runner.*'
+   ```
+
+4. Check:
+
+   ```sh
+   ls -l /dev/dri/renderD128                       # crw-rw---- root render
+   ps -o user=,supgrp= -C Runner.Listener          # runner  runner,render
+   ```
+
+This changes one group membership (render nodes allow GPU rendering and compute only, not display or input) and one driver package. No service, port, sudo right or persistent setting is added. Then start the run (above).
+
+**Undo**, after the run:
+
+```sh
+sudo gpasswd -d runner render
+sudo systemctl restart 'actions.runner.*'
+ps -o user=,supgrp= -C Runner.Listener                    # runner  runner (no render)
+sudo apt-get remove -y mesa-vulkan-drivers                # only if step 2 installed it
+```
+
+If step 2's "NEW packages" line listed more than `mesa-vulkan-drivers`, remove those too by name. Don't use `apt-get autoremove` blindly; it may remove packages that other steps installed.
+
+If the summary says the `egl:` line is still `llvmpipe` (headless sway did not hand the GPU to its clients; that wlroots picks the render node in headless mode is expected but **unverified on the NUC**), use option B.
+
+**Option B (fallback): a real display, as the owner, without touching the runner.** Needs a monitor and keyboard on the NUC and no root.
+
+1. On another machine, download the `d006-bundle` artifact of a workflow run (the hosted `build` job) and copy it to the NUC as `~/d006.tar.gz` (zip it first if GitHub gave a zip).
+2. Log in on the console (tty1) as the owner, so logind gives sway a seat. Unpack and start sway with [`tools/d006/sway-drm.conf`](../tools/d006/sway-drm.conf):
+
+   ```sh
+   mkdir ~/d006 && tar -xzf ~/d006.tar.gz -C ~/d006 && cd ~/d006 && chmod +x bin/* tools/d006/* && sway -c tools/d006/sway-drm.conf
+   ```
+
+   The config runs `D006_COMPOSITOR=existing D006_RENDERER=gles2 tools/d006/measure.sh bin out-gpu` inside that sway and then `swaymsg exit`.
+3. Leave the machine alone until sway exits by itself (about 2 h 15 min). Then summarize and copy off the results:
+
+   ```sh
+   python3 tools/d006/summarize.py out-gpu > out-gpu/summary.md
+   ```
+
+**Undo:** `rm -rf ~/d006 ~/d006.tar.gz`. Nothing else changed.
 
 ## Updates
 

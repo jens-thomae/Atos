@@ -20,7 +20,7 @@ Build needs `libxkbcommon-dev` (for `smithay-client-toolkit`); it was installed 
 | | |
 | --- | --- |
 | Toolkit | libcosmic git rev [`daca62bb`](https://github.com/pop-os/libcosmic/commit/daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f), the brief's revision, with its bundled pop-os/iced fork. Default features (`winit`, `tokio`, `a11y`, `dbus-config`, `x11`, `wayland`, `multi-window`); nothing changed |
-| Renderer | `iced_tiny_skia` (CPU). libcosmic's default features do not include `wgpu`, so the default build never uses the GPU |
+| Renderer | `iced_tiny_skia` (CPU). libcosmic's default features do not include `wgpu`, so the default build never uses the GPU. `--features wgpu` (#36) turns libcosmic's `wgpu` feature on; iced falls back to tiny-skia if wgpu finds no adapter, so the run's renderer line decides what was measured |
 | Other dependencies | `jiff` 0.2 (resolves to 0.2.39), for local time in the *Modified* column. libcosmic already depends on it, so it adds no crate |
 | Lines of Rust | 560 in `src/main.rs`, blank and comment lines excluded (includes a small size-format test) |
 | Crates in `Cargo.lock` | 679 |
@@ -59,3 +59,5 @@ So M6 (#12) will find every control in the brief's table missing. No workaround 
 
 - `wtype` drops the first key after it creates its virtual keyboard: a separate `wtype -k Down` call is often lost. Waiting first (`wtype -s 500 -k Down`) made every key arrive.
 - `WAYLAND_DEBUG=client` prints timestamps for this app (`[2103807.362] …`), and autoscroll commits go to one surface.
+
+**Renderer line (#36):** with `D006_RENDERER_PROBE=1` the app asks `iced::system::information()` after the first frame, prints `D006_RENDERER: iced <backend> <adapter>` (`tiny-skia` for the CPU renderer, `Vulkan` and the adapter name for wgpu) on stderr and exits. Normal runs never query it. This needs iced's `sysinfo` feature, enabled through a direct `iced` dependency on the same libcosmic revision.
