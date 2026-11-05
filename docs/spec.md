@@ -48,7 +48,7 @@ Version 1 is a daily-drivable desktop for laptops and desktops on a short list o
 **In scope for v1**
 
 - Wayland compositor and shell: dock-taskbar, top bar, launcher, command palette, control centre, notifications, overview, workspaces.
-- Window modes per workspace: floating (default), grid tiling, scroll tiling.
+- Window modes per workspace: floating (default), tree tiling (i3-style), scroll tiling.
 - Image-based, signed OS with atomic updates and rollback.
 - Native app suite: Files, Text Editor, Image Viewer, Media Player, Terminal, Settings, Software, Screenshot and Recorder, PDF Viewer, Archive Manager, Calculator, System Monitor.
 - One Software app covering Flatpak apps, web apps and Windows apps through Proton/Wine.
@@ -94,7 +94,7 @@ This log records every architectural decision and its status. **Decided** entrie
 | D-004 | Customisation only through config, tokens and defined extension points; no shell monkey-patching | Decided | Prevents the GNOME-extension breakage problem |
 | D-005 | No account required, no telemetry by default | Decided | Core positioning against Windows 11 |
 | D-006 | Primary UI toolkit: iced/libcosmic or Slint | Open | Resolve by prototyping Files in each candidate, with no fixed timeline; the owner may add more candidates. Measure frame time, memory, accessibility and agent productivity |
-| D-007 | Relationship with COSMIC: collaborate upstream or fork | Open | Decides how much compositor, toolkit and app code we reuse |
+| D-007 | Fork cosmic-comp (renamed) as the base of C2; C3–C5 are our own code on the D-006 toolkit; no upstream contributions | Decided | Best starting point for a solid compositor, with freedom to change anything. COSMIC does not accept AI-written contributions, and hand-written ones are not an option. C2 is GPL-3.0-only, which the owner accepts. See `docs/decisions/D-007-cosmic-relationship.md` |
 | D-008 | Base image technology: bootc or systemd-sysupdate; base distribution | Open | Needs a short comparison spike |
 | D-009 | Implementation language for system components, native apps included: Rust | Decided | Memory safety, matches iced, Slint and COSMIC. Third-party crates are approved case by case. See `docs/decisions/D-009-rust.md` |
 | D-010 | Configuration format: TOML or KDL | Proposed | Human-editable and diff-friendly |
@@ -117,7 +117,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 
 - Wayland compositor with Xwayland for legacy apps.
 - Variable refresh rate, HDR, 120 Hz+ frame pacing, per-monitor fractional scaling.
-- Three window modes per workspace: floating, grid tiling, scroll tiling. Switch with Super+T or from the dock-taskbar.
+- Three window modes per workspace: floating, tree tiling, scroll tiling. Tree tiling follows i3: manual horizontal and vertical splits, tabbed and stacked containers; it is the primary tiling style. Switch with Super+T or from the dock-taskbar.
 - Workspaces per monitor; gestures track the touchpad 1:1.
 - All window animations use the shared motion tokens and never block input.
 
@@ -335,7 +335,8 @@ Use these terms exactly, in code, docs and cards, so agents don't drift into syn
 | Dock-taskbar | The floating bottom bar holding pinned and running apps, launcher button, tray and quick settings |
 | Command palette | The Super+Space search-and-act field for apps, files, settings, windows and actions |
 | Control centre | The quick-settings panel for Wi-Fi, Bluetooth, sound, brightness and similar toggles |
-| Window mode | Floating, grid tiling or scroll tiling, set per workspace |
+| Window mode | Floating, tree tiling or scroll tiling, set per workspace |
+| Tree tiling | i3-style tiling: windows in a tree of horizontal and vertical splits, with tabbed and stacked containers |
 | Preset | A shell layout chosen at first run: Balanced, Classic Mac or Focused |
 | Token | A named design value (colour, size, radius, motion) shared by shell, apps and themes |
 | Extension point | A defined place where third-party code can plug in, such as a palette provider |
