@@ -1,0 +1,9 @@
+{
+  "app": "/tmp/tmp.Zds0zvUvPS/iced-small",
+  "cpu": "Intel(R) Xeon(R) 6975P-C",
+  "kernel": "7.0.0-1014-aws",
+  "cpu_window_s": 30,
+  "cold_start_ms": 2796.82763,
+  "idle_rss_mb": 33.726464,
+  "idle_cpu_percent": 0
+}

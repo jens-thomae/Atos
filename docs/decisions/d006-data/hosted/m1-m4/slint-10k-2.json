@@ -1,0 +1,9 @@
+{
+  "app": "/tmp/tmp.Zds0zvUvPS/slint-10k",
+  "cpu": "Intel(R) Xeon(R) 6975P-C",
+  "kernel": "7.0.0-1014-aws",
+  "cpu_window_s": 10,
+  "cold_start_ms": 147.96733,
+  "idle_rss_mb": 158.195712,
+  "idle_cpu_percent": 0
+}
