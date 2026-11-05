@@ -45,7 +45,7 @@ print('output: %s %dx%d@%.0fHz scale %s' % (o['name'], m['width'], m['height'], 
 output_info >>"$OUT/environment.txt"
 
 # --- fixture --------------------------------------------------------------------
-FX="$WORK/fx"; "$HERE/../../spikes/d006-fixture/make-fixture.sh" "$FX"
+FX="$WORK/fx"; sh "$HERE/../../spikes/d006-fixture/make-fixture.sh" "$FX"
 (cd "$FX" && TZ=UTC find . \( -type f -printf '%p f %s %TY%Tm%Td%TH%TM\n' \) -o \( -type d -printf '%p d %TY%Tm%Td%TH%TM\n' \) | LC_ALL=C sort | sha256sum) \
   | sed 's/^/fixture digest: /' >>"$OUT/environment.txt"
 
