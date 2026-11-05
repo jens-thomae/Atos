@@ -72,9 +72,119 @@ pub fn parse_cpu_ticks(stat: &str) -> Option<u64> {
     Some(utime + stime)
 }
 
+/// The measured metrics, as written to and read from the JSON results file:
+/// JSON key, display name, unit and budget limit. Higher is worse for all of them.
+pub const METRICS: [(&str, &str, &str, f64); 3] = [
+    (
+        "cold_start_ms",
+        "Cold start to first frame",
+        "ms",
+        limits::COLD_START_MS,
+    ),
+    (
+        "idle_rss_mb",
+        "Idle RSS (5 s after first frame)",
+        "MB",
+        limits::IDLE_RAM_MB,
+    ),
+    (
+        "idle_cpu_percent",
+        "Idle CPU",
+        "%",
+        limits::IDLE_CPU_PERCENT,
+    ),
+];
+
+/// The raw results of one harness run as a flat JSON object.
+/// `info` holds string fields (app, machine), `values` the numbers in [`METRICS`] order.
+pub fn results_json(info: &[(&str, &str)], cpu_window_s: u64, values: [f64; 3]) -> String {
+    // ponytail: Rust's `{:?}` string escaping equals JSON's except for control characters,
+    // which never appear in paths or /proc fields; use a JSON crate if that changes.
+    let mut fields: Vec<String> = info.iter().map(|(k, v)| format!("{k:?}: {v:?}")).collect();
+    fields.push(format!("\"cpu_window_s\": {cpu_window_s}"));
+    for ((key, ..), value) in METRICS.iter().zip(values) {
+        fields.push(format!("{key:?}: {value}"));
+    }
+    format!("{{\n  {}\n}}\n", fields.join(",\n  "))
+}
+
+/// The number stored under `key` in a results file written by [`results_json`].
+pub fn json_number(json: &str, key: &str) -> Option<f64> {
+    // ponytail: reads only our own flat format, not general JSON.
+    let rest = json.split_once(&format!("\"{key}\":"))?.1;
+    rest.split([',', '}']).next()?.trim().parse().ok()
+}
+
+/// Compares two results files. A metric regresses when it got worse by more than
+/// `threshold_percent` of its budget. Returns a Markdown table and whether anything regressed.
+pub fn compare(
+    previous: &str,
+    current: &str,
+    threshold_percent: f64,
+) -> Result<(String, bool), String> {
+    let mut table = "| Metric | Previous nightly | This run | Change | Result |\n| --- | --- | --- | --- | --- |\n".to_string();
+    let mut regressed = false;
+    for (key, name, unit, limit) in METRICS {
+        let read = |json: &str, which: &str| {
+            json_number(json, key).ok_or(format!("no {key} in the {which} results"))
+        };
+        let (prev, cur) = (read(previous, "previous")?, read(current, "current")?);
+        let worse = cur - prev > threshold_percent / 100.0 * limit;
+        regressed |= worse;
+        let result = if worse {
+            format!("⚠️ worse by more than {threshold_percent} % of budget")
+        } else {
+            "ok".to_string()
+        };
+        table += &format!(
+            "| {name} | {prev:.2} {unit} | {cur:.2} {unit} | {:+.2} {unit} | {result} |\n",
+            cur - prev
+        );
+    }
+    Ok((table, regressed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_round_trip() {
+        let json = results_json(
+            &[
+                ("app", "/a \"b\""),
+                ("cpu", "Intel(R) Celeron(R) N5105 @ 2.00GHz"),
+            ],
+            300,
+            [12.5, 4.1, 0.0],
+        );
+        assert!(json.contains(r#""app": "/a \"b\"""#), "{json}");
+        assert_eq!(json_number(&json, "cpu_window_s"), Some(300.0));
+        assert_eq!(json_number(&json, "cold_start_ms"), Some(12.5));
+        assert_eq!(json_number(&json, "idle_rss_mb"), Some(4.1));
+        assert_eq!(json_number(&json, "idle_cpu_percent"), Some(0.0));
+        assert_eq!(json_number(&json, "missing"), None);
+    }
+
+    #[test]
+    fn compare_marks_regressions_beyond_threshold() {
+        let prev = results_json(&[], 300, [100.0, 50.0, 0.10]);
+        // 5 % of the budgets: 15 ms, 40 MB, 0.05 % CPU.
+        let same = results_json(&[], 300, [114.0, 89.0, 0.15]);
+        let (table, regressed) = compare(&prev, &same, 5.0).unwrap();
+        assert!(!regressed, "{table}");
+        let worse = results_json(&[], 300, [116.0, 10.0, 0.0]);
+        let (table, regressed) = compare(&prev, &worse, 5.0).unwrap();
+        assert!(regressed);
+        assert_eq!(table.matches("⚠️").count(), 1, "{table}");
+        assert!(
+            table.contains("| Cold start to first frame | 100.00 ms | 116.00 ms | +16.00 ms | ⚠️")
+        );
+        // Getting better never regresses.
+        let better = results_json(&[], 300, [10.0, 1.0, 0.0]);
+        assert!(!compare(&prev, &better, 5.0).unwrap().1);
+        assert!(compare(&prev, "{}", 5.0).is_err());
+    }
 
     fn round2(x: f64) -> f64 {
         (x * 100.0).round() / 100.0

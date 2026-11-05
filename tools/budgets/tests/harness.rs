@@ -42,3 +42,31 @@ fn app_exit_during_cpu_window_fails() {
         "{stderr}"
     );
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn writes_json_that_compare_reads() {
+    let json = std::env::temp_dir().join(format!("budgets-{}.json", std::process::id()));
+    let json = json.to_str().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_budgets"))
+        .args([
+            env!("CARGO_BIN_EXE_budget-test-app"),
+            "--cpu-window",
+            "1",
+            "--json",
+            json,
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let written = std::fs::read_to_string(json).unwrap();
+    assert!(written.contains("\"cpu_window_s\": 1"), "{written}");
+    // A run compared with itself never regresses.
+    let out = Command::new(env!("CARGO_BIN_EXE_budgets"))
+        .args(["compare", json, json, "5"])
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_file(json);
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("| Idle CPU |"));
+}
