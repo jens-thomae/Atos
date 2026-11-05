@@ -87,7 +87,7 @@ sudo bash -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc
 [`.github/workflows/d006-measure.yml`](../.github/workflows/d006-measure.yml) starts the two Files prototypes in a headless sway compositor, injects keys and reads their accessibility trees. That needs, once, as the owner:
 
 ```sh
-sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core bc
+sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core mesa-utils
 ```
 
 | Package | Why |
@@ -96,7 +96,7 @@ sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-
 | `wl-clipboard`, `grim` | Clipboard check for *Copy Path*, screenshots of the walkthrough |
 | `at-spi2-core`, `gir1.2-atspi-2.0`, `python3-gi` | AT-SPI bus and the tree dump |
 | `libgl1-mesa-dri`, `libegl1`, `fontconfig`, `fonts-dejavu-core` | OpenGL ES through Mesa's software rasteriser (Slint's femtovg renderer) and a font |
-| `dbus-daemon`, `bc` | A private session bus per run; arithmetic in the scripts |
+| `dbus-daemon`, `mesa-utils` | A private session bus per run; `eglinfo`, to record which GL renderer (llvmpipe or a GPU driver) the apps get |
 
 The `runner` user is unprivileged and has no login session, so sway runs with its headless backend and the software renderer, not on the N5105's display. Measurements therefore do not exercise the GPU (see `docs/decisions/D-006-measurements.md`). Run all measurements with `gh workflow run d006-measure.yml -f nuc=true` or the label `d006-nuc` on a pull request; the job takes about 1 h 20 min (idle CPU over the full 5 minutes, 5 runs per prototype).
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # D-006 measurements M1–M7 (docs/decisions/D-006-prototype-brief.md §7) for both Files prototypes.
-# Needs: sway wtype wl-clipboard grim dbus-run-session at-spi2-core python3-gi gir1.2-atspi-2.0 bc
+# Needs: sway wtype wl-clipboard grim dbus-run-session at-spi2-core python3-gi gir1.2-atspi-2.0 eglinfo
 # Usage: measure.sh <d006-iced> <d006-slint> <budgets> <out-dir>
 #   D006_RUNS         runs per number (default 5, the brief's minimum)
 #   D006_CPU_WINDOW   idle-CPU window in seconds, or `full` (5 min, §7; default)
@@ -43,6 +43,8 @@ import json, sys
 o = json.load(sys.stdin)[0]; m = o['current_mode']
 print('output: %s %dx%d@%.0fHz scale %s' % (o['name'], m['width'], m['height'], m['refresh'] / 1000, o['scale']))"; }
 output_info >>"$OUT/environment.txt"
+# Which GL renderer the apps get (llvmpipe = software; on the NUC possibly a GPU driver through the render node).
+eglinfo -B 2>/dev/null | grep 'OpenGL ES profile renderer' | sort -u | sed 's/^/egl: /' >>"$OUT/environment.txt" || true
 
 # --- fixture --------------------------------------------------------------------
 FX="$WORK/fx"; sh "$HERE/../../spikes/d006-fixture/make-fixture.sh" "$FX"

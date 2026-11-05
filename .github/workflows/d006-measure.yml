@@ -11,22 +11,27 @@ on:
         description: Also measure on the reference NUC (about 1 h 20 min)
         type: boolean
         default: true
+  # Only when a label is added: later pushes never start a run, so the NUC is never reached
+  # by new code without the owner adding the label again.
   pull_request:
-    types: [labeled, synchronize, reopened]
+    types: [labeled]
 
 permissions: {}
+
+# One run at a time on the single NUC runner; a newer run replaces an older one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Nothing compiles on the NUC: build here, measure there.
   build:
     # Never for pull requests from forks: their code must not reach the self-hosted runner.
-    # On `labeled`, only the two d006 labels start a run.
+    # Only the label added just now starts a run.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
-       (contains(github.event.pull_request.labels.*.name, 'd006-measure') ||
-        contains(github.event.pull_request.labels.*.name, 'd006-nuc')) &&
-       (github.event.action != 'labeled' || startsWith(github.event.label.name, 'd006-')))
+       (github.event.label.name == 'd006-measure' || github.event.label.name == 'd006-nuc'))
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -76,12 +81,14 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core \
-            gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core bc
+            gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core mesa-utils
       - name: Measure
         shell: bash
         # A 30 s idle-CPU window keeps the hosted job short; the NUC job uses the full 5 minutes.
+        # 7 runs: a first-launch timeout leaves no RSS or CPU reading, and each number needs 5.
         env:
           D006_CPU_WINDOW: "30"
+          D006_RUNS: "7"
         run: |
           bundle/tools/d006/measure.sh bundle/bin/d006-iced bundle/bin/d006-slint bundle/bin/budgets results
           python3 bundle/tools/d006/summarize.py results | tee -a "$GITHUB_STEP_SUMMARY" >results/summary.md
@@ -97,7 +104,7 @@ jobs:
     needs: build
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.nuc ||
-      github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'd006-nuc')
+      github.event_name == 'pull_request' && github.event.label.name == 'd006-nuc'
     runs-on: [self-hosted, nuc]
     timeout-minutes: 120
     permissions: {}
@@ -111,10 +118,13 @@ jobs:
       - run: chmod +x bundle/bin/* bundle/tools/d006/*
       - name: Check the packages (docs/reference-runner.md, step 7)
         run: |
-          for c in sway wtype wl-paste grim dbus-run-session busctl python3 bc; do
+          for c in sway wtype wl-paste grim dbus-run-session busctl python3 eglinfo; do
             command -v "$c" >/dev/null || { echo "::error::$c is missing on the NUC: owner installs the packages in docs/reference-runner.md step 7"; exit 1; }
           done
           python3 -c 'import gi; gi.require_version("Atspi","2.0")'
+          for p in libgl1-mesa-dri libegl1 fonts-dejavu-core mesa-utils; do
+            dpkg -s "$p" >/dev/null 2>&1 || { echo "::error::package $p is missing on the NUC (docs/reference-runner.md step 7)"; exit 1; }
+          done
       - name: Measure
         shell: bash
         run: |
