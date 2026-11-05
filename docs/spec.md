@@ -1,6 +1,6 @@
 # OS Project Specification
 
-Last updated: 2026-11-03 · Owner: Jens Thomae
+Last updated: 2026-11-05 · Owner: Jens Thomae
 
 The single source of truth for what we are building, why, and how agents work on it. If code, a task or a conversation disagrees with this spec, the spec wins until it is changed.
 
@@ -28,13 +28,14 @@ Non-negotiable rules:
 
 We are building a Linux-based desktop OS that looks as considered as macOS, feels instant, and is fully owned by its user. Linux has a small user base and a large app gap, so the OS must win on feel, trust and integration rather than app count.
 
-The five priorities guide every decision. They are not strictly ranked, but when two conflict in practice, prefer them in this order:
+The six priorities guide every decision. They are not strictly ranked, but when two conflict in practice, prefer them in this order:
 
 1. **Performance and stability.** A beautiful design that lags or glitches destroys trust. Nothing ships that misses the budgets in section 7.
 2. **Beautiful design that feels good.** Design follows the design system. Legibility beats spectacle.
 3. **Familiar, with something new.** Windows, macOS and mobile users are productive in minutes. New ideas are added alongside familiar ones, never in place of them.
-4. **Integration.** Shell and native apps form one product, built on one toolkit and one design system.
-5. **Ownership and customisation.** Users can change anything. The OS warns but does not block, and warnings can be turned off.
+4. **AI integration, with the user in control.** Users can build their own apps with an assistant, and assistants can operate every system feature and app through standard interfaces (C12). This should make the computer easier for everyone, disabled or not. Safety and privacy come first: assistants cannot easily do harm, and nothing leaves the machine without the user knowing.
+5. **Integration.** Shell and native apps form one product, built on one toolkit and one design system.
+6. **Ownership and customisation.** Users can change anything. The OS warns but does not block, and warnings can be turned off.
 
 Positioning in one line: your computer — no account, no ads, no telemetry, nothing that breaks on update.
 
@@ -54,6 +55,7 @@ Version 1 is a daily-drivable desktop for laptops and desktops on a short list o
 - Declarative configuration, design-token theming and a versioned extension API.
 - Phone integration via the KDE Connect protocol.
 - A first-run flow with layout presets and no account requirement.
+- Agent integration (C12): system features and native apps expose their actions through MCP, with a permission broker, action log, stop switch and warnings for cloud models.
 
 **Out of scope for v1 (non-goals)**
 
@@ -64,17 +66,18 @@ Version 1 is a daily-drivable desktop for laptops and desktops on a short list o
 - An X11 session. Legacy X11 apps run through Xwayland.
 - First-class Android apps. Waydroid may be offered later as experimental.
 - Our own browser, office suite, mail client or cloud service.
+- A production voice assistant. A local voice assistant follows once local models are reliable enough; an experimental version may ship earlier.
 
 ## 4. Architecture
 
-The OS is five layers. Everything a user sees is built on one UI toolkit, and everything runs on a signed, read-only base image. Component IDs (C1–C11) match section 6 and are used on every task card.
+The OS is five layers. Everything a user sees is built on one UI toolkit, and everything runs on a signed, read-only base image. Component IDs (C1–C12) match section 6 and are used on every task card.
 
 | Layer (top to bottom) | Components |
 | --- | --- |
 | Apps | C5 Native apps (Files, Editor, Terminal…) · C7 Software (Flatpak, web, Windows tiers) · Third-party apps (GTK, Qt, Electron, Wine) |
 | Experience | C3 Shell (dock, palette, overview) · C6 Search and indexer (apps, files, settings) · C8 Settings (config, tokens, plugins) |
 | Toolkit | C4 UI toolkit and SDK: one design system for shell and native apps, accessibility, agent-ready docs |
-| System | C2 Compositor (Wayland, 3 window modes) · C10 Privacy (portals and permissions) · C9 Connectivity (Wi-Fi, Bluetooth, phone) |
+| System | C2 Compositor (Wayland, 3 window modes) · C10 Privacy (portals and permissions) · C9 Connectivity (Wi-Fi, Bluetooth, phone) · C12 Agent integration (MCP, permission broker) |
 | Base | C1 Base OS image and updates: signed read-only image, atomic updates, rollback; Linux, systemd, PipeWire, Flatpak |
 
 Third-party apps are not built on our toolkit; they run through Flatpak and are themed to look close to native. The installer and first run (C11) sit outside these layers.
@@ -95,6 +98,8 @@ This log records every architectural decision and its status. **Decided** entrie
 | D-008 | Base image technology: bootc or systemd-sysupdate; base distribution | Open | Needs a short comparison spike |
 | D-009 | Implementation language for system components, native apps included: Rust | Decided | Memory safety, matches iced, Slint and COSMIC. Third-party crates are approved case by case. See `docs/decisions/D-009-rust.md` |
 | D-010 | Configuration format: TOML or KDL | Proposed | Human-editable and diff-friendly |
+| D-011 | Agent interface standard: Model Context Protocol (MCP) | Decided | The standard most AI apps and models already use, so our assistant and third-party agents can control the system and other apps the same way. How the OS maps onto MCP is written up in Phase 0 |
+| D-012 | Assistant permission and safety model | Open | Decide early in Phase 1. Must cover capabilities per assistant, confirmations, sandboxing, action log, stop switch and data leaving the machine (C10, C12) |
 
 ## 6. Component specifications
 
@@ -128,6 +133,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 - One toolkit for shell and native apps (decision D-006).
 - Implements every component and token in the design system.
 - Accessibility through AccessKit: screen reader, keyboard navigation, high contrast. Accessibility gaps block release.
+- The accessibility tree is complete (every control has a role and name), because assistants use it as the fallback way to operate apps (C12).
 - Documentation written for humans and agents: an llms.txt file, the full API as Markdown, one runnable example per widget.
 - A headless inspection and screenshot-test harness so agents can verify UI changes themselves.
 - Matching themes for GTK and Qt apps so third-party apps look close to native.
@@ -167,11 +173,24 @@ Each component has a short ID used on task cards, a purpose and its hard require
 - No telemetry by default; any future diagnostics are opt-in and anonymous.
 - Camera, microphone, screen capture, location and file access go through portals with clear prompts.
 - A Privacy page in Settings lists every permission granted to every app.
+- Cloud models are opt-in per provider and show a clear warning when turned on. Local models are the default.
+- Before data goes to a cloud model, the user sees what will be sent. Sensitive data (passwords, files in protected folders, screen contents) needs confirmation every time.
 
 ### C11 Installer and first run
 
 - Installation in under 10 minutes with encryption on by default.
 - First run: language, Wi-Fi, layout preset, accent colour, optional import of Windows user folders. No account required.
+
+### C12 Agent integration
+
+- System features (settings, files, windows, notifications, search, connectivity) and native apps expose their actions as MCP servers (D-011). Third-party apps that speak MCP plug in the same way.
+- Apps without MCP can be operated through their accessibility tree (C4), under the same permissions.
+- A permission broker (D-012) gives each assistant only the capabilities the user granted. Destructive, irreversible or outbound actions need confirmation every time.
+- Users may relax confirmations per assistant. There is no global off switch, and data leaving the machine always needs confirmation.
+- Assistants run sandboxed, with no root or unrestricted shell access by default.
+- An indicator shows while an assistant acts; an action log records everything it did; one stop switch halts all assistants; the Privacy page lists each assistant and its permissions.
+- Users can build their own apps with an assistant on the toolkit and SDK; those apps get the same agent interface and permissions as native apps.
+- A local voice assistant follows after v1, once local models are reliable enough; an experimental version may ship earlier.
 
 ## 7. Quality budgets
 
@@ -200,9 +219,9 @@ Work runs in five phases. A phase ends only when its gate is met and the owner s
 | Phase | Contents | Exit gate |
 | --- | --- | --- |
 | 0 · Foundations | Decide toolkit, COSMIC relationship, base image (D-006 to D-008). Repo, CI, budget harness, board set up | D-006 to D-008 decided; CI measures budgets |
-| 1 · Bootable base | Signed image with updates and rollback, compositor, installer. Minimal shell: dock-taskbar, launcher, control centre | Boots and updates on the reference hardware |
+| 1 · Bootable base | Signed image with updates and rollback, compositor, installer. Minimal shell: dock-taskbar, launcher, control centre. Assistant safety model (D-012) | Boots and updates on the reference hardware |
 | 2 · Core experience | Full shell, command palette, three window modes. Files, Settings, Terminal, Text Editor on the toolkit | Owner daily-drives it for two weeks |
-| 3 · App suite and software | Remaining v1 apps, Software app, search and indexer. Phone integration, privacy page, first-run flow | Every v1 feature works; zero known crashers |
+| 3 · App suite and software | Remaining v1 apps, Software app, search and indexer. Phone integration, privacy page, first-run flow, agent integration (C12) | Every v1 feature works; zero known crashers |
 | 4 · Public beta | Extension API, theming, certified hardware list. Public docs and SDK for third-party developers | Release checklist met; public beta ships |
 
 The order follows the main risk: decide the foundations first, then prove a bootable, updatable system before investing in the app suite.
@@ -324,3 +343,8 @@ Use these terms exactly, in code, docs and cards, so agents don't drift into syn
 | Card | One task on the board (a GitHub issue); branches use its number, such as T-142 |
 | Budget | A measurable quality limit from section 7 that blocks release if missed |
 | Owner | The project lead, who approves decisions and accepts work |
+| Assistant | An AI agent that acts for the user on the running OS, local or cloud. Not the agents that build this project |
+| Agent interface | The MCP servers through which system features and apps expose their actions to assistants (C12) |
+| Permission broker | The system service that grants, checks and confirms what each assistant may do (D-012) |
+| Action log | The user-visible record of every action an assistant took |
+| Stop switch | The single control that halts all assistants at once |
