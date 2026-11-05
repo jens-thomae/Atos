@@ -1,0 +1,16 @@
+[package]
+name = "d006-iced"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+
+[dependencies]
+# Local time for the Modified column; already a libcosmic dependency (same 0.2 line).
+jiff = "0.2"
+# D-006 brief §2: exact revision, default features (a11y included).
+libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f" }
+iced_accessibility = { git = "https://github.com/pop-os/libcosmic", rev = "daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f" }
+
+# Own workspace: spikes stay out of the main one (root Cargo.toml), also from a worktree.
+[workspace]

@@ -1,0 +1,32 @@
+=== 15:41:10 cargo check --offline
+    Checking d006-iced v0.0.0 (/home/jens.guest/agent-test/iced2/app)
+error[E0599]: no method named `iter` found for reference `&cosmic::iced::widget::list::Content<Entry>` in the current scope
+   --> src/main.rs:288:42
+    |
+288 |         let items: Vec<&Entry> = content.iter().map(|(_, e)| e).collect();
+    |                                          ^^^^ method not found in `&cosmic::iced::widget::list::Content<Entry>`
+
+error[E0515]: cannot return value referencing local variable `labels`
+   --> src/main.rs:858:9
+    |
+791 |             labels
+    |             ------ `labels` is borrowed here
+...
+858 |         pop.into()
+    |         ^^^^^^^^^^ returns a value referencing data owned by the current function
+
+Some errors have detailed explanations: E0515, E0599.
+For more information about an error, try `rustc --explain E0515`.
+error: could not compile `d006-iced` (bin "d006-iced") due to 2 previous errors
+=== 15:41:18 cargo check --offline
+    Checking d006-iced v0.0.0 (/home/jens.guest/agent-test/iced2/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+=== 15:41:24 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced2/app)
+    Finished `release` profile [optimized] target(s) in 14.29s
+=== 15:43:43 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced2/app)
+    Finished `release` profile [optimized] target(s) in 13.28s
+=== 15:44:37 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced2/app)
+    Finished `release` profile [optimized] target(s) in 13.23s

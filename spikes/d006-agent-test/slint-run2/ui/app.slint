@@ -1,0 +1,470 @@
+// D-006 Files prototype (brief: docs/decisions/D-006-prototype-brief.md §3).
+import { Button, LineEdit, Palette, StandardListView, StandardTableView, StyleMetrics } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "Files";
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    forward-focus: table;
+
+    in property <string> path;
+    in property <bool> at-root;
+    in property <[[StandardListViewItem]]> rows;
+    in property <string> error;
+    in property <string> prop-name;
+    in property <string> prop-path;
+    in property <string> prop-size;
+    in property <string> prop-modified;
+
+    in property <[string]> tab-labels;
+    in property <int> current-tab;
+    out property <int> current-row: table.current-row;
+    in property <[StandardListViewItem]> rename-preview;
+    in property <string> rename-conflict;
+    in property <bool> rename-ok;
+    in-out property <string> find-text;
+    in-out property <string> replace-text;
+
+    callback new-tab();
+    callback close-tab();
+    callback switch-tab(int);
+    callback step-tab(int);
+    callback rename-edited(string, string);
+    callback do-rename(string, string);
+    callback open-rename();
+    callback activate-place(int);
+    callback up();
+    callback open-row(int);
+    callback row-left-down(int);
+    callback path-of(int) -> string;
+    callback fill-properties(int);
+    callback autoscroll-done();
+    callback menu-opened();
+
+    // Which Tab stop has focus: 0 sidebar, 1 Up button, 2 list. StandardTableView
+    // reports no focus state, so the app tracks it to draw the list's focus border.
+    property <int> zone: 2;
+    property <int> menu-row: -1;
+
+    public function show-properties() {
+        properties.show();
+    }
+
+    public function show-rename() {
+        rename-dialog.show();
+    }
+
+    public function close-rename() {
+        rename-dialog.close();
+        focus-zone(2);
+    }
+
+    public function restore-row(row: int) {
+        if row >= 0 && rows.length > 0 {
+            table.set-current-row(min(rows.length - 1, row));
+        }
+    }
+
+    public function reset-view() {
+        table.current-row = -1;
+        table.content-y = 0;
+    }
+
+    function focus-zone(z: int) {
+        zone = z;
+        if z == 0 {
+            places.focus();
+            places.set-current-item(0);
+        } else if z == 1 {
+            up-button.focus();
+        } else {
+            table.focus();
+        }
+    }
+
+    function next-zone(step: int) -> int {
+        let z = mod(zone + step + 3, 3);
+        // Up is disabled at "/", so it is skipped.
+        if z == 1 && at-root { return mod(z + step + 3, 3); }
+        z
+    }
+
+    // Page size in rows and header height, derived from the table's public geometry.
+    property <length> row-height: rows.length > 0 ? table.content-height / rows.length : 1px;
+    property <int> page: max(1, floor(table.visible-height / row-height));
+
+    function select(row: int) {
+        table.set-current-row(max(0, min(rows.length - 1, row)));
+    }
+
+    function show-menu(row: int, at: Point) {
+        menu-row = row;
+        menu.show(at);
+        menu-opened();
+    }
+
+    // Autoscroll (D006_AUTOSCROLL=1): driven by animation-tick(), Slint's per-frame clock.
+    property <bool> autoscrolling;
+    property <duration> autoscroll-start;
+    property <duration> autoscroll-elapsed: autoscrolling ? animation-tick() - autoscroll-start : 0;
+    public function start-autoscroll() {
+        autoscroll-start = animation-tick();
+        autoscrolling = true;
+    }
+    changed autoscroll-elapsed => {
+        if !autoscrolling { return; }
+        let end = max(0px, table.content-height - table.visible-height);
+        table.content-y = -min(end, autoscroll-elapsed / 1s * 2000px);
+        if autoscroll-elapsed >= 10s || -table.content-y >= end {
+            autoscrolling = false;
+            autoscroll-done();
+        }
+    }
+
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+
+        capture-key-pressed(event) => {
+            if event.modifiers.control && event.text.to-lowercase() == "t" && !event.modifiers.shift {
+                new-tab();
+                focus-zone(2);
+                return accept;
+            }
+            if event.modifiers.control && event.text.to-lowercase() == "w" {
+                close-tab();
+                focus-zone(2);
+                return accept;
+            }
+            if event.modifiers.control && (event.text == Key.Tab || event.text == Key.Backtab) {
+                step-tab(event.text == Key.Backtab || event.modifiers.shift ? -1 : 1);
+                focus-zone(2);
+                return accept;
+            }
+            if event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift) {
+                focus-zone(next-zone(-1));
+                return accept;
+            }
+            if event.text == Key.Tab {
+                focus-zone(next-zone(1));
+                return accept;
+            }
+            reject
+        }
+
+        HorizontalLayout {
+            FocusScope {
+                focus-on-click: false;
+                focus-on-tab-navigation: false;
+                width: 200px;
+                key-pressed(event) => {
+                    if event.text == Key.Return && places.current-item >= 0 {
+                        activate-place(places.current-item);
+                        return accept;
+                    }
+                    reject
+                }
+
+                places := StandardListView {
+                    width: 100%;
+                    height: 100%;
+                    accessible-label: "Places";
+                    model: [{ text: "Home" }, { text: "File system" }, { text: "Start folder" }];
+                    item-pointer-event(item, event, position) => {
+                        if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                            zone = 0;
+                            activate-place(item);
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                Rectangle {
+                    vertical-stretch: 0;
+                    height: 32px;
+                    accessible-role: tab-list;
+                    accessible-label: "Tabs";
+
+                    HorizontalLayout {
+                        alignment: start;
+                        for label[i] in tab-labels: Rectangle {
+                            min-width: 100px;
+                            max-width: 200px;
+                            background: i == current-tab ? Palette.accent-background : Palette.alternate-background;
+                            accessible-role: tab;
+                            accessible-label: label;
+                            accessible-checkable: true;
+                            accessible-checked: i == current-tab;
+                            accessible-action-default => { switch-tab(i); focus-zone(2); }
+
+                            Text {
+                                text: label;
+                                overflow: elide;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                color: i == current-tab ? Palette.accent-foreground : Palette.foreground;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    switch-tab(i);
+                                    focus-zone(2);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    vertical-stretch: 0;
+                    Text {
+                        text: path;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    up-button := Button {
+                        text: "Up";
+                        enabled: !at-root;
+                        horizontal-stretch: 0;
+                        clicked => {
+                            zone = 1;
+                            up();
+                        }
+                    }
+                }
+
+                FocusScope {
+                    focus-on-click: false;
+                    focus-on-tab-navigation: false;
+                    vertical-stretch: 1;
+
+                    capture-key-pressed(event) => {
+                        let row = table.current-row;
+                        if event.text == Key.PageDown {
+                            select(row + page);
+                        } else if event.text == Key.PageUp {
+                            select(row - page);
+                        } else if event.text == Key.Home {
+                            select(0);
+                        } else if event.text == Key.End {
+                            select(rows.length - 1);
+                        } else if event.text == Key.Return && row >= 0 {
+                            open-row(row);
+                        } else if event.text == Key.Backspace || (event.text == Key.UpArrow && event.modifiers.alt) {
+                            up();
+                        } else if event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift) {
+                            if row >= 0 {
+                                show-menu(row, { x: 24px, y: table.height - table.visible-height + table.content-y + (row + 1) * row-height });
+                            }
+                        } else {
+                            return reject;
+                        }
+                        accept
+                    }
+
+                    // The toolkit opens it on right-click and the Menu key; both are handled
+                    // above and in row-pointer-event instead, so it is disabled here.
+                    menu := ContextMenuArea {
+                        width: 100%;
+                        height: 100%;
+                        enabled: false;
+                        Menu {
+                            MenuItem {
+                                title: "Open";
+                                activated => { open-row(menu-row); }
+                            }
+                            MenuItem {
+                                title: "Copy Path";
+                                activated => {
+                                    clipboard.text = path-of(menu-row);
+                                    clipboard.select-all();
+                                    clipboard.copy();
+                                }
+                            }
+                            MenuItem {
+                                title: "Rename…";
+                                activated => { open-rename(); }
+                            }
+                            MenuItem {
+                                title: "Properties";
+                                // The app shows the dialog once the menu has closed, since closing
+                                // the menu moves focus back to the list.
+                                activated => { fill-properties(menu-row); }
+                            }
+                        }
+
+                        table := StandardTableView {
+                            width: 100%;
+                            height: 100%;
+                            accessible-label: "Files";
+                            columns: [{ title: "Name", horizontal-stretch: 1 }, { title: "Size", min-width: 120px }, { title: "Modified", min-width: 160px }];
+                            rows: rows;
+                            row-pointer-event(row, event, position) => {
+                                zone = 2;
+                                if event.kind != PointerEventKind.down { return; }
+                                if event.button == PointerEventButton.left {
+                                    row-left-down(row);
+                                } else if event.button == PointerEventButton.right {
+                                    table.focus();
+                                    table.set-current-row(row);
+                                    show-menu(row, position);
+                                }
+                            }
+                        }
+                    }
+
+                    if error != "": Text {
+                        text: error;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    // StandardTableView draws no focus indicator; this uses the toolkit palette.
+                    if zone == 2: Rectangle {
+                        border-width: 2px;
+                        border-color: Palette.accent-background;
+                    }
+                }
+            }
+        }
+    }
+
+    // The toolkit has no clipboard API; TextInput.copy() is its only way to set it.
+    clipboard := TextInput {
+        visible: false;
+        width: 0;
+        height: 0;
+    }
+
+    properties := PopupWindow {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        close-policy: no-auto-close;
+        forward-focus: close-button;
+
+        // Swallows clicks outside the dialog: it is modal.
+        TouchArea { }
+
+        FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    properties.close();
+                    focus-zone(2);
+                    return accept;
+                }
+                reject
+            }
+
+            Rectangle {
+                width: 480px;
+                height: dialog.preferred-height;
+                background: Palette.background;
+                border-width: 1px;
+                border-color: Palette.border;
+                accessible-role: groupbox;
+                accessible-label: "Properties";
+
+                dialog := VerticalLayout {
+                    padding: StyleMetrics.layout-padding;
+                    spacing: StyleMetrics.layout-spacing;
+                    Text { text: "Properties"; }
+                    Text { text: "Name: " + prop-name; wrap: word-wrap; }
+                    Text { text: "Path: " + prop-path; wrap: word-wrap; }
+                    Text { text: "Size: " + prop-size; }
+                    Text { text: "Modified: " + prop-modified; }
+                    HorizontalLayout {
+                        alignment: end;
+                        close-button := Button {
+                            text: "Close";
+                            clicked => {
+                                properties.close();
+                                focus-zone(2);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    rename-dialog := PopupWindow {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        close-policy: no-auto-close;
+        forward-focus: find-edit;
+
+        TouchArea { }
+
+        FocusScope {
+            capture-key-pressed(event) => {
+                if event.text == Key.Escape {
+                    close-rename();
+                    return accept;
+                }
+                reject
+            }
+
+            Rectangle {
+                width: 560px;
+                height: rename-layout.preferred-height;
+                background: Palette.background;
+                border-width: 1px;
+                border-color: Palette.border;
+                accessible-role: groupbox;
+                accessible-label: "Batch Rename";
+
+                rename-layout := VerticalLayout {
+                    padding: StyleMetrics.layout-padding;
+                    spacing: StyleMetrics.layout-spacing;
+                    Text { text: "Batch Rename"; }
+                    Text { text: "Find"; }
+                    find-edit := LineEdit {
+                        text <=> find-text;
+                        accessible-label: "Find";
+                        edited(text) => { rename-edited(find-text, replace-text); }
+                        accepted(text) => { if rename-ok { do-rename(find-text, replace-text); } }
+                    }
+                    Text { text: "Replace with"; }
+                    LineEdit {
+                        text <=> replace-text;
+                        accessible-label: "Replace with";
+                        edited(text) => { rename-edited(find-text, replace-text); }
+                        accepted(text) => { if rename-ok { do-rename(find-text, replace-text); } }
+                    }
+                    StandardListView {
+                        height: 200px;
+                        accessible-label: "Preview";
+                        model: rename-preview;
+                    }
+                    Text {
+                        text: rename-conflict;
+                        color: Palette.accent-background;
+                        wrap: word-wrap;
+                        accessible-label: rename-conflict;
+                    }
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: StyleMetrics.layout-spacing;
+                        Button {
+                            text: "Cancel";
+                            clicked => { close-rename(); }
+                        }
+                        Button {
+                            text: "Rename";
+                            enabled: rename-ok;
+                            clicked => { do-rename(find-text, replace-text); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

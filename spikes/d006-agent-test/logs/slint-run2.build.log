@@ -1,0 +1,59 @@
+=== 15:48:59 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint2/app)
+error: failed to run custom build command for `d006-slint v0.0.0 (/home/jens.guest/agent-test/slint2/app)`
+
+Caused by:
+  process didn't exit successfully: `/home/jens.guest/agent-test/target-slint/release/build/d006-slint-f630c9aff354b7d1/build-script-build` (exit status: 101)
+  --- stderr
+  error: Unknown property accessible-selectable in Rectangle
+     --> /home/jens.guest/agent-test/slint2/app/ui/app.slint:197:29
+      |
+  197 | ...                   accessible-selectable: true;
+      |                       ^^^^^^^^^^^^^^^^^^^^^
+      |
+  error: Unknown property accessible-selected in Rectangle
+     --> /home/jens.guest/agent-test/slint2/app/ui/app.slint:198:29
+      |
+  198 | ...                   accessible-selected: i == current-tab;
+      |                       ^^^^^^^^^^^^^^^^^^^
+
+  thread 'main' (951396) panicked at build.rs:2:42:
+  called `Result::unwrap()` on an `Err` value: CompileError(["/home/jens.guest/agent-test/slint2/app/ui/app.slint:197: Unknown property accessible-selectable in Rectangle", "/home/jens.guest/agent-test/slint2/app/ui/app.slint:198: Unknown property accessible-selected in Rectangle"])
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+=== 15:49:04 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint2/app)
+error[E0502]: cannot borrow `s` as immutable because it is also borrowed as mutable
+   --> src/main.rs:264:20
+    |
+264 |             s.tabs[s.active].row = ui.get_current_row();
+    |             -     -^--------
+    |             |     ||
+    |             |     |immutable borrow occurs here
+    |             |     mutable borrow later used here
+    |             mutable borrow occurs here
+    |
+help: try adding a local storing this...
+   --> src/main.rs:264:20
+    |
+264 |             s.tabs[s.active].row = ui.get_current_row();
+    |                    ^^^^^^^^
+help: ...and then using that local here
+   --> src/main.rs:264:19
+    |
+264 |             s.tabs[s.active].row = ui.get_current_row();
+    |                   ^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0502`.
+error: could not compile `d006-slint` (bin "d006-slint") due to 1 previous error
+=== 15:49:12 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint2/app)
+    Finished `release` profile [optimized] target(s) in 11.04s
+=== 15:49:41 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint2/app)
+    Finished `release` profile [optimized] target(s) in 10.88s
+=== 15:50:08 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint2/app)
+    Finished `release` profile [optimized] target(s) in 10.51s
+=== 15:50:37 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint2/app)
+    Finished `release` profile [optimized] target(s) in 10.58s
