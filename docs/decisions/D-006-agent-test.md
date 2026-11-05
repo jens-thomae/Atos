@@ -18,7 +18,9 @@ Card: #13 · Run: 2026-11-05 · Method: [`D-006-prototype-brief.md` §8](D-006-p
 
 Every number in the table comes from [section 4](#4-per-run-results). Runs alternated libcosmic, Slint, libcosmic, Slint, libcosmic, Slint.
 
-What the failed check was. In all three libcosmic runs, both features worked and checks 1 to 6 passed. Check 7 (the new controls appear in the AT-SPI tree with names equal to their labels) failed because the AT-SPI tree of the libcosmic app is empty (`frame ''` with no children), before and after the change. This was already recorded for the unmodified prototype in #10's README. Run 2 and run 3 set accessible names in code (button `.name()`, a wrapper widget, see [section 4](#4-per-run-results)); the names cannot be observed through AT-SPI at this revision. All three agents reached the same diagnosis independently: the iced winit layer creates the AT-SPI adapter but never publishes the widget tree, and libcosmic's `text_input` and `segmented_button` have no accessibility nodes. None of them could fix that from application code.
+**Read the libcosmic completion count with this in mind.** Check 7 already failed on the unmodified libcosmic prototype before any agent touched it (#10, `spikes/d006-iced/README.md`, "Accessibility"). So libcosmic's 0 of 3 says nothing about agent skill. The informative columns are checks 1 to 6 (6 of 6 in every run of both toolkits), compile-error iterations, wrong-API attempts and wall time.
+
+What the failed check was. In all three libcosmic runs, both features worked and checks 1 to 6 passed. Check 7 (the new controls appear in the AT-SPI tree with names equal to their labels) failed because the AT-SPI tree of the libcosmic app is empty (`frame ''` with no children), before and after the change. `org.a11y.Status ScreenReaderEnabled` was `true` during the checks (read back; setting it explicitly gave the same result, see [`checks/README.md`](../../spikes/d006-agent-test/checks/README.md)). This was already recorded for the unmodified prototype in #10's README. Run 2 and run 3 set accessible names in code (button `.name()`, a wrapper widget, see [section 4](#4-per-run-results)); the names cannot be observed through AT-SPI at this revision. All three agents reached the same diagnosis independently: the iced winit layer creates the AT-SPI adapter but never publishes the widget tree, and libcosmic's `text_input` and `segmented_button` have no accessibility nodes. None of them could fix that from application code.
 
 ## 2. Setup actually used
 
@@ -104,6 +106,8 @@ Read these before using any number above.
 10. **Model ID.** See [section 2](#2-setup-actually-used).
 
 ## 7. Where the code is
+
+The acceptance-check helpers (desktop start, AT-SPI dump, key sequences, build log wrapper) are in [`spikes/d006-agent-test/checks/`](../../spikes/d006-agent-test/checks/).
 
 The extended source (everything the agents changed or added, plus `Cargo.toml` and `Cargo.lock`, no build output) is on this PR branch only and is not merged into the prototypes:
 
