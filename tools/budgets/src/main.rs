@@ -1,11 +1,14 @@
 //! Launches an app and checks it against the §7 budgets. Linux only (reads `/proc`).
 //!
-//! Usage: `budgets <app> [--cpu-window <seconds>|full]` (`full` is the §7 window)
+//! Usage: `budgets <app> [--cpu-window <seconds>|full] [--json <file>]` (`full` is the §7 window)
 //!
-//! Prints a Markdown results table on stdout and exits with 1 if a budget is breached,
-//! 2 if it could not measure.
+//! Prints a Markdown results table on stdout, writes the raw results to `--json` if given,
+//! and exits with 1 if a budget is breached, 2 if it could not measure.
+//!
+//! `budgets compare <previous.json> <current.json> <threshold-percent>` prints a comparison
+//! table and exits with 1 if a metric got worse by more than that percentage of its budget.
 
-use budgets::{FIRST_FRAME_MARKER, limits, parse_cpu_ticks, parse_vm_rss_mb};
+use budgets::{FIRST_FRAME_MARKER, limits, parse_cpu_ticks, parse_vm_rss_mb, results_json};
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::mpsc;
@@ -31,19 +34,34 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<bool, String> {
-    let mut args = env::args().skip(1);
-    let usage = "usage: budgets <app> [--cpu-window <seconds>|full]";
-    let app = args.next().ok_or(usage)?;
-    let cpu_window = match (args.next().as_deref(), args.next()) {
-        (None, _) => 10,
-        (Some("--cpu-window"), Some(s)) if s == "full" => limits::IDLE_CPU_WINDOW_S,
-        (Some("--cpu-window"), Some(s)) => s.parse().map_err(|_| usage)?,
-        _ => return Err(usage.into()),
-    };
+    let args: Vec<String> = env::args().skip(1).collect();
+    let usage = "usage: budgets <app> [--cpu-window <seconds>|full] [--json <file>]\n       \
+                 budgets compare <previous.json> <current.json> <threshold-percent>";
+    if let [cmd, previous, current, threshold] = &args[..]
+        && cmd == "compare"
+    {
+        let read = |p: &str| fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"));
+        let threshold = threshold.parse().map_err(|_| usage)?;
+        let (table, regressed) = budgets::compare(&read(previous)?, &read(current)?, threshold)?;
+        print!("{table}");
+        return Ok(!regressed);
+    }
+    let (app, options) = args.split_first().ok_or(usage)?;
+    let (mut cpu_window, mut json_path) = (10, None);
+    for pair in options.chunks(2) {
+        match pair {
+            [flag, s] if flag == "--cpu-window" && s == "full" => {
+                cpu_window = limits::IDLE_CPU_WINDOW_S
+            }
+            [flag, s] if flag == "--cpu-window" => cpu_window = s.parse().map_err(|_| usage)?,
+            [flag, path] if flag == "--json" => json_path = Some(path),
+            _ => return Err(usage.into()),
+        }
+    }
     let cpu_window = Duration::from_secs(cpu_window);
 
     let start = Instant::now();
-    let mut child = Command::new(&app)
+    let mut child = Command::new(app)
         .stdout(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot start {app}: {e}"))?;
@@ -51,6 +69,26 @@ fn run() -> Result<bool, String> {
     let _ = child.kill();
     let _ = child.wait();
     let (cold_start_ms, rss_mb, cpu_percent) = result?;
+
+    if let Some(path) = json_path {
+        // Name the environment with the numbers (D-006 brief §6).
+        let cpu = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+        let cpu = cpu
+            .lines()
+            .find_map(|l| l.strip_prefix("model name")?.split_once(':'));
+        let kernel = fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+        let info = [
+            ("app", app.as_str()),
+            ("cpu", cpu.map_or("unknown", |(_, m)| m.trim())),
+            ("kernel", kernel.trim()),
+        ];
+        let json = results_json(
+            &info,
+            cpu_window.as_secs(),
+            [cold_start_ms, rss_mb, cpu_percent],
+        );
+        fs::write(path, json).map_err(|e| format!("cannot write {path}: {e}"))?;
+    }
 
     let rows = [
         (
