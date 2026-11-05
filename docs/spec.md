@@ -93,13 +93,14 @@ This log records every architectural decision and its status. **Decided** entrie
 | D-003 | Apps distributed as Flatpak, Flathub as default remote | Decided | The de facto Linux app store; sandboxing and portals for permissions |
 | D-004 | Customisation only through config, tokens and defined extension points; no shell monkey-patching | Decided | Prevents the GNOME-extension breakage problem |
 | D-005 | No account required, no telemetry by default | Decided | Core positioning against Windows 11 |
-| D-006 | Primary UI toolkit: iced/libcosmic or Slint | Open | Resolve by prototyping Files in each candidate, with no fixed timeline; the owner may add more candidates. Measure frame time, memory, accessibility and agent productivity |
+| D-006 | Primary UI toolkit: iced/libcosmic or Slint | Open | Resolve by prototyping Files in each candidate, with no fixed timeline; the owner may add more candidates. Measure frame time, memory, accessibility and agent productivity. Owner direction (2026-11-05): choose Slint if it passes the GPU gates G1–G5 on the reference hardware; otherwise follow the outcomes in `docs/decisions/D-006-toolkit.md` §4.2. Shell share of the idle memory budget: 300 MB, single-process shell |
 | D-007 | Fork cosmic-comp (renamed) as the base of C2; C3–C5 are our own code on the D-006 toolkit; no upstream contributions | Decided | Best starting point for a solid compositor, with freedom to change anything. COSMIC does not accept AI-written contributions, and hand-written ones are not an option. C2 is GPL-3.0-only, which the owner accepts. See `docs/decisions/D-007-cosmic-relationship.md` |
 | D-008 | Base image technology: bootc or systemd-sysupdate; base distribution | Open | Needs a short comparison spike |
 | D-009 | Implementation language for system components, native apps included: Rust | Decided | Memory safety, matches iced, Slint and COSMIC. Third-party crates are approved case by case. See `docs/decisions/D-009-rust.md` |
 | D-010 | Configuration format: TOML or KDL | Proposed | Human-editable and diff-friendly |
 | D-011 | Agent interface standard: Model Context Protocol (MCP) | Decided | The standard most AI apps and models already use, so our assistant and third-party agents can control the system and other apps the same way. How the OS maps onto MCP is written up in Phase 0 |
 | D-012 | Assistant permission and safety model | Open | Decide early in Phase 1. Must cover capabilities per assistant, confirmations, sandboxing, action log, stop switch and data leaving the machine (C10, C12) |
+| D-013 | Licensing: our own source is MIT OR Apache-2.0. Shipped binaries carry the licence their dependencies require: C2 is GPL-3.0-only (D-007); if D-006 picks Slint, binaries that link it are GPL-3.0-only | Decided | Keeps our code free to move to another toolkit and leaves third parties free to ship closed-source apps on our SDK under their own Slint licence |
 
 ## 6. Component specifications
 
