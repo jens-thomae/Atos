@@ -39,10 +39,15 @@ provision:
       #   weston-simple-shm and weston-screenshooter.
       # at-spi2-core, gir1.2-atspi-2.0, python3-gi: AT-SPI bus and the tree dump in smoke.sh.
       # zenity: a small GTK app that exposes an accessibility tree.
+      # sway, wtype, wl-clipboard, grim: headless compositor with virtual-keyboard support, key
+      #   injection, clipboard and screenshots for the D-006 measurements (tools/d006, #12).
+      # libfontconfig-dev, libxkbcommon-dev: build dependencies of the D-006 prototypes.
+      # bc: build-time arithmetic in tools/d006/m9-build.sh.
       apt-get update
       apt-get install -y --no-install-recommends \
         build-essential pkg-config curl ca-certificates git \
-        weston at-spi2-core gir1.2-atspi-2.0 python3-gi zenity
+        weston at-spi2-core gir1.2-atspi-2.0 python3-gi zenity \
+        sway wtype wl-clipboard grim libfontconfig-dev libxkbcommon-dev bc
   - mode: user
     script: |
       #!/bin/bash

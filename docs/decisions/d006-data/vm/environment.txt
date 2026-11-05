@@ -1,0 +1,15 @@
+date: 2026-11-05T15:03:00Z
+host: lima-atos-t12
+cpu: -
+cores: 4
+kernel: Linux 6.8.0-142-generic aarch64
+governor: unknown
+os: Ubuntu 24.04.5 LTS
+sway: sway version 1.9
+wtype: 0.4-3
+mesa: 25.2.8-0ubuntu0.24.04.4
+runs: 5  cpu_window: full
+iced: 5c5ad35b7b80e13d  slint: d1566c16875f000e
+output: HEADLESS-1 1920x1080@60Hz scale 1.0
+fixture digest: 184f3d8ea40f1ef1a3ec2434cfaffa66d1b1d6e03f95226b0cadf742e723022c  -
+egl: OpenGL ES profile renderer: llvmpipe (LLVM 20.1.2, 128 bits)   [recorded with eglinfo in the same kind of sway session after the run; the VM run itself did not log it]

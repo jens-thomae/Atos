@@ -1,0 +1,7 @@
+### Budgets: `/tmp/tmp.Zds0zvUvPS/iced-small`
+
+| Metric | Budget | Measured | Result |
+| --- | --- | --- | --- |
+| Cold start to first frame | ≤ 300 ms | 2797 ms | ❌ fail |
+| Idle RSS (5 s after first frame) | ≤ 800 MB | 33.7 MB | ✅ pass |
+| Idle CPU | ≤ 1 % over 30 s | 0.00 % | ✅ pass |

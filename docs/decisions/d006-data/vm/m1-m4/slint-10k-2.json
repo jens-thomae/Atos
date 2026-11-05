@@ -1,0 +1,9 @@
+{
+  "app": "/tmp/tmp.Jzpyoa1BmV/slint-10k",
+  "cpu": "unknown",
+  "kernel": "6.8.0-142-generic",
+  "cpu_window_s": 10,
+  "cold_start_ms": 96.506141,
+  "idle_rss_mb": 152.662016,
+  "idle_cpu_percent": 0
+}

@@ -1,0 +1,5 @@
+BUDGET_FIRST_FRAME
+SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/Ünïcödé.txt
+SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt
+BUDGET_FIRST_FRAME
+SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/10k/item-09999.md
