@@ -1,0 +1,128 @@
+# D-006 spike (#12): measure both Files prototypes (docs/decisions/D-006-measurements.md).
+# One command on the reference hardware: `gh workflow run d006-measure.yml -f nuc=true`
+# (after this file is on main), or add the label `d006-nuc` to a pull request of this repository.
+# The label `d006-measure` measures on a GitHub-hosted runner only (indicative numbers).
+name: D-006 measure
+
+on:
+  workflow_dispatch:
+    inputs:
+      nuc:
+        description: Also measure on the reference NUC (about 1 h 20 min)
+        type: boolean
+        default: true
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  # Nothing compiles on the NUC: build here, measure there.
+  build:
+    # Never for pull requests from forks: their code must not reach the self-hosted runner.
+    # On `labeled`, only the two d006 labels start a run.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       (contains(github.event.pull_request.labels.*.name, 'd006-measure') ||
+        contains(github.event.pull_request.labels.*.name, 'd006-nuc')) &&
+       (github.event.action != 'labeled' || startsWith(github.event.label.name, 'd006-')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfontconfig-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            .
+            spikes/d006-iced
+            spikes/d006-slint
+      - run: cargo build --release --locked -p budgets
+      - run: cargo build --release --locked --manifest-path spikes/d006-iced/Cargo.toml
+      - run: cargo build --release --locked --manifest-path spikes/d006-slint/Cargo.toml
+      # Same layout as the repository, so measure.sh finds the fixture script next to it.
+      - name: Stage the bundle
+        run: |
+          mkdir -p bundle/bin bundle/spikes
+          cp target/release/budgets spikes/d006-iced/target/release/d006-iced spikes/d006-slint/target/release/d006-slint bundle/bin/
+          cp -r tools/d006 bundle/tools-d006 && mkdir -p bundle/tools && mv bundle/tools-d006 bundle/tools/d006
+          cp -r spikes/d006-fixture bundle/spikes/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: d006-bundle
+          path: bundle
+          if-no-files-found: error
+          retention-days: 14
+
+  # Hosted x86_64, software rendering: indicative only (docs/budgets.md).
+  measure-hosted:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: d006-bundle
+          path: bundle
+      - run: chmod +x bundle/bin/* bundle/tools/d006/*
+      # The package list is also in docs/reference-runner.md (step 7).
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core \
+            gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core bc
+      - name: Measure
+        shell: bash
+        # A 30 s idle-CPU window keeps the hosted job short; the NUC job uses the full 5 minutes.
+        env:
+          D006_CPU_WINDOW: "30"
+        run: |
+          bundle/tools/d006/measure.sh bundle/bin/d006-iced bundle/bin/d006-slint bundle/bin/budgets results
+          python3 bundle/tools/d006/summarize.py results | tee -a "$GITHUB_STEP_SUMMARY" >results/summary.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: d006-results-hosted
+          path: results/
+          if-no-files-found: warn
+
+  # Reference hardware. Runs only if `build` succeeded, so the fork rule above covers it.
+  measure-nuc:
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.nuc ||
+      github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'd006-nuc')
+    runs-on: [self-hosted, nuc]
+    timeout-minutes: 120
+    permissions: {}
+    steps:
+      - name: Clean the workspace
+        run: rm -rf bundle results
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: d006-bundle
+          path: bundle
+      - run: chmod +x bundle/bin/* bundle/tools/d006/*
+      - name: Check the packages (docs/reference-runner.md, step 7)
+        run: |
+          for c in sway wtype wl-paste grim dbus-run-session busctl python3 bc; do
+            command -v "$c" >/dev/null || { echo "::error::$c is missing on the NUC: owner installs the packages in docs/reference-runner.md step 7"; exit 1; }
+          done
+          python3 -c 'import gi; gi.require_version("Atspi","2.0")'
+      - name: Measure
+        shell: bash
+        run: |
+          bundle/tools/d006/measure.sh bundle/bin/d006-iced bundle/bin/d006-slint bundle/bin/budgets results
+          python3 bundle/tools/d006/summarize.py results | tee -a "$GITHUB_STEP_SUMMARY" >results/summary.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: d006-results-nuc
+          path: results/
+          if-no-files-found: warn

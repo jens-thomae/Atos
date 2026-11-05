@@ -82,6 +82,24 @@ sudo bash -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc
 2. On the NUC: `systemctl status 'actions.runner.*'` shows `active (running)`, and `ps -o user= -C Runner.Listener` prints `runner`.
 3. Comment on #17 that the runner is online. An agent then adds the `perf` label to the open pull request for one on-demand run, and the next nightly run (01:30 UTC) shows up under **Actions** → **Perf**.
 
+## 7. Packages for the D-006 measurements (#12)
+
+[`.github/workflows/d006-measure.yml`](../.github/workflows/d006-measure.yml) starts the two Files prototypes in a headless sway compositor, injects keys and reads their accessibility trees. That needs, once, as the owner:
+
+```sh
+sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core bc
+```
+
+| Package | Why |
+| --- | --- |
+| `sway`, `wtype` | Headless compositor (pixman software renderer) and key injection |
+| `wl-clipboard`, `grim` | Clipboard check for *Copy Path*, screenshots of the walkthrough |
+| `at-spi2-core`, `gir1.2-atspi-2.0`, `python3-gi` | AT-SPI bus and the tree dump |
+| `libgl1-mesa-dri`, `libegl1`, `fontconfig`, `fonts-dejavu-core` | OpenGL ES through Mesa's software rasteriser (Slint's femtovg renderer) and a font |
+| `dbus-daemon`, `bc` | A private session bus per run; arithmetic in the scripts |
+
+The `runner` user is unprivileged and has no login session, so sway runs with its headless backend and the software renderer, not on the N5105's display. Measurements therefore do not exercise the GPU (see `docs/decisions/D-006-measurements.md`). Run all measurements with `gh workflow run d006-measure.yml -f nuc=true` or the label `d006-nuc` on a pull request; the job takes about 1 h 20 min (idle CPU over the full 5 minutes, 5 runs per prototype).
+
 ## Updates
 
 The runner updates itself when GitHub releases a new version (its default; GitHub stops sending jobs to runners that fall too far behind). The pinned version and checksum above cover the first install. Ubuntu updates are the owner's as usual; a kernel update changes measurements, and the job summary records the kernel for that reason.
