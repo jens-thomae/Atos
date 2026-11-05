@@ -1,0 +1,36 @@
+=== 15:56:04 cargo check --offline
+    Checking d006-iced v0.0.0 (/home/jens.guest/agent-test/iced3/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
+=== 15:56:29 cargo check --offline
+    Checking d006-iced v0.0.0 (/home/jens.guest/agent-test/iced3/app)
+error: expected `,`, found `{`
+   --> src/main.rs:152:50
+    |
+152 |         return Some(format!("Conflict: new name "{new}" {why}."));
+    |                                                  ^ expected `,`
+
+error[E0369]: cannot divide `&str` by `&str`
+   --> src/main.rs:144:24
+    |
+144 |             "contains "/""
+    |             -----------^-- &str
+    |             |
+    |             &str
+
+For more information about this error, try `rustc --explain E0369`.
+error: could not compile `d006-iced` (bin "d006-iced") due to 2 previous errors
+=== 15:56:38 cargo check --offline
+    Checking d006-iced v0.0.0 (/home/jens.guest/agent-test/iced3/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.35s
+=== 15:56:42 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced3/app)
+    Finished `release` profile [optimized] target(s) in 13.89s
+=== 15:58:36 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced3/app)
+    Finished `release` profile [optimized] target(s) in 12.30s
+=== 15:59:13 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced3/app)
+    Finished `release` profile [optimized] target(s) in 12.14s
+=== 15:59:41 cargo clippy --offline
+    Checking d006-iced v0.0.0 (/home/jens.guest/agent-test/iced3/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s

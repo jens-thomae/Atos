@@ -1,0 +1,464 @@
+=== 15:17:41 cargo check --offline
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling serde_core v1.0.229
+   Compiling libc v0.2.191
+    Checking cfg-if v1.0.5
+    Checking log v0.4.35
+    Checking once_cell v1.21.4
+    Checking smallvec v1.16.4
+   Compiling rustix v1.1.6
+    Checking linux-raw-sys v0.12.1
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+    Checking bitflags v2.13.2
+    Checking pin-project-lite v0.2.17
+    Checking libloading v0.8.9
+   Compiling libm v0.2.16
+   Compiling serde v1.0.229
+   Compiling autocfg v1.5.1
+   Compiling pkg-config v0.3.34
+   Compiling serde_derive v1.0.229
+   Compiling bytemuck_derive v1.12.1
+   Compiling cfg_aliases v0.2.2
+   Compiling version_check v0.9.5
+   Compiling thiserror v2.0.21
+   Compiling thiserror-impl v2.0.21
+   Compiling memchr v2.8.3
+    Checking dlib v0.5.3
+    Checking bytemuck v1.25.2
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling wayland-sys v0.31.11
+   Compiling cc v1.11.0
+   Compiling tracing-attributes v0.1.31
+    Checking tracing-core v0.1.36
+    Checking polling v3.11.0
+    Checking scoped-tls v1.0.1
+    Checking downcast-rs v1.2.1
+   Compiling quick-xml v0.41.0
+    Checking tracing v0.1.44
+   Compiling winnow v1.0.4
+   Compiling wayland-scanner v0.31.11
+   Compiling wayland-backend v0.3.17
+   Compiling num-traits v0.2.19
+   Compiling wayland-client v0.31.15
+   Compiling equivalent v1.0.3
+   Compiling hashbrown v0.17.1
+    Checking futures-core v0.3.34
+   Compiling toml_parser v1.1.5+spec-1.1.0
+    Checking memmap2 v0.9.12
+   Compiling indexmap v2.14.2
+   Compiling toml_datetime v1.1.2+spec-1.1.0
+    Checking arrayvec v0.7.8
+   Compiling toml_edit v0.25.17+spec-1.1.0
+   Compiling enumflags2_derive v0.7.12
+   Compiling proc-macro-crate v3.5.0
+   Compiling zvariant_utils v4.2.0
+    Checking parking v2.2.1
+    Checking futures-io v0.3.34
+    Checking fastrand v2.5.0
+    Checking wayland-server v0.31.14
+    Checking raw-window-handle v0.6.2
+   Compiling crossbeam-utils v0.8.23
+    Checking xkeysym v0.2.1
+    Checking core_maths v0.1.1
+    Checking xcursor v0.3.11
+   Compiling zvariant_derive v5.15.1
+    Checking wayland-protocols v0.32.13
+   Compiling displaydoc v0.2.7
+    Checking slab v0.4.12
+    Checking cursor-icon v1.2.0
+    Checking concurrent-queue v2.5.0
+    Checking event-listener v5.4.2
+   Compiling enumflags2 v0.7.12
+   Compiling zcheapstr v1.2.0
+   Compiling endi v1.1.1
+    Checking event-listener-strategy v0.5.4
+   Compiling zvariant v5.15.1
+    Checking futures-lite v2.6.1
+    Checking calloop v0.14.5
+   Compiling build_helpers v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking errno v0.3.14
+    Checking foldhash v0.2.0
+   Compiling zerocopy v0.8.63
+   Compiling zbus_names v4.3.5
+    Checking signal-hook-registry v1.4.8
+    Checking ttf-parser v0.25.1
+   Compiling smithay-client-toolkit v0.20.0
+   Compiling async-io v2.6.0
+   Compiling zerocopy-derive v0.8.63
+    Checking allocator-api2 v0.2.21
+    Checking hashbrown v0.16.1
+    Checking calloop-wayland-source v0.4.1
+    Checking wayland-csd-frame v0.3.0
+    Checking xkbcommon v0.8.0
+    Checking wayland-cursor v0.31.14
+    Checking mio v1.2.4
+    Checking float-cmp v0.9.0
+    Checking async-task v4.7.1
+    Checking strict-num v0.1.1
+    Checking async-channel v2.5.0
+   Compiling tokio-macros v2.7.2
+    Checking uuid v1.29.0
+    Checking socket2 v0.6.5
+    Checking arrayref v0.3.9
+    Checking atomic-waker v1.1.2
+    Checking bytes v1.12.1
+    Checking piper v0.2.5
+    Checking async-signal v0.2.14
+    Checking async-lock v3.5.0
+    Checking tokio v1.54.1
+   Compiling synstructure v0.14.0
+    Checking static_assertions v1.1.0
+    Checking wayland-protocols-wlr v0.3.12
+    Checking wayland-protocols-misc v0.3.12
+    Checking wayland-protocols-experimental v20250721.0.1
+   Compiling thiserror v1.0.69
+    Checking async-process v2.5.0
+    Checking blocking v1.7.0
+    Checking async-executor v1.14.1
+   Compiling zbus_macros v5.19.0
+   Compiling zbus_xml v5.2.1
+    Checking async-broadcast v0.7.2
+    Checking ordered-stream v0.2.0
+   Compiling serde_repr v0.1.21
+   Compiling async-trait v0.1.92
+   Compiling async-recursion v1.2.0
+   Compiling thiserror-impl v1.0.69
+    Checking smol_str v0.3.7
+    Checking as-raw-xcb-connection v1.0.1
+    Checking hex v0.4.3
+   Compiling zbus-lockstep v0.5.2
+   Compiling zerofrom-derive v0.1.8
+    Checking zbus v5.19.0
+   Compiling uncased v0.9.10
+   Compiling x11-dl v2.21.0
+    Checking gethostname v1.1.0
+    Checking x11rb-protocol v0.13.2
+   Compiling zbus-lockstep-macros v0.5.2
+    Checking zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+    Checking keyboard-types v0.8.3
+    Checking dpi v0.1.2 (https://github.com/pop-os/winit.git?rev=9567503#9567503d)
+   Compiling getrandom v0.3.4
+    Checking siphasher v1.0.4
+    Checking stable_deref_trait v1.2.1
+    Checking rustc-hash v2.1.3
+    Checking winit-core v0.31.0-beta.2 (https://github.com/pop-os/winit.git?rev=9567503#9567503d)
+    Checking yoke v0.8.4
+    Checking tiny-skia-path v0.12.0
+    Checking owned_ttf_parser v0.25.1
+    Checking xkbcommon-dl v0.4.2
+   Compiling ahash v0.8.12
+    Checking ab_glyph_rasterizer v0.1.10
+    Checking percent-encoding v2.3.2
+   Compiling phf_shared v0.13.1
+    Checking ab_glyph v0.2.32
+    Checking tiny-skia v0.12.0
+    Checking atspi-common v0.13.0
+    Checking winit-common v0.31.0-beta.2 (https://github.com/pop-os/winit.git?rev=9567503#9567503d)
+    Checking accesskit v0.22.0 (https://github.com/wash2/accesskit?rev=6c20249#6c20249d)
+   Compiling zerovec-derive v0.11.7
+   Compiling phf_generator v0.13.1
+    Checking accesskit_consumer v0.32.0 (https://github.com/wash2/accesskit?rev=6c20249#6c20249d)
+    Checking sctk-adwaita v0.11.1
+    Checking smithay-clipboard v0.8.0 (https://github.com/pop-os/smithay-clipboard?tag=sctk-0.20#859b02c8)
+    Checking zerovec v0.11.9
+    Checking wayland-protocols-plasma v0.3.12
+   Compiling winit v0.31.0-beta.2 (https://github.com/pop-os/winit.git?rev=9567503#9567503d)
+    Checking simd-adler32 v0.3.10
+    Checking mime v0.1.0 (https://github.com/pop-os/window_clipboard.git?tag=sctk-0.20#f68595ee)
+   Compiling phf_macros v0.13.1
+    Checking atspi-proxies v0.13.0
+    Checking winit-wayland v0.31.0-beta.2 (https://github.com/pop-os/winit.git?rev=9567503#9567503d)
+    Checking x11rb v0.13.2
+    Checking accesskit_atspi_common v0.15.0 (https://github.com/wash2/accesskit?rev=6c20249#6c20249d)
+    Checking tokio-stream v0.1.19
+   Compiling crc32fast v1.5.4
+    Checking futures-sink v0.3.34
+    Checking adler2 v2.0.1
+    Checking futures-channel v0.3.34
+    Checking phf v0.13.1
+    Checking dnd v0.1.0 (https://github.com/pop-os/window_clipboard.git?tag=sctk-0.20#f68595ee)
+   Compiling slotmap v1.1.1
+    Checking winit-x11 v0.31.0-beta.2 (https://github.com/pop-os/winit.git?rev=9567503#9567503d)
+   Compiling futures-macro v0.3.34
+    Checking unicode-segmentation v1.13.3
+    Checking atspi v0.29.0
+    Checking accesskit_unix v0.18.0 (https://github.com/wash2/accesskit?rev=6c20249#6c20249d)
+   Compiling by_address v1.2.1
+    Checking futures-task v0.3.34
+   Compiling palette_derive v0.7.7
+    Checking futures-util v0.3.34
+    Checking clipboard_wayland v0.2.2 (https://github.com/pop-os/window_clipboard.git?tag=sctk-0.20#f68595ee)
+    Checking clipboard_x11 v0.4.2 (https://github.com/pop-os/window_clipboard.git?tag=sctk-0.20#f68595ee)
+    Checking miniz_oxide v0.9.1
+    Checking tinystr v0.8.5
+    Checking cosmic-protocols v0.2.0 (https://github.com/pop-os/cosmic-protocols?rev=c0cff4d#c0cff4db)
+    Checking accesskit_winit v0.30.0 (https://github.com/wash2/accesskit?rev=6c20249#6c20249d)
+   Compiling iced_core v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking approx v0.5.1
+    Checking web-time v1.1.0
+    Checking palette_math v0.7.7
+    Checking futures-executor v0.3.34
+    Checking palette v0.7.7
+    Checking lilt v0.8.2
+    Checking iced_accessibility v0.1.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking flate2 v1.1.10
+    Checking window_clipboard v0.4.1 (https://github.com/pop-os/window_clipboard.git?tag=sctk-0.20#f68595ee)
+    Checking half v2.7.1
+    Checking roxmltree v0.20.0
+    Checking glam v0.25.0
+   Compiling parking_lot_core v0.9.12
+    Checking cosmic-client-toolkit v0.2.0 (https://github.com/pop-os/cosmic-protocols?rev=c0cff4d#c0cff4db)
+   Compiling rustix v0.38.44
+    Checking fontconfig-parser v0.5.8
+    Checking futures v0.3.34
+    Checking miniz_oxide v0.8.9
+    Checking fdeflate v0.3.7
+    Checking euclid v0.22.14
+    Checking font-types v0.12.7
+    Checking font-types v0.11.3
+    Checking linux-raw-sys v0.4.15
+    Checking tinyvec v1.13.3
+    Checking self_cell v1.3.0
+    Checking unicode-script v0.5.9
+    Checking read-fonts v0.37.0
+    Checking fontdb v0.23.0
+    Checking read-fonts v0.41.0
+   Compiling typenum v1.20.1
+    Checking unicode-bidi v0.3.18
+   Compiling hybrid-array v0.4.15
+   Compiling unic-langid-impl v0.9.6
+    Checking iced_futures v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking yazi v0.2.2
+    Checking skrifa v0.44.0
+    Checking sys-locale v0.3.2
+    Checking byteorder-lite v0.1.0
+    Checking zeno v0.3.3
+   Compiling unic-langid v0.9.6
+    Checking harfrust v0.5.2
+    Checking skrifa v0.40.0
+    Checking rangemap v1.8.0
+    Checking zune-core v0.5.3
+    Checking unicode-linebreak v0.1.5
+    Checking pxfm v0.1.30
+    Checking swash v0.2.10
+    Checking linebender_resource_handle v0.1.1
+    Checking zune-jpeg v0.5.15
+    Checking moxcms v0.8.1
+   Compiling block-buffer v0.12.1
+   Compiling crypto-common v0.2.2
+    Checking lyon_geom v1.0.20
+    Checking png v0.18.1
+    Checking cosmic-text v0.19.0
+   Compiling drm-sys v0.6.1
+   Compiling ash v0.38.0+1.3.281
+   Compiling unicase v2.10.0
+    Checking mutate_once v0.1.2
+   Compiling const-oid v0.10.2
+    Checking scopeguard v1.2.0
+    Checking lock_api v0.4.14
+   Compiling digest v0.11.3
+    Checking kamadak-exif v0.6.1
+   Compiling mime_guess v2.0.5
+    Checking lyon_path v1.0.19
+   Compiling cpufeatures v0.3.1
+   Compiling naga v28.0.0
+   Compiling tiny-xlib v0.2.5
+    Checking foldhash v0.1.5
+    Checking image v0.25.10
+    Checking linux-raw-sys v0.6.5
+   Compiling drm-fourcc v2.2.0
+    Checking unicode-width v0.2.3
+   Compiling same-file v1.0.6
+   Compiling khronos-egl v6.0.0
+    Checking bit-vec v0.8.0
+    Checking bit-set v0.8.0
+   Compiling walkdir v2.5.0
+    Checking codespan-reporting v0.12.0
+    Checking hashbrown v0.15.5
+    Checking parking_lot v0.12.5
+   Compiling sha2 v0.11.1
+    Checking tiny-skia-path v0.11.4
+    Checking iced_graphics v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking kurbo v0.11.3
+   Compiling wgpu-hal v28.0.1
+    Checking spirv v0.3.0+sdk-1.3.268.0
+    Checking gpu-descriptor-types v0.2.0
+   Compiling mime v0.3.17
+    Checking utf_types v1.0.0
+    Checking ctor v0.10.1
+    Checking bitflags v1.3.2
+    Checking litemap v0.8.3
+    Checking writeable v0.6.4
+    Checking hexf-parse v0.2.1
+    Checking unicode-ccc v0.4.0
+   Compiling rustversion v1.0.23
+    Checking unicode-bidi-mirroring v0.4.0
+    Checking rustc-hash v1.1.0
+    Checking presser v0.3.1
+    Checking unicode-properties v0.1.5
+    Checking rustybuzz v0.20.1
+    Checking icu_locale_core v2.4.0
+    Checking png v0.17.16
+    Checking utf8_iter v1.1.0
+    Checking gpu-descriptor v0.3.2
+    Checking svgtypes v0.15.3
+   Compiling rust-embed-utils v8.13.0
+    Checking drm-ffi v0.7.1
+    Checking iced_debug v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking potential_utf v0.1.6
+    Checking zerotrie v0.2.5
+   Compiling iced_runtime v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking ordered-float v5.5.1
+    Checking wgpu-types v28.0.0
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling softbuffer v0.4.1 (https://github.com/pop-os/softbuffer?tag=cosmic-4.0#c2b2c19d)
+    Checking simplecss v0.2.2
+    Checking xmlwriter v0.1.0
+    Checking profiling v1.0.18
+    Checking weezl v0.1.12
+    Checking glow v0.16.0
+    Checking unicode-vo v0.1.0
+    Checking imagesize v0.13.0
+   Compiling getrandom v0.4.3
+    Checking base64 v0.22.1
+    Checking pico-args v0.5.0
+   Compiling inotify-sys v0.1.8
+    Checking color_quant v1.1.0
+    Checking renderdoc-sys v1.1.0
+    Checking quick-error v2.0.1
+   Compiling icu_normalizer_data v2.4.0
+   Compiling icu_properties_data v2.4.0
+    Checking zune-core v0.4.12
+    Checking data-url v0.3.2
+    Checking zune-jpeg v0.4.21
+    Checking usvg v0.45.1
+    Checking image-webp v0.2.4
+    Checking gif v0.13.3
+   Compiling type-map v0.5.1
+    Checking icu_provider v2.4.0
+    Checking icu_collections v2.4.0
+    Checking drm v0.11.1
+   Compiling rust-embed-impl v8.13.0
+    Checking tiny-skia v0.11.4
+    Checking gpu-allocator v0.28.0
+   Compiling basic-toml v0.1.10
+   Compiling toml v0.5.11
+    Checking rgb v0.8.53
+   Compiling wgpu-core v28.0.1
+   Compiling yansi v1.0.1
+   Compiling strsim v0.11.1
+   Compiling typeid v1.0.3
+   Compiling litrs v1.0.1
+   Compiling i18n-config v0.4.8
+   Compiling find-crate v0.6.3
+    Checking wgpu-core-deps-windows-linux-android v28.0.0
+    Checking resvg v0.45.1
+   Compiling fluent-syntax v0.12.0
+   Compiling document-features v0.2.12
+   Compiling intl-memoizer v0.5.3
+   Compiling fluent-langneg v0.13.1
+   Compiling intl_pluralrules v7.0.2
+    Checking kurbo v0.10.4
+   Compiling wgpu v28.0.0
+   Compiling fnv v1.0.7
+   Compiling ident_case v1.0.1
+    Checking option-ext v0.2.0
+    Checking svg_fmt v0.4.5
+   Compiling heck v0.4.1
+   Compiling zmij v1.0.23
+    Checking iced_tiny_skia v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+   Compiling ouroboros_macro v0.18.5
+   Compiling fluent-bundle v0.16.0
+    Checking dirs-sys v0.5.0
+   Compiling darling_core v0.21.3
+    Checking icu_properties v2.4.0
+    Checking icu_normalizer v2.4.0
+    Checking inotify v0.11.5
+    Checking tempfile v3.27.0
+   Compiling i18n-embed-impl v0.8.4
+   Compiling iced_widget v0.14.2 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+   Compiling iced_winit v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking notify-types v2.2.0
+    Checking memmap2 v0.8.0
+    Checking xdg v3.0.0
+   Compiling serde_json v1.0.154
+    Checking aliasable v0.1.3
+    Checking xkbcommon v0.7.0
+    Checking ouroboros v0.18.5
+    Checking notify v8.2.1
+   Compiling darling_macro v0.21.3
+    Checking ron v0.12.3
+    Checking atomicwrites v0.4.2 (https://github.com/jackpot51/rust-atomicwrites#043ab485)
+    Checking idna_adapter v1.2.2
+   Compiling fluent v0.17.0
+    Checking dirs v6.0.0
+    Checking iced_renderer v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking etagere v0.2.15
+    Checking iced_program v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+   Compiling arc-swap v1.9.3
+   Compiling rust-embed v8.13.0
+    Checking cosmic-settings-daemon v0.1.0 (https://github.com/pop-os/dbus-settings-bindings#85502fb8)
+   Compiling iced v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+   Compiling iced_wgpu v0.14.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+   Compiling cosmic-config-derive v1.0.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+   Compiling proc-macro-error-attr3 v3.1.1
+    Checking itoa v1.0.18
+    Checking lru v0.16.4
+    Checking regex-automata v0.4.18
+   Compiling proc-macro-error3 v3.1.1
+    Checking cosmic-config v1.0.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+   Compiling i18n-embed v0.16.0
+    Checking bstr v1.13.1
+   Compiling darling v0.21.3
+    Checking idna v1.1.0
+    Checking guillotiere v0.6.2
+    Checking csscolorparser v0.8.4
+    Checking form_urlencoded v1.2.2
+   Compiling libcosmic v1.0.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking cryoglyph v0.1.0 (https://github.com/iced-rs/cryoglyph.git?rev=e429a025df36ab8145708acb309080ae3deec17a#e429a025)
+    Checking hex_color v3.0.0
+    Checking btoi v0.5.0
+   Compiling derive_utils v0.16.0
+    Checking grid v1.0.1
+    Checking configparser v3.3.0
+    Checking jiff-core v0.1.2
+    Checking almost v0.2.0
+   Compiling auto_enums v0.8.10
+    Checking cosmic-theme v1.0.0 (https://github.com/pop-os/libcosmic?rev=daca62bb701bdc2cefbf44d6e87dc5d0c2f1835f#daca62bb)
+    Checking taffy v0.9.2
+    Checking jiff v0.2.39
+    Checking cosmic-freedesktop-icons v0.4.0 (https://github.com/pop-os/freedesktop-icons#ab4c57b8)
+    Checking url v2.5.8
+   Compiling derive_setters v0.1.9
+   Compiling i18n-embed-fl v0.10.1
+    Checking float-cmp v0.10.0
+    Checking css-color v0.2.8
+    Checking apply v0.3.0
+    Checking d006-iced v0.0.0 (/home/jens.guest/agent-test/iced1/app)
+warning: variants `NewTab` and `CloseTab` are never constructed
+   --> src/main.rs:202:5
+    |
+192 | enum Message {
+    |      ------- variants in this enum
+...
+202 |     NewTab,
+    |     ^^^^^^
+203 |     CloseTab,
+    |     ^^^^^^^^
+    |
+    = note: `Message` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `d006-iced` (bin "d006-iced") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 22s
+=== 15:19:09 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced1/app)
+    Finished `release` profile [optimized] target(s) in 25.24s
+=== 15:21:28 cargo build --release --offline
+   Compiling d006-iced v0.0.0 (/home/jens.guest/agent-test/iced1/app)
+    Finished `release` profile [optimized] target(s) in 24.60s

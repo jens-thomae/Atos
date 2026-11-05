@@ -1,0 +1,62 @@
+=== 16:02:43 cargo check --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)
+error: failed to run custom build command for `d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)`
+
+Caused by:
+  process didn't exit successfully: `/home/jens.guest/agent-test/target-slint/debug/build/d006-slint-41eaf27e14d16c6c/build-script-build` (exit status: 101)
+  --- stderr
+  error: Cannot access property or callback 'find-input.text' inside of a PopupWindow from enclosing component
+     --> /home/jens.guest/agent-test/slint3/app/ui/app.slint:388:22
+      |
+  388 |     rename-dialog := PopupWindow {
+      |                      ^^^^^^^^^^^^
+      |
+  error: Cannot access property or callback 'replace-input.text' inside of a PopupWindow from enclosing component
+     --> /home/jens.guest/agent-test/slint3/app/ui/app.slint:388:22
+      |
+  388 |     rename-dialog := PopupWindow {
+      |                      ^^^^^^^^^^^^
+
+  thread 'main' (1033655) panicked at build.rs:2:42:
+  called `Result::unwrap()` on an `Err` value: CompileError(["/home/jens.guest/agent-test/slint3/app/ui/app.slint:388: Cannot access property or callback 'find-input.text' inside of a PopupWindow from enclosing component", "/home/jens.guest/agent-test/slint3/app/ui/app.slint:388: Cannot access property or callback 'replace-input.text' inside of a PopupWindow from enclosing component"])
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+=== 16:02:48 cargo check --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)
+error[E0502]: cannot borrow `s` as immutable because it is also borrowed as mutable
+   --> src/main.rs:260:20
+    |
+260 |             s.tabs[s.cur].sel = tab.sel;
+    |             -     -^-----
+    |             |     ||
+    |             |     |immutable borrow occurs here
+    |             |     mutable borrow later used here
+    |             mutable borrow occurs here
+    |
+help: try adding a local storing this...
+   --> src/main.rs:260:20
+    |
+260 |             s.tabs[s.cur].sel = tab.sel;
+    |                    ^^^^^
+help: ...and then using that local here
+   --> src/main.rs:260:19
+    |
+260 |             s.tabs[s.cur].sel = tab.sel;
+    |                   ^^^^^^^
+
+For more information about this error, try `rustc --explain E0502`.
+error: could not compile `d006-slint` (bin "d006-slint") due to 1 previous error
+=== 16:02:53 cargo check --offline
+    Checking d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.62s
+=== 16:02:55 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)
+    Finished `release` profile [optimized] target(s) in 8.47s
+=== 16:03:35 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)
+    Finished `release` profile [optimized] target(s) in 8.37s
+=== 16:04:09 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)
+    Finished `release` profile [optimized] target(s) in 8.80s
+=== 16:06:16 cargo build --release --offline
+   Compiling d006-slint v0.0.0 (/home/jens.guest/agent-test/slint3/app)
+    Finished `release` profile [optimized] target(s) in 8.27s
