@@ -69,11 +69,10 @@ The runner adds the default labels `self-hosted`, `Linux` and `X64` itself, so i
 As the owner:
 
 ```sh
-cd /home/runner/actions-runner
-sudo ./svc.sh install runner
-sudo ./svc.sh start
-sudo ./svc.sh status
+sudo bash -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc.sh start && ./svc.sh status'
 ```
+
+`svc.sh` must run as root from the runner directory. The `cd` is inside the root command because `/home/runner` is readable only by `runner` (Ubuntu's default home mode 750). No root account or runner password is needed.
 
 `install runner` creates a systemd unit named `actions.runner.<owner>-<repo>.nuc.service`, which runs the runner as the user `runner`, starts at boot and restarts it if it stops. `status` should show `active (running)`.
 
@@ -92,9 +91,7 @@ The runner updates itself when GitHub releases a new version (its default; GitHu
 As the owner:
 
 ```sh
-cd /home/runner/actions-runner
-sudo ./svc.sh stop
-sudo ./svc.sh uninstall
+sudo bash -c 'cd /home/runner/actions-runner && ./svc.sh stop && ./svc.sh uninstall'
 ```
 
 Get a removal token: **Settings** → **Actions** → **Runners** → `nuc` → **Remove** → copy the token from the Linux command. Then:
