@@ -1,9 +1,9 @@
 {
-  "app": "/tmp/tmp.Zds0zvUvPS/iced-small",
-  "cpu": "Intel(R) Xeon(R) 6975P-C",
-  "kernel": "7.0.0-1014-aws",
+  "app": "/tmp/tmp.s2c4KvFOck/iced-small",
+  "cpu": "AMD EPYC 9V74 80-Core Processor",
+  "kernel": "7.0.0-1017-azure",
   "cpu_window_s": 30,
-  "cold_start_ms": 43.942035,
-  "idle_rss_mb": 33.755136,
+  "cold_start_ms": 87.69300700000001,
+  "idle_rss_mb": 33.62816,
   "idle_cpu_percent": 0
 }

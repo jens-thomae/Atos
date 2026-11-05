@@ -33,7 +33,7 @@
    {
     "check": "path label",
     "result": "unverifiable",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs",
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs",
     "observed": null
    }
   ]
@@ -45,13 +45,13 @@
    {
     "check": "path label after 2026",
     "result": "unverifiable",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026",
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026",
     "observed": null
    },
    {
     "check": "path label after november",
     "result": "unverifiable",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026/november",
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026/november",
     "observed": null
    },
    {
@@ -69,13 +69,13 @@
    {
     "check": "after Backspace",
     "result": "unverifiable",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026",
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026",
     "observed": null
    },
    {
     "check": "after Alt+Up",
     "result": "unverifiable",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs",
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs",
     "observed": null
    }
   ]
@@ -135,7 +135,7 @@
    {
     "check": "Enter returns to small",
     "result": "unverifiable",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small",
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small",
     "observed": null
    },
    {
@@ -162,8 +162,8 @@
    {
     "check": "End selects Ünïcödé.txt (Enter prints SPIKE_OPEN)",
     "result": "pass",
-    "expected": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/Ünïcödé.txt",
-    "observed": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/Ünïcödé.txt"
+    "expected": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/Ünïcödé.txt",
+    "observed": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/Ünïcödé.txt"
    },
    {
     "check": "Home selects docs (AT-SPI)",
@@ -213,8 +213,8 @@
    {
     "check": "wl-paste",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt"
    }
   ]
  },
@@ -258,8 +258,8 @@
    {
     "check": "stdout",
     "result": "pass",
-    "expected": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt",
-    "observed": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt"
+    "expected": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt",
+    "observed": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt"
    }
   ]
  },
@@ -270,8 +270,8 @@
    {
     "check": "End selects item-09999.md (Enter prints SPIKE_OPEN)",
     "result": "pass",
-    "expected": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/10k/item-09999.md",
-    "observed": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/10k/item-09999.md"
+    "expected": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/10k/item-09999.md",
+    "observed": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/10k/item-09999.md"
    }
   ]
  }

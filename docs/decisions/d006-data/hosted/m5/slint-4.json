@@ -1,1 +1,1 @@
-{"surface": "23", "commits": 606, "duration_ms": 10001.2, "p50_ms": 16.523000000044703, "p95_ms": 17.19900000002235, "p99_ms": 17.579999999841675, "max_ms": 18.408000000054017, "dropped": 0, "dropped_limit_ms": 25.0, "other_surface_commits": 0}
+{"surface": "23", "commits": 600, "duration_ms": 10005.6, "p50_ms": 16.70299999997951, "p95_ms": 17.353000000002794, "p99_ms": 17.91099999996368, "max_ms": 24.0, "dropped": 0, "dropped_limit_ms": 25.0, "other_surface_commits": 0}

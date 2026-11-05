@@ -36,8 +36,8 @@
    {
     "check": "path label",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small/docs"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small/docs"
    }
   ]
  },
@@ -48,14 +48,14 @@
    {
     "check": "path label after 2026",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026"
    },
    {
     "check": "path label after november",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026/november",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026/november"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026/november",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026/november"
    },
    {
     "check": "no row selected",
@@ -72,14 +72,14 @@
    {
     "check": "after Backspace",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small/docs/2026"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small/docs/2026"
    },
    {
     "check": "after Alt+Up",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/docs",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small/docs"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/docs",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small/docs"
    }
   ]
  },
@@ -150,8 +150,8 @@
    {
     "check": "Enter returns to small",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small"
    },
    {
     "check": "Tab twice focuses the list",
@@ -180,8 +180,8 @@
    {
     "check": "End selects Ünïcödé.txt (Enter prints SPIKE_OPEN)",
     "result": "pass",
-    "expected": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/Ünïcödé.txt",
-    "observed": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/Ünïcödé.txt"
+    "expected": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/Ünïcödé.txt",
+    "observed": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/Ünïcödé.txt"
    },
    {
     "check": "Home selects docs (AT-SPI)",
@@ -234,8 +234,8 @@
    {
     "check": "wl-paste",
     "result": "pass",
-    "expected": "/tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt",
-    "observed": "/tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt"
+    "expected": "/tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt",
+    "observed": "/tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt"
    }
   ]
  },
@@ -282,8 +282,8 @@
    {
     "check": "stdout",
     "result": "pass",
-    "expected": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt",
-    "observed": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/small/notes-1.txt"
+    "expected": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt",
+    "observed": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/small/notes-1.txt"
    }
   ]
  },
@@ -294,8 +294,8 @@
    {
     "check": "End selects item-09999.md (Enter prints SPIKE_OPEN)",
     "result": "pass",
-    "expected": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/10k/item-09999.md",
-    "observed": "SPIKE_OPEN /tmp/tmp.Zds0zvUvPS/fx/10k/item-09999.md"
+    "expected": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/10k/item-09999.md",
+    "observed": "SPIKE_OPEN /tmp/tmp.s2c4KvFOck/fx/10k/item-09999.md"
    }
   ]
  }

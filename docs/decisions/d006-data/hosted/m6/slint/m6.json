@@ -47,7 +47,7 @@
   {
    "control": "Path label",
    "expected_role": "label",
-   "expected_name": "/tmp/tmp.Zds0zvUvPS/fx/small",
+   "expected_name": "/tmp/tmp.s2c4KvFOck/fx/small",
    "result": "ok",
    "ok": true
   },
