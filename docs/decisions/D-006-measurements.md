@@ -55,7 +55,7 @@ Median, (min–max), 5 runs, harness `tools/budgets` unchanged, per-run files in
 ¹ On CI the first two Slint `small` launches (the first launches after the compositor started) hit the harness's 3 s marker timeout: recorded as **`> 3000 ms (timeout)`, a gate fail** per the brief, counted as 3000 ms in the median. Run 3 took 2596 ms; runs 4 and 5 were 100–115 ms. libcosmic's first run was also slow there (2797 ms). Both look like one-time library and shader-cache start-up on a fresh runner; it was not seen in the VM, but it is a real result of that environment and shows up at the first launch after boot, which is what the cold-start budget is about. The NUC run will show whether it occurs on the reference hardware.
 ² From the 3 Slint runs that gave a reading.
 
-Harness exit 1 on a run means a §7 breach in that run (only the slow first launches on CI). No crash or hang occurred in any final run. A first attempt in the shared VM had one Slint 10k run die with a Wayland `Broken pipe` while another session was using the machine; it did not recur in the final runs (all 15 Slint harness launches and 5 autoscroll runs in the VM exited normally) and is not in the data, but it is the only unexplained abnormal exit seen.
+Harness exit 1 on a run means a §7 breach in that run (only the slow first launches on CI). No crash or hang occurred in any final run. A first attempt in the shared VM had one Slint 10k run die with a Wayland `Broken pipe` while another session was using the machine; it did not recur in the final runs (all 10 Slint harness launches and 5 autoscroll runs in the VM exited normally) and is not in the data, but it is the only unexplained abnormal exit seen.
 
 ## M5: frame interval while scrolling 10,000 items
 
