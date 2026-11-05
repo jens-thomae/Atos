@@ -26,3 +26,9 @@ cargo test
 ## Spikes
 
 `spikes/` holds short experiments, such as the toolkit prototypes for D-006. It is excluded from the workspace (`exclude` in the root `Cargo.toml`), so a spike can pull in dependencies and fail to build without breaking the checks above. Each spike lives in `spikes/<name>/`, is its own Cargo project with its own `Cargo.lock`, and is built from its own directory. `cargo new spikes/<name>` still adds the spike to `members` in the root `Cargo.toml`; remove that entry before committing. Spike code never ships; anything worth keeping moves into a component through a card.
+
+## Licence
+
+Atos's own source code is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT licence](LICENSE-MIT), at your option (D-013). Contributions are accepted under the same terms.
+
+Shipped binaries carry the licence their dependencies require: the compositor (a cosmic-comp fork) is GPL-3.0-only, and so are binaries that link Slint if D-006 picks it. Spikes under `spikes/` keep their own licence statements.
