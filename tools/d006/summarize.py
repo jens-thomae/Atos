@@ -29,7 +29,9 @@ def harness(app, folder):
         rc = int(open(rcf).read())
         rcs.append(rc)
         j = load(rcf[:-3] + ".json")
-        if rc != 2 and j:
+        if rc == 2:
+            cold.append(3000.0)  # timeout: counted as the 3 s limit, a lower bound
+        elif j:
             cold.append(j["cold_start_ms"]); rss.append(j["idle_rss_mb"]); cpu.append(j["idle_cpu_percent"])
     return cold, rcs.count(2), rss, cpu, rcs
 
@@ -38,7 +40,7 @@ print("### Environment\n")
 print("```text\n" + open(f"{root}/environment.txt").read().strip() + "\n```\n")
 
 print("### M1–M4: harness (`tools/budgets`)\n")
-print("Median (min–max, n runs). Cold start is with a warm page cache.\n")
+print("Median (min–max, n runs). Page cache is warm. M3 and M4 use only the runs that gave a reading.\n")
 print("| Metric | Budget | " + " | ".join(t for _, t in APPS) + " |\n| --- | --- | " + " | ".join("---" for _ in APPS) + " |")
 cells = {}
 for a, _ in APPS:
@@ -52,15 +54,15 @@ def row(label, budget, pick, unit, digits=1, f="small", timeout_note=True):
         c = cells[a, f]
         s = fmt(pick(c), unit, digits)
         if timeout_note and c[1]:
-            s += f"; **{c[1]} of {len(c[4])} runs: > 3000 ms (timeout)**"
+            s += f"; **{c[1]} of {len(c[4])} runs: > 3000 ms (timeout), counted as 3000 ms, gate fail**"
         out.append(s)
     print(f"| {label} | {budget} | " + " | ".join(out) + " |")
 
 
 row("M1 cold start, `small`", "≤ 300 ms", lambda c: c[0], " ms")
 row("M2 10,000-item first paint, `10k`", "≤ 500 ms", lambda c: c[0], " ms", f="10k")
-row("M3 idle RSS, `small`, 5 s after first frame", "800 MB (desktop)", lambda c: c[2], " MB")
-row("M4 idle CPU, `small`", "≤ 1 %", lambda c: c[3], " %", digits=2)
+row("M3 idle RSS, `small`, 5 s after first frame", "800 MB (desktop)", lambda c: c[2], " MB", timeout_note=False)
+row("M4 idle CPU, `small`", "≤ 1 %", lambda c: c[3], " %", digits=2, timeout_note=False)
 print()
 for a, t in APPS:
     for f in ("small", "10k"):
