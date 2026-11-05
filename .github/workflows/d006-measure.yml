@@ -18,9 +18,11 @@ on:
 
 permissions: {}
 
-# One run at a time on the single NUC runner; a newer run replaces an older one.
+# A newer run for the same trigger replaces an older one (one run at a time on the single NUC
+# runner). The label name is part of the group, so an unrelated label (`perf`, ...) starts its own
+# skipped run in its own group and cannot cancel a running `d006-nuc` job.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.label.name || 'dispatch' }}
   cancel-in-progress: true
 
 jobs:
