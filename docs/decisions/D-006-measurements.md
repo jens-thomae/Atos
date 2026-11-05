@@ -4,9 +4,9 @@ Card: #12 · Method: [`D-006-prototype-brief.md`](D-006-prototype-brief.md) §6�
 
 Both prototypes (`spikes/d006-iced/`, libcosmic rev `daca62bb`; `spikes/d006-slint/`, Slint 1.18.1) were measured in the same environment in the same run with the scripts in [`tools/d006/`](../../tools/d006/). Raw data is in [`d006-data/`](d006-data/).
 
-## Status: reference hardware not yet measured
+## Status: measured on the reference NUC, in headless sway with software rendering
 
-**No number below comes from the Intel NUC 11 (Celeron N5105).** The `nuc` runner needs packages (sway, wtype, an AT-SPI stack) that only the owner can install; they are listed in [`reference-runner.md`](../reference-runner.md) step 7. Until then the §9 performance gates are **provisional** (brief §9). Numbers come from two environments:
+The Intel NUC 11 (Celeron N5105, runner `nuc`) was measured once (workflow run 42071246272, 5 runs per number, full 5-minute idle windows): see [Reference hardware](#reference-hardware-intel-nuc-11-celeron-n5105). **The GPU is still not exercised**: sway runs headless, libcosmic renders on the CPU and Slint on Mesa llvmpipe (deviation 1, limitations). The §9 performance gates are therefore **provisional** (brief §9) until the owner decides on a DRM/GPU run. Besides the NUC, numbers come from two other environments:
 
 | | Dev VM (`atos-t12`) | GitHub-hosted CI |
 | --- | --- | --- |
@@ -19,11 +19,11 @@ Both prototypes (`spikes/d006-iced/`, libcosmic rev `daca62bb`; `spikes/d006-sli
 | Fixture digest (brief §5) | `184f3d8e…23022c` | `184f3d8e…23022c` (identical) |
 | Raw data | [`d006-data/vm/`](d006-data/vm/) | [`d006-data/hosted/`](d006-data/hosted/) (workflow run 42064288468, 7 runs; the earlier 5-run run is kept in [`d006-data/hosted-run1/`](d006-data/hosted-run1/)) |
 
-The VM is a dedicated instance (the shared one was busy with the #13 agent test, which skewed a first attempt; that attempt is not used). Neither environment has a GPU in the path: **the N5105's integrated GPU is not exercised anywhere yet.**
+The NUC column set is in its own section below. The VM is a dedicated instance (the shared one was busy with the #13 agent test, which skewed a first attempt; that attempt is not used). Neither environment has a GPU in the path: **the N5105's integrated GPU is not exercised anywhere yet.**
 
 ## Rerun on the reference hardware
 
-After the owner has installed the step-7 packages:
+The step-7 packages are installed on the NUC (done; the first NUC attempt failed only on the missing `eglinfo`, reported on #12). To repeat the measurement:
 
 ```sh
 gh workflow run d006-measure.yml -f nuc=true      # once the workflow is on main
@@ -32,9 +32,29 @@ gh workflow run d006-measure.yml -f nuc=true      # once the workflow is on main
 
 [`.github/workflows/d006-measure.yml`](../../.github/workflows/d006-measure.yml) builds both prototypes and the harness on a hosted runner, uploads them with the scripts, and the `nuc` job only measures: `tools/d006/measure.sh` (M1–M7), `summarize.py` writes the tables below into the job summary, and the raw data is the `d006-results-nuc` artifact (about 1 h 20 min: five 5-minute idle windows per prototype). The same job on a hosted runner is started by the label `d006-measure`. On any Linux machine with the packages: `tools/d006/measure.sh <d006-iced> <d006-slint> <budgets> <out-dir>`. M9 is `tools/d006/m9-build.sh <out.json>`.
 
+## Reference hardware: Intel NUC 11 (Celeron N5105)
+
+Workflow run 42071246272 on the self-hosted runner `nuc` (Ubuntu 24.04.5, kernel 6.8.0-147, governor `powersave`, Mesa 25.2.8, sway 1.9, 1920 × 1080 @ 60 Hz headless). 5 runs per number, full 300 s idle window, warm page cache, same fixture digest. Binaries were built on a hosted x86_64 runner (nothing compiles on the NUC). Raw data: [`d006-data/nuc/`](d006-data/nuc/) (`summary.md` is the job summary). **EGL renderer on the NUC: `llvmpipe (LLVM 20.1.2, 128 bits)`, i.e. software rendering, not the GPU.** M9 was not run here.
+
+| Metric | Budget | libcosmic | Slint |
+| --- | --- | --- | --- |
+| M1 cold start (warm cache) | ≤ 300 ms | **49.2** ms (48.1–65.8) | **184.5** ms (130.5–610.2) ¹ |
+| M2 10k first paint | ≤ 500 ms | **76.5** ms (76.3–82.7) | **276.5** ms (236.4–638.5) ¹ |
+| M3 idle RSS, 5 s after first frame | 800 MB | **33.7** MB (33.5–33.8) | **154.3** MB (150.8–165.1) |
+| M4 idle CPU (300 s) | ≤ 1 % | **0.00** % (0.00–0.01) | **0.01** % (0.01–0.02) |
+| M5 p50 / p95 / p99 / max, scrolling 10k | no dropped frames | 75.7 / 239.6 / 258.3 / 260.7 ms | 17.3 / 19.2 / 20.5 / 22.1 ms (max 21.1–33.6) |
+| M5 commits per run; dropped frames (> 25 ms) per run | | 114; **69** (64–74) | 575; **0** (0–1) |
+
+¹ The first Slint launch after the compositor started was slow in both folders (610 ms `small`, 639 ms `10k`) and breached the budget (harness exit 1); the next four were 130–280 ms. No launch timed out and no timeout was seen for libcosmic (first launch 66 ms). This matches the first-launch effect seen on CI (M1–M4 footnote).
+
+**M6 (identical to VM and CI):** libcosmic 26 of 26 missing (tree has 2 nodes, nothing focusable); Slint 17 of 26 missing or wrong, 9 ok (same controls).
+
+**M7 on the NUC, through AT-SPI:** libcosmic 0 of 12 steps verifiable, as before. Slint: 6 fully verified (2, 4, 5, 6, 8, 10), 2 partly (1, 3), 4 not verifiable (7, 9, 11, 12): same as VM and CI, nothing failed.
+**One difference in the behavioural probes, libcosmic only:** steps 9 and 11 (`wl-paste` and the `SPIKE_OPEN` line) gave `notes-2.txt`, not the expected `notes-1.txt`. The step-8 screenshot shows `empty` selected after the Properties dialog closed (VM and CI: `docs`), so the script's two *Down* presses landed one row further; the app copied and printed the row it had selected, so the output is consistent with its own selection. **Why the selection was one row off before step 9 is not established.** A timing explanation (one *Down* of the menu step reaching the list on the slower machine, libcosmic produces a frame every ~76 ms here) is plausible but unconfirmed, and I did not rerun on the NUC. Slint passed both steps; libcosmic's step 12 probe (`item-09999.md`) passed. Treat libcosmic's steps 9 and 11 as "not reproduced on the NUC", not as a proven app defect.
+
 ## Deviations from the brief
 
-1. **Reference hardware: sway headless, not the DRM backend.** The runner is an unprivileged service user without a seat, so sway cannot take the display. The NUC job will also use sway headless with software rendering; the GPU path stays unmeasured. For the owner to decide whether a DRM or `WLR_RENDER_DRM_DEVICE` run is wanted.
+1. **Reference hardware: sway headless, not the DRM backend.** The runner is an unprivileged service user without a seat, so sway cannot take the display. The NUC job also uses sway headless with software rendering (`egl:` line: llvmpipe); the GPU path stays unmeasured. For the owner to decide whether a DRM or `WLR_RENDER_DRM_DEVICE` run is wanted.
 2. **Page cache warm** everywhere (owner decision: no `drop_caches` rule). "Cold start" here is a warm start.
 3. **M4 on hosted CI uses a 30 s window**, not 5 minutes. The VM used the full window.
 4. **Modifier keys:** `wtype -M` (modifier state) alone is ignored by Slint and `-P` (key event) alone by libcosmic, so the walkthrough sends both. Each key is sent after a 500 ms delay because the first key of a `wtype` call is otherwise lost; a background `wtype` keeps a virtual keyboard alive so the window keeps keyboard focus.
@@ -53,7 +73,7 @@ Median, (min–max), 5 runs, harness `tools/budgets` unchanged, per-run files in
 | M3 idle RSS, 5 s after first frame | 800 MB | **32.0** MB (32.0–32.1) | **147.9** MB (147.7–149.1) | **33.6** MB (33.5–33.7) | **149.1** MB (145.2–160.8) |
 | M4 idle CPU | ≤ 1 % | **0.00** % (0.00–0.01), 300 s | **0.02** % (0.02–0.03), 300 s | **0.00** % (0.00–0.03), 30 s | **0.00** % (0.00–0.03), 30 s |
 
-¹ The first launch after the compositor started took about 2 s for both prototypes on CI (2146 ms, 2033 ms); the other six were 85–125 ms. Under the 3 s limit, so no timeout this time. **In the earlier 5-run CI run (different runner, AMD EPYC 9V45; [`hosted-run1`](d006-data/hosted-run1/)) the first two Slint `small` launches did hit the 3 s marker timeout: `> 3000 ms (timeout)`, a gate fail per the brief**; there Slint's M1 median was 1561 ms and libcosmic's first launch 801 ms. The effect is a one-time start-up cost on a fresh runner (library loading and, for Slint, llvmpipe/shader set-up, see Limitations) and varies between runners; it was not seen in the VM. The NUC run will show whether it occurs on the reference hardware.
+¹ The first launch after the compositor started took about 2 s for both prototypes on CI (2146 ms, 2033 ms); the other six were 85–125 ms. Under the 3 s limit, so no timeout this time. **In the earlier 5-run CI run (different runner, AMD EPYC 9V45; [`hosted-run1`](d006-data/hosted-run1/)) the first two Slint `small` launches did hit the 3 s marker timeout: `> 3000 ms (timeout)`, a gate fail per the brief**; there Slint's M1 median was 1561 ms and libcosmic's first launch 801 ms. The effect is a one-time start-up cost on a fresh runner (library loading and, for Slint, llvmpipe/shader set-up, see Limitations) and varies between runners; it was not seen in the VM. On the NUC only the first Slint launch was slow (610 ms, below).
 
 Harness exit 1 on a run means a §7 breach in that run (only the slow first launches on CI; the first libcosmic launch also breached in both CI runs). No crash or hang occurred in any final run. A first attempt in the shared VM had one Slint 10k run die with a Wayland `Broken pipe` while another session was using the machine; it did not recur in the final runs (all 10 Slint harness launches and 5 autoscroll runs in the VM exited normally) and is not in the data, but it is the only unexplained abnormal exit seen.
 
@@ -127,8 +147,8 @@ Clean `cargo build --release --locked` in the VM (4 vCPU M1 Max, aarch64, depend
 
 ## Limitations
 
-- No NUC numbers; the CI runner (AMD EPYC, 2 vCPU, shared) and the VM (Apple M1 Max, aarch64) differ from the N5105 in CPU speed, architecture, memory and kernel. Absolute numbers do not count against §7. Comparisons between the two prototypes hold within an environment, and the ordering was the same in both, but both environments are headless sway with software rendering; the ordering may differ on the NUC's GPU path.
-- **The software-rendering setup is not neutral between the two prototypes.** libcosmic's default features have no `wgpu`, so its renderer is `iced_tiny_skia` (CPU) everywhere, including on the NUC: its M5 numbers are its real path, a GPU would not change them. Slint renders with femtovg on OpenGL ES, which here runs on Mesa's llvmpipe (see the `egl:` line in each `environment.txt`). Its M1, M3 and first-launch numbers therefore include loading LLVM and JIT-compiling shaders, likely the cause of the CI timeouts (footnote ¹) and part of its ~148 MB RSS; a GPU driver would not pay that cost. This setup favours libcosmic on M1 and M3, and says nothing about Slint on a GPU. If the NUC picks a GPU driver through the render node (`iris`), the `egl:` line will show it and Slint's numbers will change.
+- The NUC numbers are software-rendered (llvmpipe, headless sway): the N5105's GPU was not used. The CI runner (AMD EPYC, 2 vCPU, shared) and the VM (Apple M1 Max, aarch64) differ from the N5105 in CPU speed, architecture, memory and kernel. The VM and CI numbers do not count against §7; the NUC numbers are the closest to it, but still provisional. Comparisons between the two prototypes hold within an environment, and the ordering was the same in both, but both environments are headless sway with software rendering; the ordering may differ on the NUC's GPU path.
+- **The software-rendering setup is not neutral between the two prototypes.** libcosmic's default features have no `wgpu`, so its renderer is `iced_tiny_skia` (CPU) everywhere, including on the NUC: its M5 numbers are its real path, a GPU would not change them. Slint renders with femtovg on OpenGL ES, which here runs on Mesa's llvmpipe (see the `egl:` line in each `environment.txt`). Its M1, M3 and first-launch numbers therefore include loading LLVM and JIT-compiling shaders, likely the cause of the CI timeouts (footnote ¹) and part of its ~148 MB RSS; a GPU driver would not pay that cost. This setup favours libcosmic on M1 and M3, and says nothing about Slint on a GPU. The NUC's `egl:` line also shows llvmpipe, so Slint's NUC numbers carry the same software-rendering cost.
 - Sway runs headless (pixman) in every environment, not on a real display.
 - Runs go all libcosmic first, then all Slint (not alternating), so the one-time first-launch effect falls on different points for each toolkit.
 - Warm page cache; a true cold cache is not measured.
