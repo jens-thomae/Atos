@@ -56,6 +56,7 @@ If you run out of context or time before finishing, skip to step 7. A clear hand
 - UI changes follow the design system and have screenshot tests.
 - Affected docs are updated (component docs only; propose spec changes, don't make them).
 - A reviewer agent approved the PR, and the owner accepted it.
+- The owner delegates acceptance to the planner for cards that decide nothing, change no spec text and touch no security-relevant code; those merge once the reviewer approves and CI is green.
 
 ## Roles
 
