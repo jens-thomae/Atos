@@ -2,6 +2,7 @@
 name = "atos-comp-config"
 version = "1.0.0"
 edition = "2024"
+license = "GPL-3.0-only"
 
 [dependencies]
 cosmic-config = { git = "https://github.com/pop-os/libcosmic/" }

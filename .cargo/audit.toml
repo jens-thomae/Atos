@@ -1,0 +1,7 @@
+# cargo-audit config; run from the repository root. Keep in sync with deny.toml.
+[advisories]
+ignore = [
+  # quick-xml 0.39 in C2: build-time only (wayland-scanner), trusted input. See deny.toml.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
+]

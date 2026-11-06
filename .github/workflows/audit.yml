@@ -1,0 +1,56 @@
+name: Dependency audit
+
+# cargo-audit (RustSec advisories) and cargo-deny (advisories, licences, sources) over both
+# Cargo workspaces: the root one and components/c2-compositor/ (its own workspace).
+# Policy: deny.toml and .cargo/audit.toml. Docs: docs/components/c2-compositor/upstream.md.
+# Separate from ci.yml and c2-compositor.yml: no compile, no system libraries, ~1 minute.
+on:
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "deny.toml"
+      - ".cargo/audit.toml"
+      - ".github/workflows/audit.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "deny.toml"
+      - ".cargo/audit.toml"
+      - ".github/workflows/audit.yml"
+  schedule:
+    # New advisories appear without any commit: weekly, Monday 05:00 UTC.
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2
+
+      # rustup is preinstalled; cargo-deny reads the manifests, so the pinned toolchain is needed.
+      - run: rustup toolchain install
+
+      - name: cargo audit
+        run: |
+          cargo audit --file Cargo.lock
+          cargo audit --file components/c2-compositor/Cargo.lock
+
+      - name: cargo deny
+        run: |
+          cargo deny --manifest-path Cargo.toml check
+          cargo deny --manifest-path components/c2-compositor/Cargo.toml check

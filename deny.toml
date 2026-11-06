@@ -1,0 +1,107 @@
+# cargo-deny policy for both Cargo workspaces (root and components/c2-compositor).
+# Run: cargo deny --manifest-path <workspace>/Cargo.toml check   (docs/components/c2-compositor/upstream.md)
+
+[graph]
+# ponytail: Linux only; the OS ships on x86_64 and aarch64 (spec §1).
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
+[advisories]
+# Unmaintained/yanked crates warn (visible in the log); vulnerabilities always fail.
+unmaintained = "workspace"
+yanked = "warn"
+# Both are in quick-xml 0.39, used only by the wayland-scanner proc-macro at build time on
+# trusted protocol XML; neither is reachable at runtime. Fix needs quick-xml >= 0.41, which
+# needs a wayland-scanner release (upstream of Smithay). Revisit at every merge.
+# Keep in sync with .cargo/audit.toml.
+ignore = [
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml: build-time only (wayland-scanner), trusted input" },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml: build-time only (wayland-scanner), trusted input" },
+]
+
+[licenses]
+# Allow-list of dependency licences compatible with our code: MIT OR Apache-2.0 (D-013)
+# and GPL-3.0-only for C2 (D-013). Permissive licences only; GPL-3.0 is allowed because
+# C2 (and only C2) is GPL-3.0-only. A new licence needs a decision, not an edit here.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "MPL-2.0",
+  "Unlicense",
+  "GPL-3.0-only",
+  "GPL-3.0-or-later",
+]
+confidence-threshold = 0.9
+
+# Git crates without a licence field; the licence is the one in the repository's LICENSE
+# file (checked 2026-11-06): libcosmic and dbus-settings-bindings MPL-2.0,
+# cosmic-settings-daemon GPL-3.0-only, window_clipboard MIT.
+
+[[licenses.clarify]]
+crate = "cosmic-config"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "cosmic-config-derive"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "cosmic-theme"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "libcosmic"
+expression = "MPL-2.0"
+license-files = [{ path = "LICENSE", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "cosmic-settings-daemon"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE.md", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "cosmic-settings-config"
+expression = "GPL-3.0-only"
+license-files = [{ path = "../LICENSE", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "cosmic-settings-daemon-config"
+expression = "GPL-3.0-only"
+license-files = [{ path = "../LICENSE", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "dnd"
+expression = "MIT"
+license-files = [{ path = "../LICENSE", hash = 0x00000000 }]
+
+[[licenses.clarify]]
+crate = "mime"
+expression = "MIT"
+license-files = [{ path = "../LICENSE", hash = 0x00000000 }]
+
+[bans]
+multiple-versions = "allow"
+# C2 depends on its own path crates without a version, which cargo-deny counts as a wildcard.
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# C2 inherits upstream's git dependencies (Smithay, libcosmic, ...). Org-level allow;
+# the lockfile pins each revision.
+allow-org = { github = ["pop-os", "smithay"] }
+# Two forks upstream uses: cosmic-config atomic writes and id_tree (copy_clone branch).
+allow-git = [
+  "https://github.com/jackpot51/rust-atomicwrites",
+  "https://github.com/Drakulix/id-tree.git",
+]

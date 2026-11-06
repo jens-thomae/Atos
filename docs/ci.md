@@ -9,3 +9,4 @@ Free plan: 2,000 hosted minutes per month. `ci.yml` saves minutes as follows.
 - **Artifacts.** Every `upload-artifact` step sets `retention-days` (7 or 14).
 
 Docs-only commit used to demonstrate the skip: this file is documentation.
+- **`audit.yml`** (cargo audit and cargo deny, both workspaces, `docs/components/c2-compositor/upstream.md`): no compile, about 1–2 minutes. Runs only when a manifest, lockfile or the policy changes, plus once a week.
