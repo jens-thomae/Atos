@@ -1,0 +1,15 @@
+[package]
+name = "tokens"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+# JSON parsing for docs/design/tokens.json (D-009: serde_json is the standard, maintained JSON crate;
+# no derive macros, so the tree is serde + itoa + ryu + memchr; see the PR).
+serde_json = "1"
+
+[lints]
+workspace = true
