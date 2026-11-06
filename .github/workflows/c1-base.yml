@@ -69,9 +69,10 @@ jobs:
       # Fail before pushing, so no unsigned image reaches the registry.
       - name: Signing key is set up
         env:
-          HAS_KEY: ${{ secrets.COSIGN_PRIVATE_KEY != '' && secrets.COSIGN_PASSWORD != '' }}
+          # An empty COSIGN_PASSWORD is a valid key password for cosign; only the key must exist.
+          HAS_KEY: ${{ secrets.COSIGN_PRIVATE_KEY != '' }}
         run: |
-          [ "$HAS_KEY" = true ] || { echo "::error::COSIGN_PRIVATE_KEY/COSIGN_PASSWORD secrets missing, see docs/components/c1-base/README.md"; exit 1; }
+          [ "$HAS_KEY" = true ] || { echo "::error::COSIGN_PRIVATE_KEY secret missing, see docs/components/c1-base/README.md"; exit 1; }
           [ -f components/c1-base/cosign.pub ] || { echo "::error::components/c1-base/cosign.pub missing"; exit 1; }
 
       - run: podman build --pull=missing -t c1-base components/c1-base
