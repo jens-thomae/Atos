@@ -127,6 +127,10 @@ Entering emergency mode. Exit the shell to continue.
 
 A changed systemd-boot is refused the same way, by the firmware, before any of this runs. That case is by design and not tested separately: it is the same signature check as case 3.
 
+## Fallback B2: Fedora shim + MOK (spike)
+
+Card #76 tested D-014's fallback B2 in the dev VM: Fedora's Microsoft-signed shim starts our systemd-boot, which verifies the sealed UKI through the TEST cert enrolled as a MOK. It works. Fedora 45's x86_64 shim is dual-signed (UEFI CA 2011 and 2023); the aarch64 shim is 2023-only. The image does not ship shim. Findings, trust per step and open points: [`shim-mok-spike.md`](shim-mok-spike.md).
+
 ## Where it goes
 
 | Event | Result |
