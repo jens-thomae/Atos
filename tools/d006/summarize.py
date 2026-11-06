@@ -45,9 +45,12 @@ print("```text\n" + open(f"{root}/environment.txt").read().strip() + "\n```\n")
 
 # --- G1–G5 (D-006 §4.1) ------------------------------------------------------------------
 env = open(f"{root}/environment.txt").read()
-pattern = os.environ.get("D006_GPU_PATTERN") or (re.search(r"^gpu_pattern: (.*)$", env, re.M) or [0, "Intel"])[1]
-soft = "" if re.search("llvmpipe|lavapipe|softpipe|swrast", pattern) else r"llvmpipe|lavapipe|softpipe|swrast"
-is_gpu = lambda text: bool(re.search(pattern, text, re.I)) and not (soft and re.search(soft, text, re.I))
+# Hard-coded on purpose: a results directory can never be re-read with a weaker rule (§3.3, §4.1).
+pattern = "Intel"
+soft = r"llvmpipe|lavapipe|softpipe|swrast"
+is_gpu = lambda text: bool(re.search(pattern, text, re.I)) and not re.search(soft, text, re.I)
+RUNS_MIN = 5  # §4.1: each variant gets 5 runs
+runs = int((re.search(r"^runs: (\d+)", env, re.M) or [0, 0])[1])
 
 
 def proof(a):
@@ -66,16 +69,24 @@ def proof(a):
 
 
 def gates(a, cells, m5):
-    """{gate: (ok, text)} for one variant (§4.1). Every run counts, the NUC job uses 5."""
+    """{gate: (ok, text)} for one variant (§4.1). Every run counts: a missing, crashed or timed-out run fails its gate."""
     cold, rss, cpu = cells[a, "small"][0], cells[a, "small"][2], cells[a, "small"][3]
     c10 = cells[a, "10k"][0]
+    n1, n2 = len(cells[a, "small"][4]), len(cells[a, "10k"][4])  # launches that left an exit code
+    rcs = [int(open(f).read()) for f in sorted(glob.glob(f"{root}/m5/{a}-[0-9]*.rc"))]
     dr = [j["dropped"] for j in m5[a]]
+    full = lambda n: n == runs and n >= RUNS_MIN
+    note = lambda n: "" if full(n) else f"; **{n} of {runs} runs (need {RUNS_MIN}+ and all)**"
     out = {}
-    out["G1 cold start: every launch ≤ 300 ms"] = (bool(cold) and max(cold) <= 300, f"max {max(cold):.0f} ms of {len(cold)}" if cold else "n/a")
-    out["G2 10k first paint: every launch ≤ 500 ms"] = (bool(c10) and max(c10) <= 500, f"max {max(c10):.0f} ms of {len(c10)}" if c10 else "n/a")
+    out["G1 cold start: every launch ≤ 300 ms"] = (
+        full(n1) and len(cold) == n1 and max(cold) <= 300, (f"max {max(cold):.0f} ms of {len(cold)}" if cold else "n/a") + note(n1))
+    out["G2 10k first paint: every launch ≤ 500 ms"] = (
+        full(n2) and len(c10) == n2 and max(c10) <= 500, (f"max {max(c10):.0f} ms of {len(c10)}" if c10 else "n/a") + note(n2))
     out["G3 idle CPU: median ≤ 1 %"] = (bool(cpu) and statistics.median(cpu) <= 1, f"median {statistics.median(cpu):.2f} %" if cpu else "n/a")
+    ok4 = full(len(rcs)) and len(dr) == len(rcs) and all(r == 0 for r in rcs) and statistics.median(dr) == 0 and max(dr) <= 1
     out["G4 scrolling: median 0 dropped, no run above 1"] = (
-        bool(dr) and statistics.median(dr) == 0 and max(dr) <= 1, f"median {statistics.median(dr):g}, max {max(dr)} of {len(dr)} runs" if dr else "n/a")
+        ok4, (f"median {statistics.median(dr):g}, max {max(dr)} of {len(dr)} runs" if dr else "n/a")
+        + (f"; **scroll exit codes {rcs}**" if any(rcs) else "") + note(len(rcs)))
     out[f"G5 shell memory: {SHELL_N} × M3 ≤ {SHELL_SHARE_MB} MB"] = (
         bool(rss) and SHELL_N * statistics.median(rss) <= SHELL_SHARE_MB, f"{SHELL_N} × {statistics.median(rss):.0f} MB" if rss else "n/a")
     return out
@@ -124,7 +135,10 @@ print()
 print("### G1–G5: GPU gates (`docs/decisions/D-006-toolkit.md` §4.1)\n")
 print(f"A variant is evaluated only if its run is proven to use the GPU: the compositor's Wayland `egl:` line and the app's own "
       f"renderer line must match `{pattern}` (CPU renderers by design need only the `egl:` line). Otherwise **not measured**, never a GPU number. "
-      f"G5 uses N = {SHELL_N} and a {SHELL_SHARE_MB} MB shell share.\n")
+      f"G5 uses N = {SHELL_N} and a {SHELL_SHARE_MB} MB shell share. Every run must be present: {RUNS_MIN}+ runs, none missing or crashed.\n")
+hz = re.search(r"^output: .*@(\d+)Hz", env, re.M)
+if not hz or int(hz[1]) != 60:
+    print(f"> **Warning:** the output runs at {hz[1] + ' Hz' if hz else 'an unknown rate'}, but G4 is defined at 60 Hz (25 ms). Dropped frames here use 1.5 × that output's period.\n")
 print("| Variant | Renderer proof | " + " | ".join(["G1", "G2", "G3", "G4", "G5"]) + " | Result |\n| --- | --- | --- | --- | --- | --- | --- | --- |")
 details = []
 for a, t in APPS:

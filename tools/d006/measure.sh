@@ -11,8 +11,6 @@
 #                     (D006_RENDER_DEVICE, default /dev/dri/renderD128). Option A of D-006 §3.3.
 #   D006_COMPOSITOR   `existing`: do not start sway; use the running compositor (WAYLAND_DISPLAY,
 #                     SWAYSOCK). Option B: tools/d006/sway-drm.conf.
-#   D006_GPU_PATTERN  regex a renderer string must match to count as GPU (default `Intel`). Only for
-#                     testing the gate logic on software renderers (e.g. `llvmpipe`).
 #   D006_A11Y_VARIANTS  variants that get M6/M7 (default `iced slint`: the tree is renderer-independent)
 set -euo pipefail
 
@@ -28,6 +26,7 @@ A11Y=${D006_A11Y_VARIANTS:-iced slint}
 WORK=$(mktemp -d)
 # Own compositor: private runtime dir. Existing compositor: keep the real one (its socket lives there).
 [ "$COMPOSITOR" = existing ] || { export XDG_RUNTIME_DIR="$WORK/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"; }
+export MESA_SHADER_CACHE_DIR="$WORK/mesa-cache"  # no shader cache left by earlier runs warms the first launch
 trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$WORK"' EXIT
 # Variant wrappers: name, environment, binary. `exec` keeps the PID (the harness measures the PID).
 mkdir -p "$WORK/v"
@@ -50,8 +49,7 @@ APPS="iced:$WORK/v/iced iced-wgpu:$WORK/v/iced-wgpu slint:$WORK/v/slint slint-sw
   echo "sway: $(sway --version)"; echo "wtype: $(dpkg -s wtype 2>/dev/null | sed -n 's/^Version: //p')"
   echo "mesa: $(dpkg -s libgl1-mesa-dri 2>/dev/null | sed -n 's/^Version: //p')"
   echo "runs: $RUNS  cpu_window: $WINDOW"
-  echo "compositor: $COMPOSITOR  sway_renderer: $RENDERER"
-  echo "gpu_pattern: ${D006_GPU_PATTERN:-Intel}"
+  echo "compositor: $COMPOSITOR  sway_renderer: $([ "$COMPOSITOR" = existing ] && echo '(existing compositor)' || echo "$RENDERER")"
   for b in d006-iced d006-iced-wgpu d006-slint; do echo "$b: $(sha256sum "$BIN/$b" | cut -c1-16)"; done
 } >"$OUT/environment.txt"
 
@@ -82,24 +80,12 @@ output_info >>"$OUT/environment.txt"
 [ -s "$OUT/egl.txt" ] || echo "egl: none (no renderer line in the Wayland platform block)" >"$OUT/egl.txt"
 cat "$OUT/egl.txt" >>"$OUT/environment.txt"; rm "$OUT/egl.txt"
 
-# Renderer proof, part 2: each variant's own renderer line (stderr, `D006_RENDERER: ...`). Needs a
-# launch of its own: iced queries the adapter only when D006_RENDERER_PROBE is set, so the measured
-# runs below never pay for it.
 mkdir -p "$OUT/renderer"
 
 # --- fixture --------------------------------------------------------------------
 FX="$WORK/fx"; sh "$HERE/../../spikes/d006-fixture/make-fixture.sh" "$FX"
 (cd "$FX" && TZ=UTC find . \( -type f -printf '%p f %s %TY%Tm%Td%TH%TM\n' \) -o \( -type d -printf '%p d %TY%Tm%Td%TH%TM\n' \) | LC_ALL=C sort | sha256sum) \
   | sed 's/^/fixture digest: /' >>"$OUT/environment.txt"
-
-for a in $APPS; do
-  n=${a%%:*}; b=${a#*:}
-  D006_RENDERER_PROBE=1 "$b" "$FX/small" >/dev/null 2>"$OUT/renderer/$n.txt" & pid=$!
-  for _ in $(seq 200); do grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" && break; kill -0 $pid 2>/dev/null || break; sleep 0.1; done
-  kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true
-  grep -h '^D006_RENDERER:' "$OUT/renderer/$n.txt" | sed "s/^D006_RENDERER:/renderer $n:/" >>"$OUT/environment.txt" || true
-  grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" || echo "renderer $n: none" >>"$OUT/environment.txt"
-done
 
 # --- M1–M4: harness ---------------------------------------------------------------
 # Wrappers from the brief: exec keeps the PID. Paths contain a `/`.
@@ -135,6 +121,20 @@ for a in $APPS; do
     grep -E 'wl_surface@[0-9]+\.commit|BUDGET_FIRST_FRAME|D006_AUTOSCROLL' "$OUT/m5/$n-$i.log" | gzip -9 >"$OUT/m5/$n-$i.log.gz"
     rm "$OUT/m5/$n-$i.log"
   done
+done
+
+# --- Renderer proof, part 2 ---------------------------------------------------------------------
+# Each variant's own renderer line (stderr, `D006_RENDERER: ...`). One extra launch per variant: iced
+# queries the adapter only when D006_RENDERER_PROBE is set. It runs after M1–M5 so that it cannot warm
+# the page cache or the shader cache before G1's first launch (§4.1). Same compositor, so the proof holds.
+for a in $APPS; do
+  n=${a%%:*}; b=${a#*:}
+  D006_RENDERER_PROBE=1 "$b" "$FX/small" >/dev/null 2>"$OUT/renderer/$n.txt" & pid=$!
+  for _ in $(seq 200); do grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" && break; kill -0 $pid 2>/dev/null || break; sleep 0.1; done
+  kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true
+  grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" || echo "warning: $n logged no renderer line within 20 s (slow first start?)" >&2
+  grep -h '^D006_RENDERER:' "$OUT/renderer/$n.txt" | sed "s/^D006_RENDERER:/renderer $n:/" >>"$OUT/environment.txt" || true
+  grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" || echo "renderer $n: none" >>"$OUT/environment.txt"
 done
 
 # --- M6, M7: accessibility and keyboard, with the AT-SPI bus switched on -------------

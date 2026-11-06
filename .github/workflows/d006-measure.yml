@@ -99,13 +99,9 @@ jobs:
         run: |
           bundle/tools/d006/measure.sh bundle/bin results
           python3 bundle/tools/d006/summarize.py results | tee -a "$GITHUB_STEP_SUMMARY" >results/summary.md
-      # Software renderers only, so the gate table says "not measured" above. This check feeds the same
-      # results through the gate logic with llvmpipe accepted as "GPU" and requires pass or fail rows.
-      - name: Gate logic self-check (not a GPU result)
-        run: |
-          D006_GPU_PATTERN=llvmpipe python3 bundle/tools/d006/summarize.py results >results/gates-selfcheck.md
-          sed -n '/^### G1/,/^### M6/p' results/gates-selfcheck.md
-          grep -qE '\*\*(PASS|FAIL)\*\*' results/gates-selfcheck.md
+      # Edge cases of the gate logic on synthetic results (300 vs 301 ms, dropped-frame patterns, missing runs).
+      - name: Gate logic tests
+        run: python3 bundle/tools/d006/test_gates.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:

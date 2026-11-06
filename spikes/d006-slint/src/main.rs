@@ -250,8 +250,19 @@ fn main() -> Result<(), slint::PlatformError> {
     if std::env::var("SLINT_BACKEND").is_ok_and(|v| v.contains("software")) {
         // Renderer proof (stderr: stdout carries the markers): no GL, no Mesa in this process.
         eprintln!("D006_RENDERER: slint software (CPU)");
-        ui.on_first_frame(first_frame);
-        ui.invoke_arm_first_frame();
+        // The window event filter sees winit's RedrawRequested just before Slint draws and presents that
+        // frame in the same handler. A zero-delay timer posted from it runs on a later event-loop turn,
+        // so the marker is printed after the first frame was drawn and committed, never before.
+        use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent as W};
+        let mut first_frame = Some(first_frame);
+        ui.window().on_winit_window_event(move |_, ev| {
+            if matches!(ev, W::RedrawRequested) {
+                if let Some(f) = first_frame.take() {
+                    slint::Timer::single_shot(Duration::ZERO, f);
+                }
+            }
+            EventResult::Propagate
+        });
     } else {
         let mut first_frame = Some(first_frame);
         ui.window()

@@ -149,21 +149,21 @@ If the summary says the `egl:` line is still `llvmpipe` (headless sway did not h
 
 **Option B (fallback): a real display, as the owner, without touching the runner.** Needs a monitor and keyboard on the NUC and no root.
 
-1. On another machine, download the `d006-bundle` artifact of a workflow run (the hosted `build` job) and copy it to the NUC as `~/d006.tar.gz` (zip it first if GitHub gave a zip).
+1. On another machine, download the `d006-bundle` artifact of a workflow run (the hosted `build` job) from the run page; GitHub delivers it as a zip. Copy it to the NUC as `~/d006-bundle.zip`.
 2. Log in on the console (tty1) as the owner, so logind gives sway a seat. Unpack and start sway with [`tools/d006/sway-drm.conf`](../tools/d006/sway-drm.conf):
 
    ```sh
-   mkdir ~/d006 && tar -xzf ~/d006.tar.gz -C ~/d006 && cd ~/d006 && chmod +x bin/* tools/d006/* && sway -c tools/d006/sway-drm.conf
+   mkdir ~/d006 && python3 -m zipfile -e ~/d006-bundle.zip ~/d006 && cd ~/d006 && chmod +x bin/* tools/d006/* && sway -c tools/d006/sway-drm.conf
    ```
 
-   The config runs `D006_COMPOSITOR=existing D006_RENDERER=gles2 tools/d006/measure.sh bin out-gpu` inside that sway and then `swaymsg exit`.
+   (`python3 -m zipfile` is used because `unzip` may not be installed; the `chmod` restores the executable bits it drops.) The config runs `D006_COMPOSITOR=existing D006_RENDERER=gles2 tools/d006/measure.sh bin out-gpu` inside that sway and then `swaymsg exit`.
 3. Leave the machine alone until sway exits by itself (about 2 h 15 min). Then summarize and copy off the results:
 
    ```sh
    python3 tools/d006/summarize.py out-gpu > out-gpu/summary.md
    ```
 
-**Undo:** `rm -rf ~/d006 ~/d006.tar.gz`. Nothing else changed.
+**Undo:** `rm -rf ~/d006 ~/d006-bundle.zip`. Nothing else changed.
 
 ## Updates
 
