@@ -1,0 +1,111 @@
+# C1 base image (docs/components/c1-base/README.md).
+# Pull requests: build only. Merges to main: build, push to ghcr.io, sign with the CI test key.
+# Docs-only changes skip the build (docs/ci.md).
+name: C1 base image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# PRs: a new push cancels the older run. main: runs queue, so `latest` ends on the newest merge.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/jens-thomae/atos/c1-base
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: diff
+        shell: bash
+        # PR: HEAD is the merge commit, HEAD^1 the base. main: squash merges, so HEAD^1 is the previous main.
+        # ponytail: a direct multi-commit push to main is judged by its last commit only.
+        run: |
+          docs=$(git diff --no-renames --name-only HEAD^1 HEAD | bash tools/ci/is-docs-only.sh)
+          [ "$docs" = true ] && echo code=false >> "$GITHUB_OUTPUT" || echo code=true >> "$GITHUB_OUTPUT"
+
+  # Pull requests: no registry token, no signing key.
+  build:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: podman build --pull=missing -t c1-base components/c1-base
+      - name: countme is masked (D-005)
+        run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
+
+  publish:
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Fail before pushing, so no unsigned image reaches the registry.
+      - name: Signing key is set up
+        env:
+          HAS_KEY: ${{ secrets.COSIGN_PRIVATE_KEY != '' && secrets.COSIGN_PASSWORD != '' }}
+        run: |
+          [ "$HAS_KEY" = true ] || { echo "::error::COSIGN_PRIVATE_KEY/COSIGN_PASSWORD secrets missing, see docs/components/c1-base/README.md"; exit 1; }
+          [ -f components/c1-base/cosign.pub ] || { echo "::error::components/c1-base/cosign.pub missing"; exit 1; }
+
+      - run: podman build --pull=missing -t c1-base components/c1-base
+      - name: countme is masked (D-005)
+        run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
+
+      - name: Push
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # cosign reads $DOCKER_CONFIG/config.json; podman uses the same file.
+          export DOCKER_CONFIG="$RUNNER_TEMP/registry" REGISTRY_AUTH_FILE="$RUNNER_TEMP/registry/config.json"
+          printf 'DOCKER_CONFIG=%s\nREGISTRY_AUTH_FILE=%s\n' "$DOCKER_CONFIG" "$REGISTRY_AUTH_FILE" >> "$GITHUB_ENV"
+          mkdir -p "$DOCKER_CONFIG"
+          echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman push --digestfile digest c1-base "docker://$IMAGE:$GITHUB_SHA"
+          echo "DIGEST=$(cat digest)" >> "$GITHUB_ENV"
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3, cosign v3.1.4
+
+      # Legacy .sig format and no Rekor upload: podman/bootc (containers/image) verify only this
+      # format, and only key-based for GitHub identities. Why: docs/components/c1-base/README.md.
+      - name: Sign
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
+            --new-bundle-format=false --use-signing-config=false --tlog-upload=false \
+            "$IMAGE@$DIGEST"
+
+      # `latest` moves only after the signature verifies.
+      - name: Verify, then tag latest
+        run: |
+          cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
+            "$IMAGE@$DIGEST" > /dev/null
+          podman push c1-base "docker://$IMAGE:latest"
+          echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"
