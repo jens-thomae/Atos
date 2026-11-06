@@ -1,0 +1,10 @@
+# Atos base image (C1). Docs: docs/components/c1-base/README.md
+# Base: fedora-bootc 45 (D-008), multi-arch index digest; version 45.20261105.0.
+FROM quay.io/fedora/fedora-bootc:45@sha256:c3cccbe8c7263cfc610ca9697cf4e0a34bb5b590b394f413f1c159ef63fb15ac
+
+# D-005: no call home. Fedora's anonymous countme counter runs from this timer.
+RUN systemctl mask rpm-ostree-countme.timer
+
+LABEL org.opencontainers.image.title="Atos base"
+
+RUN bootc container lint
