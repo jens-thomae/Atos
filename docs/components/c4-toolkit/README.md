@@ -55,6 +55,6 @@ Slint is used under **GPL-3.0-only**, one of its three options. We do not use th
 
 | # | Patch | Files | Card | Why |
 | --- | --- | --- | --- | --- |
-| – | (none yet) | | | The queue is created by this card; patches follow in #62 (accessibility roles), #59 (layer-shell) and the clipboard card |
+| – | (none yet) | | | The queue is created by this card; patches follow in #62 (accessibility roles) and the clipboard card. The layer-shell spike (#59) needed none: see [layer-shell-spike.md](layer-shell-spike.md) |
 
 See [rebase.md](rebase.md) for the routine and the first dry-run record.
