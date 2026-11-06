@@ -1,0 +1,3 @@
+# Sealed composefs needs fs-verity, which XFS (the Fedora default) lacks.
+[install.filesystem.root]
+type = "ext4"

@@ -20,6 +20,7 @@ limactl stop atos / limactl delete atos    # stop, or throw it away
 - The Rust toolchain comes from `rust-toolchain.toml`; `cargo-nextest` is the version pinned in `.github/workflows/ci.yml` (`vm up` fails if they drift apart).
 - The VM is Ubuntu 24.04 to match the CI runner. It is a dev tool only, not a choice of base distribution (D-008), and may change after D-008.
 - The mount is set when the VM is created. After moving the checkout: `limactl delete atos && tools/dev-vm/vm up`.
+- `tools/dev-vm/sealed.sh` builds the sealed base image, installs it and boots it with Secure Boot under QEMU inside the VM, then runs a tamper check (#54). It needs the HWE kernel and is best run in its own instance; see [`docs/components/c1-base/`](components/c1-base/README.md#rebuild-and-boot-it-in-the-dev-vm).
 - `ATOS_VM=atos-check tools/dev-vm/vm up` creates a separate instance, for example to test a change to `atos.yaml` without touching `atos`. Delete it afterwards with `limactl delete -f atos-check`.
 
 ## Pinned inputs

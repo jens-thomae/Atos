@@ -1,6 +1,6 @@
 # C1 base image
 
-The Atos base image is a bootc container image (D-008), built from [`components/c1-base/Containerfile`](../../../components/c1-base/Containerfile) by [`.github/workflows/c1-base.yml`](../../../.github/workflows/c1-base.yml).
+The Atos base image is a bootc container image (D-008): a **sealed composefs image**, with a UKI and systemd-boot signed by a **test** Secure Boot key. It is built from [`components/c1-base/Containerfile`](../../../components/c1-base/Containerfile) by [`.github/workflows/c1-base.yml`](../../../.github/workflows/c1-base.yml).
 
 ## Base
 
@@ -15,23 +15,104 @@ The digest changes only through a reviewed change to the `FROM` line. CI builds 
 
 ## Our layers
 
-1. `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
-2. Label `org.opencontainers.image.title=Atos base`.
-3. `bootc container lint`: fails the build on image problems bootc knows about.
+The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstream's recipe, [bootc-sealed-images(7)](https://bootc.dev/bootc/building/bootc-sealed-images.7.html), in stages:
 
-`bootc` itself sends no counter: it only pulls our image from our registry. `dnf` in the image still has `countme=1` in Fedora's repo files. It sends the counter only when `dnf` runs on the host. Whether to strip it too is D-008 open question 4, for the owner.
+1. **`base`**
+   - `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
+   - Installs `systemd-boot-unsigned` and removes `bootupd`, `shim-*` and `grub2-efi-*`. Sealed images boot systemd-boot signed with our key, not Fedora's shim and GRUB (D-014). Without bootupd, `bootc install` picks systemd-boot.
+   - [`usr/lib/bootc/install/80-atos-rootfs.toml`](../../../components/c1-base/usr/lib/bootc/install/80-atos-rootfs.toml): the root filesystem is ext4. Sealing needs fs-verity, and XFS, Fedora's default, has none.
+   - [`usr/lib/bootc/kargs.d/10-atos-rw.toml`](../../../components/c1-base/usr/lib/bootc/kargs.d/10-atos-rw.toml): `rw`, as bootc's own sealed test images use. composefs keeps `/usr` read-only.
+   - The test keys' `PK.auth`, `KEK.auth` and `db.auth` in `/usr/lib/bootc/install/secureboot-keys/auto/`. `bootc install` copies them to the ESP as `loader/keys/auto/`.
+   - Label `org.opencontainers.image.title=Atos base`.
+2. **`tools`** (not shipped): `systemd-ukify` and `sbsigntools`, plus the test db key.
+3. **`sdboot`**: signs `systemd-boot*.efi` as `*.efi.signed`. `bootctl install` prefers the `.signed` file.
+4. **`kernel`**: the signed systemd-boot goes into `/usr`. `bootc container split-kernel-and-rootfs` moves the kernel and initramfs out of `/usr/lib/modules/<kver>/`, because they go into the UKI.
+5. **`rootfs`**: the tree that gets sealed. This stage does three things:
+   - Removes the split-out kernel.
+   - Sets every directory's mtime to the epoch, as the base image already has it. Without this, the digest computed from the filesystem at build time differs from the one `bootc install` computes from the OCI layers for every directory our layers touched, and the install fails with *"embedded composefs= digest … doesn't match"* (found while building this; see the composefs-rs design notes and [containers/composefs-rs#132](https://github.com/containers/composefs-rs/issues/132)).
+   - Runs `bootc container lint --fatal-warnings`.
+6. **`uki`** (not shipped): `bootc container ukify` computes the composefs digest of `rootfs`, writes it into the kernel command line (`composefs.digest=v1-sha512-12:<digest>`, plus the V2 `composefs=` form) and has `ukify` build a UKI signed with the test db key.
+7. **Final image**: `rootfs` plus the UKI in `/boot/EFI/Linux/<kver>.efi`. `/boot` is outside the digest; Secure Boot checks the UKI instead.
+
+[`check-seal.sh`](../../../components/c1-base/check-seal.sh) checks the result, and CI runs it on every build. First, `sbverify` checks that the UKI and `systemd-boot*.efi.signed` are signed by the test `db.crt`; this catches an output that silently stopped being signed. Second, it checks the digest the way `bootc install` will: it imports the image's OCI layers into a scratch composefs repository, computes the digest, and checks that the UKI carries it.
+
+## Test Secure Boot keys
+
+[`components/c1-base/secureboot-test/`](../../../components/c1-base/secureboot-test/) holds the **TEST** keys from [`generate.sh`](../../../components/c1-base/secureboot-test/generate.sh). They are RSA-2048 X.509, valid for 10 years, and each subject reads *"Atos TEST <PK|KEK|db> - not for release, do not trust"*.
+
+- `db.key` and `db.crt` sign systemd-boot and the UKI. **The private key is committed on purpose.** D-014 allows test keys "committed to the repo or a CI secret… public by design". With the key committed, pull-request builds seal fully, the dev VM can rebuild the image, and no secret is involved anywhere.
+- `PK.auth`, `KEK.auth` and `db.auth` are the signed EFI signature lists that systemd-boot enrols. The PK and KEK private keys were deleted after signing. Nothing needs them, which mirrors D-014's per-machine PK.
+- Consequence: **anyone can sign a UKI that boots where these keys are enrolled.** Enrol them only in VMs and on the NUC test box, never on a machine with data. They never go into a release db (D-014).
+- To rotate them, run `generate.sh` in the dev VM (`tools/dev-vm/vm run components/c1-base/secureboot-test/generate.sh`) and commit the result. Machines that already enrolled the old keys must reset their keys in firmware setup.
+
+**Enrolment.** systemd-boot's `secure-boot-enroll` defaults to `if-safe` ([loader.conf(5)](https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html)). In that mode it enrols the key set named `auto` by itself only if the firmware is in setup mode **and** it runs in a VM. Then it resets the machine. On real hardware it only offers a menu entry. bootc 1.17.1 (in fedora-bootc 45) does not yet copy an image-provided `loader.conf`, so the defaults apply.
+
+## Rebuild and boot it in the dev VM
+
+[`tools/dev-vm/sealed.sh`](../../../tools/dev-vm/sealed.sh) runs inside the dev VM ([`docs/dev-environment.md`](../../dev-environment.md)). It builds the image natively for **aarch64**, installs it to a raw disk, and boots it with QEMU on AAVMF Secure Boot firmware:
+
+```bash
+ATOS_VM=atos-c1 tools/dev-vm/vm up
+ATOS_VM=atos-c1 tools/dev-vm/vm run tools/dev-vm/sealed.sh all
+```
+
+`all` runs four steps, which can also run one at a time:
+
+| Step | Does | Measured (M1 Max, 2026-11-06) |
+| --- | --- | --- |
+| `build` | `sudo podman build -t localhost/c1-base components/c1-base` | 45 s with cached layers |
+| `disk` | `bootc install to-disk --generic-image --via-loopback` into `~/sealed/disk.raw` (20 GB, sparse) | 34 s |
+| `boot` | Boots with fresh firmware variables (setup mode). systemd-boot enrols the test keys and resets; the UKI then boots with Secure Boot on. A report unit prints `bootctl status`, `bootc status`, `/proc/cmdline` and the root mount, then powers off. Serial log: `tools/dev-vm/out/sealed/boot.log` | 7 min 51 s |
+| `tamper` | Three cases, see below. Logs: `tools/dev-vm/out/sealed/tamper-{object,erofs,uki}.log`. `tamper <case>` runs one | 5 min 49 s for all three |
+
+Notes:
+
+- **A separate instance.** The steps load the VM for minutes. A separate instance (`ATOS_VM=atos-c1`) keeps the shared `atos` VM free for other work.
+- **The VM kernel.** `bootc install` mounts the composefs EROFS image straight from a file, which needs Linux 6.12 or newer. Ubuntu 24.04's default 6.8 kernel fails with *"Block device required"*, so install the HWE kernel once: `limactl shell atos-c1 -- sudo apt-get install -y linux-generic-hwe-24.04`, then `limactl restart atos-c1`. It is not in `atos.yaml`, because a kernel installed during provisioning only takes effect after a restart.
+- **Slow boots.** Apple M1 has no nested virtualisation, so QEMU emulates the CPU. Under emulation, udev in the initrd needs longer than systemd's default 45 s to find the root partition. The boot step therefore passes a `JobRunningTimeoutSec=10min` drop-in for `/dev/gpt-auto-root` as a systemd credential. The report unit travels the same way, over SMBIOS. Both are VM-only: the image carries no test hook, and the sealed command line cannot be changed.
+- **aarch64, not amd64.** The dev VM boots an aarch64 build, while CI builds and publishes amd64. The Containerfile and the keys are the same. `bootc status` in the VM shows `architecture: arm64` and `image: localhost/c1-base`.
+
+## Tamper check
+
+`sealed.sh tamper` runs three cases. Each starts from a fresh copy of the installed disk, `~/sealed/tampered.raw`, makes one change an attacker with offline write access could make, and boots the copy with the already-enrolled keys (Secure Boot on). The script stops QEMU once the boot halts. Results from 2026-11-06, filtered serial logs:
+
+**1. `object`: a file in `/usr`.** The deployed EROFS image is a metadata-only tree: for each file, it names the content object in `/composefs/objects/` by its fs-verity digest. The script finds the object behind `/usr/lib/systemd/systemd`, appends 8 bytes and **re-enables fs-verity** on it, with composefs' own parameters (SHA-512, 4 KiB blocks). So the file has a valid digest of its own, just not the one the image names. The kernel's overlayfs refuses it, systemd in the initrd cannot start the real init, and the machine stops:
+
+```
+[  111.755030] overlayfs: lower file 'a888b30b…5d20' has the wrong fs-verity digest
+[  112.527978] systemd[1]: Failed to execute /sbin/init, giving up: Input/output error
+[  112.534131] systemd[1]: Freezing execution.
+```
+
+A modified file that is not needed at boot is caught the same way when it is first read: the read fails with an I/O error.
+
+**2. `erofs`: the image itself.** The script flips the last byte of the deployed EROFS image and re-enables fs-verity the same way. Its digest no longer matches the one in the UKI command line, so `bootc-root-setup` in the initrd refuses to mount it, and the boot drops to the emergency shell:
+
+```
+[  101.587408] initramfs-setup[504]:     1: Failed to mount composefs image
+[  101.693627] initramfs-setup[504]:     5: fs-verity content mismatch
+Entering emergency mode. Exit the shell to continue.
+```
+
+**3. `uki`: the signed command line.** The script changes the first digit of `composefs.digest=` inside the UKI on the ESP. The UKI's Secure Boot signature no longer matches, so the firmware refuses to load it when systemd-boot asks:
+
+```
+../src/boot/boot.c:3024@call_image_start: Error loading EFI binary \EFI\Linux\bootc\bootc_composefs-b35b9ce1….efi: Access denied
+```
+
+A changed systemd-boot is refused the same way, by the firmware, before any of this runs. That case is by design and not tested separately: it is the same signature check as case 3.
 
 ## Where it goes
 
 | Event | Result |
 | --- | --- |
-| Pull request (not docs-only) | Build and countme check. No registry token, no signing key. |
-| Merge to `main` (not docs-only) | Build, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Each merge has its own concurrency group, so none is dropped. |
+| Pull request (not docs-only) | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`. No registry token, no cosign key. |
+| Merge to `main` (not docs-only) | Build, countme check, `check-seal.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Each merge has its own concurrency group, so none is dropped. |
 | Docs-only change (`tools/ci/is-docs-only.sh`) | Skipped. |
 
 **Public pulls (owner step, once).** A package pushed from a private repository starts private. After the first push to `main`, set the package to public: GitHub → Packages → `atos/c1-base` → Package settings → Change visibility → Public. **This cannot be undone:** a public package cannot be made private again. Then pulls need no account (D-005). The REST API cannot change package visibility.
 
-## Signing: CI-held test key
+## Image signing: CI-held test key
 
 The image is signed with a **test key** held as repository secrets, in cosign's legacy `.sig` format, without a Rekor upload. It is not the release key; that strategy is card #53.
 
@@ -96,8 +177,8 @@ GitHub bills each job rounded up to a whole minute.
 
 | Run | Measured | Billed |
 | --- | --- | --- |
-| Pull request: `changes` + `build` | 7 s + 46 s (pull about 40 s, build and lint 2 s) | 2 min |
-| Merge to `main`: `changes` + `publish` | not run yet; estimate: build 1 min, first push of about 1 GB 2–4 min | about 4–6 min first run, then about 2–3 min |
+| Pull request: `changes` + `build` | 6 s + 3 min 30 s (build with two `dnf` installs and the UKI 2 min, `check-seal.sh` 1 min 24 s), [run 42248379819](https://github.com/jens-thomae/Atos/actions/runs/42248379819) | 5 min (was 2 min before sealing) |
+| Merge to `main`: `changes` + `publish` | Not run with sealing yet. Estimate: build and check 3.5 min; push 1–2 min, since every merge uploads the changed layers, including the UKI of about 110 MB | about 6–7 min |
 | Docs-only | `changes` only | 1 min |
 
 ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded. The base pull from quay.io (about 1 GB) happens on every run.

@@ -1,0 +1,2 @@
+# The physical root is mounted read-write; composefs keeps /usr read-only (as bootc's own sealed test images).
+kargs = ["rw"]
