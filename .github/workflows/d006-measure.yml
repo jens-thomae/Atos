@@ -108,6 +108,7 @@ jobs:
           name: d006-results-hosted
           path: results/
           if-no-files-found: warn
+          retention-days: 14
 
   # Reference hardware. Runs only if `build` succeeded, so the fork rule above covers it.
   measure-nuc:
@@ -152,3 +153,4 @@ jobs:
           name: d006-results-nuc
           path: results/
           if-no-files-found: warn
+          retention-days: 14

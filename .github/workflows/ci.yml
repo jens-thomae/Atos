@@ -23,8 +23,39 @@ env:
   NEXTEST_SHA256: b0959bc64232974224cf9fb22c915845398c0e8668fa7831eb5b43fb1eef781f
 
 jobs:
+  # Decides whether the full build is needed. Not `paths-ignore`: a path-filtered workflow
+  # leaves a required `rust` check Pending forever. A job skipped by `if` reports Success
+  # instead, so docs-only PRs stay mergeable if branch protection is added (docs/ci.md).
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: diff
+        shell: bash
+        run: |
+          # Push to main and the nightly always build. On a PR, HEAD is the merge commit; HEAD^1 is the base.
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          # Docs-only = every file is under docs/, a *.md or a LICENSE*; never under .github/ or tools/.
+          code=false
+          while IFS= read -r f; do
+            case "$f" in
+              .github/*|tools/*) code=true ;;
+              docs/*|*.md|LICENSE*|*/LICENSE*) ;;
+              *) code=true ;;
+            esac
+          done < <(git diff --name-only HEAD^1 HEAD)
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   # ponytail: one job, so the workspace compiles once; split into parallel jobs if it gets slow.
   rust:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

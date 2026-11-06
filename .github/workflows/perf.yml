@@ -103,6 +103,7 @@ jobs:
           name: perf-results
           path: results/
           if-no-files-found: warn
+          retention-days: 14
 
   # Compares with the previous nightly on a hosted runner, so the NUC needs no `gh`.
   compare:
