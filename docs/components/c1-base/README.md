@@ -17,12 +17,14 @@ The digest changes only through a reviewed change to the `FROM` line. CI builds 
 
 The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstream's recipe, [bootc-sealed-images(7)](https://bootc.dev/bootc/building/bootc-sealed-images.7.html), in stages:
 
+0. **`comp`** (not shipped): builds `atos-comp` (C2) from `components/c2-compositor/` on the same Fedora base with the pinned toolchain (`rust-toolchain.toml`, rustup-init pinned by version). Only the stripped binary is copied into `base`; the toolchain and `target/` are deleted in the same step, because they do not fit the runner's disk as a layer.
 1. **`base`**
    - `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
    - Installs `systemd-boot-unsigned` and removes `bootupd`, `shim-*` and `grub2-efi-*`. Sealed images boot systemd-boot signed with our key, not Fedora's shim and GRUB (D-014). Without bootupd, `bootc install` picks systemd-boot.
    - [`usr/lib/bootc/install/80-atos-rootfs.toml`](../../../components/c1-base/usr/lib/bootc/install/80-atos-rootfs.toml): the root filesystem is ext4. Sealing needs fs-verity, and XFS, Fedora's default, has none.
    - [`usr/lib/bootc/kargs.d/10-atos-rw.toml`](../../../components/c1-base/usr/lib/bootc/kargs.d/10-atos-rw.toml): `rw`, as bootc's own sealed test images use. composefs keeps `/usr` read-only.
    - The test keys' `PK.auth`, `KEK.auth` and `db.auth` in `/usr/lib/bootc/install/secureboot-keys/auto/`. `bootc install` copies them to the ESP as `loader/keys/auto/`.
+   - The session (below): `greetd`, Xwayland, Mesa, `xterm`, `session/` (greetd config, `atos` user) and `atos-comp` copied from the `comp` stage.
    - Label `org.opencontainers.image.title=Atos base`.
 2. **`tools`** (not shipped): `systemd-ukify` and `sbsigntools`, plus the test db key.
 3. **`sdboot`**: signs `systemd-boot*.efi` as `*.efi.signed`. `bootctl install` prefers the `.signed` file.
@@ -35,6 +37,29 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
 7. **Final image**: `rootfs` plus the UKI in `/boot/EFI/Linux/<kver>.efi`. `/boot` is outside the digest; Secure Boot checks the UKI instead.
 
 [`check-seal.sh`](../../../components/c1-base/check-seal.sh) checks the result, and CI runs it on every build. First, `sbverify` checks that the UKI and `systemd-boot*.efi.signed` are signed by the test `db.crt`; this catches an output that silently stopped being signed. Second, it checks the digest the way `bootc install` will: it imports the image's OCI layers into a scratch composefs repository, computes the digest, and checks that the UKI carries it.
+
+## Session: greetd autologin into atos-comp
+
+Booting the image lands in a graphical session run by `atos-comp` (C2), with Xwayland (card #58). It is part of `base`, so it is inside the sealed digest.
+
+- **Build context.** `podman build --build-context repo=. -t c1-base components/c1-base`: `repo` is the repository root, where the compositor source and the toolchain pin live. The main context stays `components/c1-base`.
+- **Session path.** `greetd` (enabled; default target `graphical.target`) starts `atos-comp` as user `atos` through `initial_session` on tty1. If the compositor exits, greetd shows a text login on tty1 (`agreety`, as user `greetd`, asks for a real password). The user comes from `session/usr/lib/sysusers.d/atos.conf`: no password, so it is locked and reachable only through the autologin; no supplementary groups. Seat, DRM and input access come from logind. `atos-comp` starts Xwayland itself (`DISPLAY=:0`).
+- **Why greetd with autologin, not SDDM or GDM.** The spec does not decide a display manager; this is the smallest thing that gets a session. greetd is a small Rust daemon with no GUI toolkit dependency (SDDM pulls Qt, GDM pulls GNOME), uses PAM and logind properly, and `initial_session` is exactly autologin. C3 or C11 can replace it with a real greeter by changing `session/etc/greetd/config.toml`. Autologin is acceptable only while there is no installer, user account or disk encryption; revisit it with C11.
+- **`xterm`** is in the image only as the X11 test client for Xwayland, until a native X11 app is in the suite. CI proves that `Xwayland` is present, not that it starts; the VM demo shows that.
+
+### Demo (dev VM, 2026-11-06)
+
+The sealed image, installed with `bootc install to-disk` and booted with Secure Boot under QEMU without KVM (aarch64, software rendering, `virtio-gpu-pci`; minutes per boot). Not a budget measurement.
+
+| Session | An X11 app (`xterm`, `DISPLAY=:0`) |
+| --- | --- |
+| ![session](session-boot.png) | ![xterm](session-xterm.png) |
+
+The `xterm` was started by a test-only edit of `/etc/greetd/config.toml` on the test disk (`/etc` is outside the sealed `/usr` digest); the image itself starts only `atos-comp`. A first try with a unit passed as a systemd credential timed out waiting for the X socket, probably because the login session has its own `/tmp` (`pam_namespace`); not investigated further. The window frame is still COSMIC's look (D-007). No shell surfaces yet (C3).
+
+### Size
+
+Image 2.10 GB (base) to 2.91 GB (+0.81 GB, uncompressed, arm64, `podman images` in the dev VM). That includes #54's sealing (UKI about 110 MB, systemd-boot) and the session; the session alone was +0.46 GB before sealing. `atos-comp` is 30 MB stripped. The compressed amd64 size is not measured.
 
 ## Test Secure Boot keys
 
@@ -180,5 +205,7 @@ GitHub bills each job rounded up to a whole minute.
 | Pull request: `changes` + `build` | 6 s + 3 min 30 s (build with two `dnf` installs and the UKI 2 min, `check-seal.sh` 1 min 24 s), [run 42248379819](https://github.com/jens-thomae/Atos/actions/runs/42248379819) | 5 min (was 2 min before sealing) |
 | Merge to `main`: `changes` + `publish` | Not run with sealing yet. Estimate: build and check 3.5 min; push 1–2 min, since every merge uploads the changed layers, including the UKI of about 110 MB | about 6–7 min |
 | Docs-only | `changes` only | 1 min |
+
+With the compositor (card #58), the `build` job takes 15 min 26 s on the hosted runner ([run 42255610424](https://github.com/jens-thomae/Atos/actions/runs/42255610424)): freeing disk 1 min 54 s, `podman build` 13 min 24 s (mostly the Rust build of `atos-comp`). That is about 16 billed minutes for every push to a pull request and every merge to `main` that touches C1 or C2, with no build cache: about 125 such runs a month fill the Free plan's 2,000 minutes. A cache is tracked in [#86](https://github.com/jens-thomae/Atos/issues/86).
 
 ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded. The base pull from quay.io (about 1 GB) happens on every run.
