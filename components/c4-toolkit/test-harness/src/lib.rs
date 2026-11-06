@@ -140,3 +140,11 @@ pub fn find_by_label(root: &impl ComponentHandle, label: &str) -> Option<Element
     root.show().expect("show");
     ElementHandle::find_by_accessible_label(root, label).next()
 }
+
+/// All elements with this accessible role, in document order.
+pub fn elements_with_role(root: &impl ComponentHandle, role: AccessibleRole) -> Vec<ElementHandle> {
+    root.show().expect("show");
+    ElementQuery::from_root(root)
+        .match_predicate(move |e| e.accessible_role() == Some(role))
+        .find_all()
+}
