@@ -1,0 +1,22 @@
+// Atos sample config (spike only, not the real schema).
+
+shell {
+    preset "classic"      // classic | minimal | tablet
+    dock-position "bottom"
+}
+
+// Keybindings: order matters for display in Settings.
+keybindings {
+    bind "Super+Return" action="open-terminal"
+    bind "Super+Space" action="palette"   // palette
+    bind "Super+Q" action="close-window"
+}
+
+workspace "Work" {
+    window-mode "tiling"   // tiling | floating
+}
+
+theme {
+    // Override one design token.
+    token "color.accent" "#3584e4"
+}

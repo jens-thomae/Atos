@@ -1,0 +1,26 @@
+# Atos sample config (spike only, not the real schema).
+
+[shell]
+preset = "classic"      # classic | minimal | tablet
+dock_position = "bottom"
+
+# Keybindings: order matters for display in Settings.
+[[keybinding]]
+keys = "Super+Return"
+action = "open-terminal"
+
+[[keybinding]]
+keys = "Super+Space"   # palette
+action = "palette"
+
+[[keybinding]]
+keys = "Super+Q"
+action = "close-window"
+
+[[workspace]]
+name = "Work"
+window_mode = "tiling"   # tiling | floating
+
+[theme.tokens]
+# Override one design token.
+"color.accent" = "#3584e4"

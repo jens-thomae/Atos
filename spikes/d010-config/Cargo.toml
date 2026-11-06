@@ -1,0 +1,12 @@
+# Throwaway spike for D-010 (card #2). Not part of the main workspace.
+[package]
+name = "d010-config"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+toml_edit = "0.25"
+kdl = "6.7"
