@@ -1,0 +1,42 @@
+import "../../fonts/NotoSans-Regular.ttf";
+import { StandardTableView } from "std-widgets.slint";
+
+export component RolesTable inherits Window {
+    width: 480px;
+    height: 300px;
+    default-font-family: "Noto Sans";
+    StandardTableView {
+        columns: [{ title: "Name" }, { title: "Size" }];
+        rows: [
+            [{ text: "docs" }, { text: "-" }],
+            [{ text: "notes.txt" }, { text: "2 KB" }],
+        ];
+        current-row: 1;
+    }
+}
+
+export component RolesMenu inherits Window {
+    width: 300px;
+    height: 200px;
+    default-font-family: "Noto Sans";
+    public function open() { area.show({ x: 10px, y: 10px }); }
+    area := ContextMenuArea {
+        Menu {
+            MenuItem { title: "Open"; }
+            MenuItem { title: "Copy Path"; }
+        }
+        Rectangle { background: #303030; }
+    }
+}
+
+export component RolesDialog inherits Window {
+    width: 300px;
+    height: 150px;
+    default-font-family: "Noto Sans";
+    // An in-window dialog, as apps build them today: the role is set by the app.
+    Rectangle {
+        accessible-role: dialog;
+        accessible-label: "Properties";
+        Text { text: "Size: 2 KB"; }
+    }
+}
