@@ -39,7 +39,7 @@ The six priorities guide every decision. They are not strictly ranked, but when 
 
 Positioning in one line: your computer — no account, no ads, no telemetry, nothing that breaks on update.
 
-The design system is not kept in this repository. The owner provides it when a task needs it; agents doing UI work use only its values and ask if it is missing.
+The design system's token values live in `docs/design/tokens.json`, versioned in this repository; only the owner approves changes to it, and it will keep changing while the owner uses the system. Mockups and the design canvas stay with the owner. Agents doing UI work use only token values and ask if one is missing.
 
 ## 3. Scope
 
@@ -129,6 +129,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 - Three layout presets: Balanced (default), Classic Mac, Focused.
 - Privacy indicator whenever camera, microphone or screen capture is active.
 - Every shell action has a rebindable shortcut and appears in the command palette.
+- The command palette evaluates calculations inline and copies the result.
 
 ### C4 UI toolkit and SDK
 
@@ -163,6 +164,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 - Every setting is stored in a readable config file (decision D-010); Settings and the file never disagree.
 - Versioned extension API with defined extension points: shell applets, palette providers, tiling layouts, file actions. Extensions run out of process or in WASM.
 - Risky changes show a warning that can be disabled in Settings → Advanced.
+- An option to derive the OS colour theme from the wallpaper; derived colours still meet the §7 contrast budgets.
 
 ### C9 Connectivity and devices
 
