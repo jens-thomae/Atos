@@ -4,9 +4,9 @@ D-007: we carry our fork and follow upstream by **merging, never by contributing
 
 ## Merge routine
 
-**Rhythm (proposal, the owner confirms):** one merge per upstream Epoch tag (`epoch-X.Y.Z` on <https://github.com/pop-os/cosmic-comp>), started within two weeks of the tag. Between tags we merge only security fixes (next section). Epoch releases are the only points upstream calls stable; merging `master` continuously would mean tracking half-finished work for no gain. If an Epoch tag is more than 6 months old with no newer one, do a merge against `master` once, so drift stays bounded.
+**Rhythm (confirmed, owner, 2026-11-06 on #57):** one merge per upstream Epoch tag (`epoch-X.Y.Z` on <https://github.com/pop-os/cosmic-comp>), started within two weeks of the tag. Between tags we merge only security fixes (next section). Epoch releases are the only points upstream calls stable; merging `master` continuously would mean tracking half-finished work for no gain. If the newest Epoch tag is more than 3 months old, do a merge against `master` once (the watch workflow opens that card), so drift stays bounded.
 
-Check for a new tag: `git ls-remote --tags https://github.com/pop-os/cosmic-comp 'epoch-*'`.
+The `Upstream watch` workflow opens "C2: merge epoch-X.Y.Z" when a tag appears. Manual check: `git ls-remote --tags https://github.com/pop-os/cosmic-comp 'epoch-*'`.
 
 Steps (a Builder on a card "C2: merge epoch-X.Y.Z"):
 
@@ -31,8 +31,8 @@ Append a row per run. Expect conflicts to grow with every downstream feature (sc
 Goal: an upstream security fix reaches `atos-comp` within days, outside the merge rhythm.
 
 1. **Dependencies (automatic).** `audit.yml` runs `cargo audit` and `cargo deny` weekly (Monday) and on every change to a manifest or lockfile. A new RustSec advisory for any crate in C2's lockfile (Smithay, libcosmic and the rest included) fails the scheduled run. Fix: `cargo update -p <crate>` in `components/c2-compositor/`, or a documented ignore in `deny.toml` + `.cargo/audit.toml` when it is unreachable (see the quick-xml entries).
-2. **cosmic-comp itself (manual, cheap).** The owner watches `pop-os/cosmic-comp` on GitHub for *Security alerts* and *Releases* (Watch → Custom; watching is not contributing). Anything labelled security, plus the weekly check below, opens a card "C2: cherry-pick upstream fix <ref>".
-3. **Weekly check.** Whoever does the Monday audit-run triage also runs `git log --since='8 days ago' --grep -iE 'security|CVE|overflow|use-after|unsound|crash' origin/master` in a throwaway clone of upstream and reads hits. ponytail: manual; automate with a scheduled agent only if it proves worth it.
+2. **cosmic-comp itself (automatic).** `upstream-watch.yml` runs every Monday on a hosted runner (`tools/ci/upstream-watch.sh`, tested by `tools/ci/test-upstream-watch.sh`). It reads `pop-os/cosmic-comp` anonymously and opens, labelled `c2-compositor` and never twice for the same title: "C2: cherry-pick upstream fix <sha>" for each `master` commit of the last 8 days whose message matches `security|CVE|overflow|use-after|unsound|crash`; "C2: merge epoch-X.Y.Z" for each Epoch tag newer than the README fork point; "C2: merge master (fallback)" if the newest tag is older than 3 months (at most once per 3 months). Keyword hits include false positives: the triager reads the commit and closes the card if it is not a reachable security fix. Permissions: `contents: read`, `issues: write`. Test it with Actions > Upstream watch > Run workflow (`dry_run` is on by default and prints what it would open; `since_days` widens the window). Owner GitHub watching is no longer needed.
+3. **Commits without keywords** are caught by the next Epoch merge. ponytail: keyword match only; widen it if a fix is ever missed.
 4. **Cherry-pick.** Take the upstream commit's diff (`git show <sha> | git apply --directory=components/c2-compositor`, with the path mapping of the merge routine), one commit `T-NNN: cherry-pick upstream <sha> (<what>)`, and add a line to the README "Downstream changes" so the next merge knows the fix is already in (the merge then drops it).
 5. **Severity.** A fix for something reachable from a client or from input is released with the next image; others wait for the next merge.
 
