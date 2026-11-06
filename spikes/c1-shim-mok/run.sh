@@ -9,6 +9,7 @@
 #   direct     baseline: systemd-boot started directly under the Microsoft db (expect: refused)
 #   nomok      shim -> systemd-boot with an empty MokList; nobody at the keyboard
 #   enroll     the same, but enrol the cert in MokManager ("Enroll key from disk"), then boot on
+#   enrolled   boot again with that MOK in place; the report shows which kernel keyring holds it
 #   tamper     MOK enrolled, one byte of the UKI's command line changed (expect: refused)
 #   x64        shimx64 under OVMF (x86 TCG) with db = UEFI CA 2011 only, then 2023 only
 #   all        everything in order
@@ -73,7 +74,7 @@ After=multi-user.target
 [Service]
 Type=oneshot
 StandardOutput=journal+console
-ExecStart=/bin/sh -c "echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | head -25; echo; for v in MokListRT MokListTrustedRT SbatLevelRT; do ls /sys/firmware/efi/efivars/$v-* 2>&1; done; echo; grep -h . /proc/keys | grep -iE \"asymmetric\" ; echo; cat /sys/kernel/security/lockdown; cat /proc/cmdline; echo ATOS-REPORT-END"
+ExecStart=/bin/sh -c "echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | head -25; echo; for v in MokListRT MokListTrustedRT SbatLevelRT; do ls /sys/firmware/efi/efivars/$v-* 2>&1; done; echo; grep -E \"keyring +[.](machine|platform|secondary_trusted_keys|builtin_trusted_keys)|Atos|fedoraca\" /proc/keys; od -An -tx1 /sys/firmware/efi/efivars/MokListTrustedRT-605dab50-e046-4300-abb6-3dd810dd8b23; echo; cat /sys/kernel/security/lockdown; cat /proc/cmdline; echo ATOS-REPORT-END"
 ExecStartPost=/usr/bin/systemctl poweroff --no-block'
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 
@@ -136,6 +137,12 @@ step_enroll() {
     "until:$HALT"
 }
 
+# A second boot with the MOK from `enroll` already in place: no MokManager, report only.
+step_enrolled() {
+  cp $W/vars.fd $W/vars-enrolled.fd
+  qemu_a64 $W/shim.raw $W/vars-enrolled.fd enrolled "until:$HALT"
+}
+
 step_tamper() {
   cp --sparse=always $W/shim.raw $W/tamper.raw
   open_esp $W/tamper.raw
@@ -177,10 +184,10 @@ step_x64() {
 }
 
 case "${1:-}" in
-  fetch|sigs|disk|direct|nomok|enroll|tamper|x64) "step_$1" ;;
+  fetch|sigs|disk|direct|nomok|enroll|enrolled|tamper|x64) "step_$1" ;;
   # try <drive.py steps...>: shim.raw with fresh Microsoft vars, for finding out what MokManager shows
   try) shift; ms_vars $W/vars-try.fd; qemu_a64 $W/shim.raw $W/vars-try.fd try "$@" || true
     tr -d '\r' < $OUT/try.log | sed 's/\x1b\[[0-9;?]*[a-zA-Z]/\n/g' | grep -av '^[ |/\\-]*$' | tail -60 | cut -c1-160 ;;
-  all) for s in fetch sigs disk direct nomok enroll tamper x64; do "step_$s"; done ;;
+  all) for s in fetch sigs disk direct nomok enroll enrolled tamper x64; do "step_$s"; done ;;
   *) sed -n '2,16p' "$0" >&2; exit 2 ;;
 esac
