@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Atos <atos@localhost>
+Date: Fri, 6 Nov 2026 21:42:43 +0100
+Subject: [PATCH] a11y: add Row, ColumnHeader, Menu, MenuItem and Dialog
+ accessible roles
+
+Map them in the AccessKit, Qt and testing backends.
+---
+ internal/backends/qt/qt_accessible.rs          |  5 +++++
+ internal/backends/testing/introspection/mod.rs | 10 ++++++++++
+ internal/backends/testing/slint_systest.proto  |  5 +++++
+ internal/backends/winit/accesskit.rs           |  5 +++++
+ internal/common/enums.rs                       | 10 ++++++++++
+ 5 files changed, 35 insertions(+)
+
+diff --git a/internal/backends/qt/qt_accessible.rs b/internal/backends/qt/qt_accessible.rs
+index c44edad..1525e51 100644
+--- a/internal/backends/qt/qt_accessible.rs
++++ b/internal/backends/qt/qt_accessible.rs
+@@ -339,6 +339,11 @@ fn arm_focus_delegation_tracker(self: Pin<&Self>) {
+                     i_slint_core::items::AccessibleRole::RadioButton => QAccessible_Role_RadioButton,
+                     i_slint_core::items::AccessibleRole::RadioGroup => QAccessible_Role_Grouping,
+                     i_slint_core::items::AccessibleRole::WindowTitleBar => QAccessible_Role_TitleBar,
++                    i_slint_core::items::AccessibleRole::Row => QAccessible_Role_Row,
++                    i_slint_core::items::AccessibleRole::ColumnHeader => QAccessible_Role_ColumnHeader,
++                    i_slint_core::items::AccessibleRole::Menu => QAccessible_Role_PopupMenu,
++                    i_slint_core::items::AccessibleRole::MenuItem => QAccessible_Role_MenuItem,
++                    i_slint_core::items::AccessibleRole::Dialog => QAccessible_Role_Dialog,
+                     i_slint_core::items::AccessibleRole::Banner => QAccessible_Role_Section,
+                     i_slint_core::items::AccessibleRole::Complementary => QAccessible_Role_ComplementaryContent,
+                     i_slint_core::items::AccessibleRole::ContentInfo => QAccessible_Role_Footer,
+diff --git a/internal/backends/testing/introspection/mod.rs b/internal/backends/testing/introspection/mod.rs
+index dfc4443..4171e05 100644
+--- a/internal/backends/testing/introspection/mod.rs
++++ b/internal/backends/testing/introspection/mod.rs
+@@ -813,6 +813,11 @@ pub(crate) fn convert_to_proto_accessible_role(
+         i_slint_core::items::AccessibleRole::WindowTitleBar => {
+             proto::AccessibleRole::WindowTitleBar
+         }
++        i_slint_core::items::AccessibleRole::Row => proto::AccessibleRole::Row,
++        i_slint_core::items::AccessibleRole::ColumnHeader => proto::AccessibleRole::ColumnHeader,
++        i_slint_core::items::AccessibleRole::Menu => proto::AccessibleRole::Menu,
++        i_slint_core::items::AccessibleRole::MenuItem => proto::AccessibleRole::MenuItem,
++        i_slint_core::items::AccessibleRole::Dialog => proto::AccessibleRole::Dialog,
+         i_slint_core::items::AccessibleRole::Banner => proto::AccessibleRole::Banner,
+         i_slint_core::items::AccessibleRole::Complementary => proto::AccessibleRole::Complementary,
+         i_slint_core::items::AccessibleRole::ContentInfo => proto::AccessibleRole::ContentInfo,
+@@ -866,6 +871,11 @@ pub(crate) fn convert_from_proto_accessible_role(
+         proto::AccessibleRole::WindowTitleBar => {
+             i_slint_core::items::AccessibleRole::WindowTitleBar
+         }
++        proto::AccessibleRole::Row => i_slint_core::items::AccessibleRole::Row,
++        proto::AccessibleRole::ColumnHeader => i_slint_core::items::AccessibleRole::ColumnHeader,
++        proto::AccessibleRole::Menu => i_slint_core::items::AccessibleRole::Menu,
++        proto::AccessibleRole::MenuItem => i_slint_core::items::AccessibleRole::MenuItem,
++        proto::AccessibleRole::Dialog => i_slint_core::items::AccessibleRole::Dialog,
+         proto::AccessibleRole::Banner => i_slint_core::items::AccessibleRole::Banner,
+         proto::AccessibleRole::Complementary => i_slint_core::items::AccessibleRole::Complementary,
+         proto::AccessibleRole::ContentInfo => i_slint_core::items::AccessibleRole::ContentInfo,
+diff --git a/internal/backends/testing/slint_systest.proto b/internal/backends/testing/slint_systest.proto
+index 2291991..212d2ab 100644
+--- a/internal/backends/testing/slint_systest.proto
++++ b/internal/backends/testing/slint_systest.proto
+@@ -159,6 +159,11 @@ enum AccessibleRole {
+     Region = 27;
+     Search = 28;
+     WindowTitleBar = 29;
++    Row = 30;
++    ColumnHeader = 31;
++    Menu = 32;
++    MenuItem = 33;
++    Dialog = 34;
+ }
+ 
+ enum RecordedEventResult {
+diff --git a/internal/backends/winit/accesskit.rs b/internal/backends/winit/accesskit.rs
+index 0431309..a72575e 100644
+--- a/internal/backends/winit/accesskit.rs
++++ b/internal/backends/winit/accesskit.rs
+@@ -724,6 +724,11 @@ fn build_node_without_children(
+                     i_slint_core::items::AccessibleRole::RadioButton => Role::RadioButton,
+                     i_slint_core::items::AccessibleRole::RadioGroup => Role::RadioGroup,
+                     i_slint_core::items::AccessibleRole::WindowTitleBar => Role::TitleBar,
++                    i_slint_core::items::AccessibleRole::Row => Role::Row,
++                    i_slint_core::items::AccessibleRole::ColumnHeader => Role::ColumnHeader,
++                    i_slint_core::items::AccessibleRole::Menu => Role::Menu,
++                    i_slint_core::items::AccessibleRole::MenuItem => Role::MenuItem,
++                    i_slint_core::items::AccessibleRole::Dialog => Role::Dialog,
+                     i_slint_core::items::AccessibleRole::Banner => Role::Banner,
+                     i_slint_core::items::AccessibleRole::Complementary => Role::Complementary,
+                     i_slint_core::items::AccessibleRole::ContentInfo => Role::ContentInfo,
+diff --git a/internal/common/enums.rs b/internal/common/enums.rs
+index b27e2a7..5dbf7c2 100644
+--- a/internal/common/enums.rs
++++ b/internal/common/enums.rs
+@@ -510,6 +510,16 @@ pub enum AccessibleRole {
+                 /// The element is a window title bar, typically containing the window title and controls
+                 /// such as minimize, maximize, and close.
+                 WindowTitleBar,
++                /// The element is a row of a `TableView` or behaves like one.
++                Row,
++                /// The element is the header of a column of a `TableView` or behaves like one.
++                ColumnHeader,
++                /// The element is a menu, such as the popup of a `ContextMenuArea`.
++                Menu,
++                /// The element is an item of a menu.
++                MenuItem,
++                /// The element is a dialog window or behaves like one.
++                Dialog,
+                 // Landmark roles
+                 /// Landmark: the header area of the application, typically containing a logo, title, or global navigation.
+                 Banner,

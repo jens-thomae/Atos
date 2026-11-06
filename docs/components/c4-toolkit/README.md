@@ -8,7 +8,7 @@ Decision: D-006 (Slint). Card: #52. Licence rule: D-013. Spec: [§6 C4](../../sp
 | --- | --- |
 | Upstream | [slint-ui/slint](https://github.com/slint-ui/slint), tag `v1.18.1`, commit `372cf0ee5577c3dfec309a45e7b778ba4e81b734` |
 | Pin | [`third_party/slint/UPSTREAM`](../../../third_party/slint/UPSTREAM). The script checks the commit, not the tag name |
-| Patch queue | [`third_party/slint/patches/`](../../../third_party/slint/patches/) (empty until the first patch card lands) |
+| Patch queue | [`third_party/slint/patches/`](../../../third_party/slint/patches/) |
 | Tool | [`tools/slint-fork/slint-fork.sh`](../../../tools/slint-fork/slint-fork.sh) |
 | CI | [`.github/workflows/slint-fork.yml`](../../../.github/workflows/slint-fork.yml) |
 
@@ -62,3 +62,12 @@ See [rebase.md](rebase.md) for the routine and the first dry-run record.
 ## Testing
 
 Headless screenshot and accessibility-tree tests: [screenshot-tests.md](screenshot-tests.md).
+
+## Patch queue
+
+| Patch | Card | What |
+| --- | --- | --- |
+| `0001-a11y-add-Row-…` | #62 | New `AccessibleRole` values `row`, `column-header`, `menu`, `menu-item`, `dialog`, mapped in the AccessKit, Qt and testing backends. The AccessKit mapping is a plain match, so it moves unchanged into a backend-neutral adapter (#59 decision) |
+| `0002-a11y-use-the-new-roles-…` | #62 | `StandardTableView` (fluent, cosmic, cupertino, material; not the native qt style): column headers named by title; rows with label (first cell), selected, index and default action. Menus (all styles, via `menu-base.slint`): `menu` frame, `menu-item` with title, enabled, checked, expandable and default action |
+
+Not yet: `Dialog` windows are `Window` in AccessKit whatever the role (the window item is mapped first), so only in-window dialogs can use `dialog` today. Checkable is set on menu items that are checked, because `MenuEntry` has no separate checkable flag.
