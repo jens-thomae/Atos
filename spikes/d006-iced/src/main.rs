@@ -150,6 +150,7 @@ enum Message {
     Scrolled(Viewport),
     Key(Key, Modifiers, event::Status),
     Frame(Instant),
+    Renderer(String, String),
 }
 
 fn list_id() -> Id {
@@ -480,12 +481,22 @@ impl cosmic::Application for App {
                 Task::none()
             }
             Message::Key(key, mods, status) => self.key(key, mods, status),
+            Message::Renderer(backend, adapter) => {
+                eprintln!("D006_RENDERER: iced {backend} {adapter}");
+                std::process::exit(0);
+            }
             Message::Frame(now) => {
                 if !self.first_frame {
                     // frames() fires on RedrawRequested; iced_winit delivers the
                     // message after that frame was drawn and presented.
                     self.first_frame = true;
                     say("BUDGET_FIRST_FRAME");
+                    // Renderer proof, only when asked: querying the system is not part of the measured runs.
+                    if std::env::var_os("D006_RENDERER_PROBE").is_some() {
+                        return cosmic::iced::system::information()
+                            .map(|i| Message::Renderer(i.graphics_backend, i.graphics_adapter))
+                            .map(cosmic::Action::App);
+                    }
                 }
                 let Some((start, last)) = self.autoscroll else {
                     return Task::none();

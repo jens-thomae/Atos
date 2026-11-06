@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Markdown summary of one `measure.sh` results directory (used for the job summary and the results document).
 Usage: summarize.py <results-dir>"""
-import glob, json, os, statistics, sys
+import glob, json, os, re, statistics, sys
 
 root = sys.argv[1]
-APPS = [("iced", "libcosmic (iced)"), ("slint", "Slint")]
+LABELS = {"iced": "libcosmic default (tiny-skia)", "iced-wgpu": "libcosmic `wgpu`",
+          "slint": "Slint default (femtovg, GL)", "slint-sw": "Slint software renderer"}
+# Older results directories (#12) have only iced and slint.
+APPS = [(k, t) for k, t in LABELS.items() if glob.glob(f"{root}/m1-m4/{k}-small-*.rc")]
+SHELL_SHARE_MB, SHELL_N = 300, 1  # D-006 §4.1 G5: owner-confirmed share (spec §5 D-006), N = 1 process
 
 
 def load(p):
@@ -38,6 +42,55 @@ def harness(app, folder):
 
 print("### Environment\n")
 print("```text\n" + open(f"{root}/environment.txt").read().strip() + "\n```\n")
+
+# --- G1–G5 (D-006 §4.1) ------------------------------------------------------------------
+env = open(f"{root}/environment.txt").read()
+# Hard-coded on purpose: a results directory can never be re-read with a weaker rule (§3.3, §4.1).
+pattern = "Intel"
+soft = r"llvmpipe|lavapipe|softpipe|swrast"
+is_gpu = lambda text: bool(re.search(pattern, text, re.I)) and not re.search(soft, text, re.I)
+RUNS_MIN = 5  # §4.1: each variant gets 5 runs
+runs = int((re.search(r"^runs: (\d+)", env, re.M) or [0, 0])[1])
+
+
+def proof(a):
+    """(True, how) if the run of this variant counts as a GPU run, else (False, why)."""
+    egl = (re.search(r"^egl: (.*)$", env, re.M) or [0, "none"])[1]
+    if not is_gpu(egl):
+        return False, f"compositor's Wayland `egl:` line is `{egl}`"
+    line = (re.search(rf"^renderer {re.escape(a)}: (.*)$", env, re.M) or [0, "none"])[1]
+    if line == "none":
+        return False, "the app logged no renderer line"
+    if a in ("iced", "slint-sw"):  # CPU renderers by design: nothing to prove beyond the compositor
+        return (True, line) if re.search(r"tiny-skia|software", line, re.I) else (False, f"unexpected renderer `{line}`")
+    if a == "iced-wgpu" and not re.search("vulkan", line, re.I):
+        return False, f"wgpu did not use Vulkan: `{line}`"
+    return (True, line) if is_gpu(line) else (False, f"app renderer is `{line}`")
+
+
+def gates(a, cells, m5):
+    """{gate: (ok, text)} for one variant (§4.1). Every run counts: a missing, crashed or timed-out run fails its gate."""
+    cold, rss, cpu = cells[a, "small"][0], cells[a, "small"][2], cells[a, "small"][3]
+    c10 = cells[a, "10k"][0]
+    n1, n2 = len(cells[a, "small"][4]), len(cells[a, "10k"][4])  # launches that left an exit code
+    rcs = [int(open(f).read()) for f in sorted(glob.glob(f"{root}/m5/{a}-[0-9]*.rc"))]
+    dr = [j["dropped"] for j in m5[a]]
+    full = lambda n: n == runs and n >= RUNS_MIN
+    note = lambda n: "" if full(n) else f"; **{n} of {runs} runs (need {RUNS_MIN}+ and all)**"
+    out = {}
+    out["G1 cold start: every launch ≤ 300 ms"] = (
+        full(n1) and len(cold) == n1 and max(cold) <= 300, (f"max {max(cold):.0f} ms of {len(cold)}" if cold else "n/a") + note(n1))
+    out["G2 10k first paint: every launch ≤ 500 ms"] = (
+        full(n2) and len(c10) == n2 and max(c10) <= 500, (f"max {max(c10):.0f} ms of {len(c10)}" if c10 else "n/a") + note(n2))
+    out["G3 idle CPU: median ≤ 1 %"] = (bool(cpu) and statistics.median(cpu) <= 1, f"median {statistics.median(cpu):.2f} %" if cpu else "n/a")
+    ok4 = full(len(rcs)) and len(dr) == len(rcs) and all(r == 0 for r in rcs) and statistics.median(dr) == 0 and max(dr) <= 1
+    out["G4 scrolling: median 0 dropped, no run above 1"] = (
+        ok4, (f"median {statistics.median(dr):g}, max {max(dr)} of {len(dr)} runs" if dr else "n/a")
+        + (f"; **scroll exit codes {rcs}**" if any(rcs) else "") + note(len(rcs)))
+    out[f"G5 shell memory: {SHELL_N} × M3 ≤ {SHELL_SHARE_MB} MB"] = (
+        bool(rss) and SHELL_N * statistics.median(rss) <= SHELL_SHARE_MB, f"{SHELL_N} × {statistics.median(rss):.0f} MB" if rss else "n/a")
+    return out
+
 
 print("### M1–M4: harness (`tools/budgets`)\n")
 print("Median (min–max, n runs). Page cache is warm. M3 and M4 use only the runs that gave a reading.\n")
@@ -73,14 +126,35 @@ print()
 print("### M5: frame interval while scrolling the 10,000-item list\n")
 print("Median over runs of each run's value (min–max). Dropped = intervals > 1.5 × refresh period.\n")
 print("| | " + " | ".join(t for _, t in APPS) + " |\n| --- | " + " | ".join("---" for _ in APPS) + " |")
-m5 = {a: [j for p in sorted(glob.glob(f"{root}/m5/{a}-*.json")) if (j := load(p))] for a, _ in APPS}
+m5 = {a: [j for p in sorted(glob.glob(f"{root}/m5/{a}-[0-9]*.json")) if (j := load(p))] for a, _ in APPS}
 for key, lab, d in (("p50_ms", "p50", 1), ("p95_ms", "p95", 1), ("p99_ms", "p99", 1), ("max_ms", "max", 1),
                     ("commits", "commits per run", 0), ("dropped", "dropped frames per run", 0)):
     print(f"| {lab} | " + " | ".join(fmt([j[key] for j in m5[a]], " ms" if key.endswith("ms") else "", d) for a, _ in APPS) + " |")
 print()
 
+print("### G1–G5: GPU gates (`docs/decisions/D-006-toolkit.md` §4.1)\n")
+print(f"A variant is evaluated only if its run is proven to use the GPU: the compositor's Wayland `egl:` line and the app's own "
+      f"renderer line must match `{pattern}` (CPU renderers by design need only the `egl:` line). Otherwise **not measured**, never a GPU number. "
+      f"G5 uses N = {SHELL_N} and a {SHELL_SHARE_MB} MB shell share. Every run must be present: {RUNS_MIN}+ runs, none missing or crashed.\n")
+hz = re.search(r"^output: .*@(\d+)Hz", env, re.M)
+if not hz or int(hz[1]) != 60:
+    print(f"> **Warning:** the output runs at {hz[1] + ' Hz' if hz else 'an unknown rate'}, but G4 is defined at 60 Hz (25 ms). Dropped frames here use 1.5 × that output's period.\n")
+print("| Variant | Renderer proof | " + " | ".join(["G1", "G2", "G3", "G4", "G5"]) + " | Result |\n| --- | --- | --- | --- | --- | --- | --- | --- |")
+details = []
+for a, t in APPS:
+    ok, why = proof(a)
+    if not ok:
+        print(f"| {t} | ❌ {why} | – | – | – | – | – | **not measured** |")
+        continue
+    g = gates(a, cells, m5)
+    details += [f"- {t}: {k}: {'✅' if v[0] else '❌'} {v[1]}" for k, v in g.items()]
+    print(f"| {t} | ✅ `{why}` | " + " | ".join("✅" if v[0] else "❌" for v in g.values()) + f" | **{'PASS' if all(v[0] for v in g.values()) else 'FAIL'}** |")
+print("\n" + "\n".join(details) + "\n")
+
 print("### M6: accessibility tree\n")
 for a, t in APPS:
+    if not os.path.isdir(f"{root}/m6/{a}"):
+        continue
     j = load(f"{root}/m6/{a}/m6.json")
     if not j:
         print(f"**{t}**: no result\n")
@@ -95,6 +169,8 @@ for a, t in APPS:
 print("### M7: keyboard walkthrough (automated checks)\n")
 print("`pass`/`fail` come from AT-SPI, stdout or the clipboard; `unverifiable` means the toolkit exposes nothing to check.\n")
 for a, t in APPS:
+    if not os.path.isdir(f"{root}/m7/{a}"):
+        continue
     j = load(f"{root}/m7/{a}/m7.json")
     if not j:
         print(f"**{t}**: no result\n")
@@ -105,10 +181,11 @@ for a, t in APPS:
             print(f"| {s['step']} | {c['check']} | {c['result']} | {c['observed']} |")
     print()
 
+LABELS_M9 = [(k, LABELS[k]) for k in ("iced", "slint")]
 m9 = load(f"{root}/m9.json")
 if m9:
     print("### M9: build\n")
-    print("| | " + " | ".join(t for _, t in APPS) + " |\n| --- | " + " | ".join("---" for _ in APPS) + " |")
+    print("| | " + " | ".join(t for _, t in LABELS_M9) + " |\n| --- | " + " | ".join("---" for _ in LABELS_M9) + " |")
     for k, lab in (("build_seconds", "Clean release build (s)"), ("stripped_bytes", "Stripped binary (bytes)"),
                    ("crates", "Crates in Cargo.lock"), ("lines", "Lines of Rust and markup")):
-        print(f"| {lab} | " + " | ".join(str(m9[a][k]) for a, _ in APPS) + " |")
+        print(f"| {lab} | " + " | ".join(str(m9[a][k]) for a, _ in LABELS_M9) + " |")

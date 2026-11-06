@@ -118,6 +118,28 @@ fn open(ui: &AppWindow, state: &mut State, row: i32) {
     }
 }
 
+/// `glGetString(name)` through the context's loader (GL_RENDERER = 0x1F01).
+fn gl_string(
+    get_proc_address: &dyn Fn(&std::ffi::CStr) -> *const std::ffi::c_void,
+    name: u32,
+) -> String {
+    let p = get_proc_address(c"glGetString");
+    if p.is_null() {
+        return "unknown (no glGetString)".into();
+    }
+    // SAFETY: glGetString has this signature in every GL and GL ES version.
+    let f: unsafe extern "system" fn(u32) -> *const std::ffi::c_char =
+        unsafe { std::mem::transmute(p) };
+    let s = unsafe { f(name) };
+    if s.is_null() {
+        "unknown".into()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(s) }
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into()));
     let start = std::env::args_os()
@@ -214,26 +236,65 @@ fn main() -> Result<(), slint::PlatformError> {
         std::process::exit(0);
     });
 
-    // BUDGET_FIRST_FRAME: after the first frame is rendered, right before the renderer's
-    // buffer swap presents it.
+    // BUDGET_FIRST_FRAME. femtovg and Skia: after the first frame is rendered, right before the
+    // renderer's buffer swap presents it. Software renderer (SLINT_BACKEND=winit-software), which has
+    // no rendering notifier: the first change of animation-tick() in app.slint (see README).
     let autoscroll = std::env::var("D006_AUTOSCROLL").is_ok_and(|v| v == "1");
-    let mut first = true;
-    let weak = ui.as_weak();
-    ui.window()
-        .set_rendering_notifier(move |state, _| {
-            if first && matches!(state, RenderingState::AfterRendering) {
-                first = false;
-                println!("BUDGET_FIRST_FRAME");
-                std::io::stdout().flush().ok();
-                if autoscroll {
-                    let weak = weak.clone();
-                    slint::Timer::single_shot(Duration::ZERO, move || {
-                        weak.unwrap().invoke_start_autoscroll();
-                    });
-                }
+    let first_frame = {
+        let weak = ui.as_weak();
+        move || {
+            println!("BUDGET_FIRST_FRAME");
+            std::io::stdout().flush().ok();
+            if autoscroll {
+                let weak = weak.clone();
+                slint::Timer::single_shot(Duration::ZERO, move || {
+                    weak.unwrap().invoke_start_autoscroll();
+                });
             }
-        })
-        .expect("renderer must support the rendering notifier (femtovg or skia)");
+        }
+    };
+    if std::env::var("SLINT_BACKEND").is_ok_and(|v| v.contains("software")) {
+        // Renderer proof (stderr: stdout carries the markers): no GL, no Mesa in this process.
+        eprintln!("D006_RENDERER: slint software (CPU)");
+        // The window event filter sees winit's RedrawRequested just before Slint draws and presents that
+        // frame in the same handler. A zero-delay timer posted from it runs on a later event-loop turn,
+        // so the marker is printed after the first frame was drawn and committed, never before.
+        use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent as W};
+        let mut first_frame = Some(first_frame);
+        ui.window().on_winit_window_event(move |_, ev| {
+            if matches!(ev, W::RedrawRequested)
+                && let Some(f) = first_frame.take()
+            {
+                slint::Timer::single_shot(Duration::ZERO, f);
+            }
+            EventResult::Propagate
+        });
+    } else {
+        let mut first_frame = Some(first_frame);
+        ui.window()
+            .set_rendering_notifier(move |state, api| {
+                match state {
+                    RenderingState::RenderingSetup => {
+                        // Renderer proof: the GL_RENDERER string of the context the app drew with.
+                        if let slint::GraphicsAPI::NativeOpenGL { get_proc_address } = api {
+                            eprintln!(
+                                "D006_RENDERER: slint gl {}",
+                                gl_string(get_proc_address, 0x1F01)
+                            );
+                        } else {
+                            eprintln!("D006_RENDERER: slint unknown graphics API");
+                        }
+                    }
+                    RenderingState::AfterRendering => {
+                        if let Some(f) = first_frame.take() {
+                            f();
+                        }
+                    }
+                    _ => {}
+                }
+            })
+            .expect("renderer must support the rendering notifier (femtovg or skia)");
+    }
 
     ui.run()
 }
