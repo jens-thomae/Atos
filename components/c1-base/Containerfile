@@ -1,10 +1,59 @@
-# Atos base image (C1). Docs: docs/components/c1-base/README.md
+# Atos base image (C1): a sealed composefs image with a signed UKI and systemd-boot (D-008).
+# Docs: docs/components/c1-base/README.md. Recipe: bootc-sealed-images(7).
 # Base: fedora-bootc 45 (D-008), multi-arch index digest; version 45.20261105.0.
-FROM quay.io/fedora/fedora-bootc:45@sha256:c3cccbe8c7263cfc610ca9697cf4e0a34bb5b590b394f413f1c159ef63fb15ac
+FROM quay.io/fedora/fedora-bootc:45@sha256:c3cccbe8c7263cfc610ca9697cf4e0a34bb5b590b394f413f1c159ef63fb15ac AS base
 
 # D-005: no call home. Fedora's anonymous countme counter runs from this timer.
 RUN systemctl mask rpm-ostree-countme.timer
 
+# systemd-boot instead of bootupd/GRUB/shim: sealed images boot systemd-boot signed with our own
+# key (D-014), and bootc picks systemd-boot when bootupd is absent.
+RUN dnf -y install systemd-boot-unsigned \
+    && rpm -e --nodeps bootupd \
+    && rpm -e $(rpm -qa 'shim-*' 'grub2-efi-*') \
+    && rm -rf /usr/lib/bootupd /run/dnf /var/lib/dnf /var/cache/* /var/log/*
+
+# Install config (filesystem with fs-verity, systemd-boot loader.conf, kernel arguments) and the
+# TEST Secure Boot keys. systemd-boot enrols the set named `auto` by itself, but only in a VM in
+# setup mode (`secure-boot-enroll if-safe`, loader.conf(5)).
+COPY usr/ /usr/
+COPY secureboot-test/PK.auth secureboot-test/KEK.auth secureboot-test/db.auth /usr/lib/bootc/install/secureboot-keys/auto/
+
 LABEL org.opencontainers.image.title="Atos base"
 
-RUN bootc container lint
+# Tools for signing; never part of the final image.
+FROM base AS tools
+RUN dnf -y install systemd-ukify sbsigntools
+COPY secureboot-test/db.key secureboot-test/db.crt /keys/
+
+# systemd-boot signed with the TEST db key. bootctl installs `<name>.efi.signed` when it exists.
+FROM tools AS sdboot
+RUN for f in /usr/lib/systemd/boot/efi/systemd-boot*.efi; do \
+      sbsign --key /keys/db.key --cert /keys/db.crt --output "$f.signed" "$f"; done
+
+# The rootfs the UKI seals: kernel and initramfs move out of /usr, into the UKI.
+FROM base AS kernel
+COPY --from=sdboot /usr/lib/systemd/boot/efi/ /usr/lib/systemd/boot/efi/
+RUN bootc container split-kernel-and-rootfs --output /kernel
+
+FROM kernel AS rootfs
+# Directory mtimes: the digest of this rootfs (computed from the filesystem at build time) must equal
+# the one bootc install computes from the OCI layers. Directories our layers changed come out
+# differently in the two (composefs-rs design notes, containers/composefs-rs#132), so this layer
+# sets every directory to the epoch, as the base image already has it.
+RUN rm -rf /kernel \
+    && find / -xdev -type d -newermt @0 ! -path /proc ! -path /sys ! -path /dev -exec touch -h -d @0 {} + \
+    && bootc container lint --fatal-warnings
+
+# Composefs digest of `rootfs` into the kernel command line, UKI signed with the TEST db key.
+FROM tools AS uki
+RUN --mount=type=bind,from=rootfs,target=/target \
+    --mount=type=bind,from=kernel,source=/kernel,target=/kernel \
+    kver=$(ls /kernel) && mkdir /out && \
+    bootc container ukify --rootfs /target --kernel-dir "/kernel/$kver" -- \
+      --output "/out/$kver.efi" --signtool sbsign \
+      --secureboot-private-key /keys/db.key --secureboot-certificate /keys/db.crt
+
+# /boot is outside the composefs digest; Secure Boot checks the UKI instead.
+FROM rootfs
+COPY --from=uki /out/ /boot/EFI/Linux/

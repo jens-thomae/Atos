@@ -1,4 +1,5 @@
-# C1 base image (docs/components/c1-base/README.md).
+# C1 base image (docs/components/c1-base/README.md): a sealed composefs image, UKI and systemd-boot
+# signed with the committed TEST Secure Boot key (no secret needed for that, so PRs build it fully).
 # Pull requests: build only. Merges to main: build, push to ghcr.io, sign with the CI test key.
 # Docs-only changes skip the build (docs/ci.md).
 name: C1 base image
@@ -52,6 +53,8 @@ jobs:
       - run: podman build --pull=missing -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
+      - name: UKI seals the image (#54)
+        run: components/c1-base/check-seal.sh c1-base
 
   publish:
     needs: changes
@@ -78,6 +81,8 @@ jobs:
       - run: podman build --pull=missing -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
+      - name: UKI seals the image (#54)
+        run: components/c1-base/check-seal.sh c1-base
 
       - name: Push
         env:
