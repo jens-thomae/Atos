@@ -18,7 +18,7 @@ If you have no task card, stop and ask the owner. Do not choose work yourself.
 ## Non-negotiable rules
 
 - **One card, nothing else.** Work only on your assigned card. Anything else you notice becomes a new issue (`gh issue create`), not an unasked change.
-- **Decided means binding.** Never contradict a *Decided* entry in the decisions log. If you think one is wrong, add a *Proposed* entry in a comment on the card and move the card to Blocked.
+- **Decided means binding.** Never contradict a _Decided_ entry in the decisions log. If you think one is wrong, add a _Proposed_ entry in a comment on the card and move the card to Blocked.
 - **Never invent requirements.** If the spec or card is silent or ambiguous, write the question on the card, move it to Blocked and stop.
 - **Do not edit `docs/spec.md` or this file.** Propose changes in a card comment; only the owner changes them.
 - **Stay in your component.** Do not modify code owned by another component (C1–C11) unless the card says so.
@@ -41,6 +41,7 @@ If you run out of context or time before finishing, skip to step 7. A clear hand
 
 ```markdown
 ### Handoff – <date>
+
 **Done:** what was finished, with commit or PR links
 **Not done:** what remains and why
 **Decisions made:** anything chosen that is not in the spec (flag for owner)
@@ -61,7 +62,7 @@ If you run out of context or time before finishing, skip to step 7. A clear hand
 ## Roles
 
 - **Builder:** implements one card on its own branch. The default role unless the owner says otherwise.
-- **Reviewer:** checks a PR against its card, the spec and the budgets. Comments with *Approve* or *Request changes* and specific reasons. Never fixes the code itself and never reviews its own work.
+- **Reviewer:** checks a PR against its card, the spec and the budgets. Comments with _Approve_ or _Request changes_ and specific reasons. Never fixes the code itself and never reviews its own work.
 - **Planner:** turns a roadmap phase (§8) into cards using the task template. Writes no production code.
 - **Docs:** keeps component docs and the glossary in sync with merged work.
 
@@ -93,14 +94,16 @@ tools/           budget checks, screenshot-test harness, scripts
 
 ## Commands
 
-Not defined yet. Phase 0 sets up the build, test, lint and budget-check commands; the agent that does so must fill this section in through a proposal to the owner.
+Run from the repository root. These are the commands CI (`ci.yml`) runs, in the same order. The toolchain is pinned in `rust-toolchain.toml`; `rustup` installs it on first use.
 
 ```sh
-# build:   TBD
-# test:    TBD
-# lint:    TBD
-# budgets: TBD
+# lint:    cargo fmt --check && cargo clippy --all-targets -- -D warnings
+# build:   cargo build --release -p budgets
+# test:    cargo nextest run && cargo test --doc
+# budgets: cargo build --release -p budgets && target/release/budgets target/release/budget-test-app --cpu-window 10
 ```
+
+`cargo nextest` is not installed by rustup: `cargo install --locked --version 0.9.150 cargo-nextest` (CI uses the release binary pinned in `ci.yml`). `cargo test` also works for a quick run but does not match CI. The budgets command needs Linux (the harness reads `/proc`); for the §7 numbers use `--cpu-window full` and the NUC (`perf.yml`).
 
 ## Conventions
 
