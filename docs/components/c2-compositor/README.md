@@ -12,7 +12,7 @@ Code: `components/c2-compositor/` (crate and binary `atos-comp`). Requirements: 
 | Taken | 2026-11-06 |
 | Method | `git archive` of the tag, committed as a plain snapshot (no upstream history, no submodule, no remote). |
 
-Merging later upstream changes is a manual diff against this commit. D-007: we do not contribute upstream.
+Merging later upstream changes, the security watch and the dependency checks: [upstream.md](upstream.md). D-007: we do not contribute upstream.
 
 ## Layout
 
@@ -59,6 +59,10 @@ These are interfaces shared with COSMIC components or internal names; each is a 
 - Internal libcosmic use (`cosmic`, `cosmic-config`, `cosmic-protocols`, `cosmic-settings-*`, `cosmic-text` dependencies) and Rust type names such as `CosmicSurface`, `CosmicWindow`, `CosmicCompConfig`.
 - Config and shortcut IDs (`com.system76.CosmicSettings.*`, the `cosmic-comp` cosmic-config ID inside `atos-comp-config`), the `COSMIC_SESSION_SOCK` environment variable, `cosmic-session` protocol, tiling-exception app IDs in `data/tiling-exceptions.ron`.
 - Source comments linking upstream issues and pull requests.
+
+## Dependencies
+
+Four patch bumps in `Cargo.lock` against upstream's lockfile (`anyhow`, `async-executor`, `chacha20`, `rand` 0.10), for RustSec advisories and yanked versions; `license = "GPL-3.0-only"` added to `atos-comp-config/Cargo.toml`. Details: [upstream.md](upstream.md#dependency-checks).
 
 ## Demo and measurements
 
