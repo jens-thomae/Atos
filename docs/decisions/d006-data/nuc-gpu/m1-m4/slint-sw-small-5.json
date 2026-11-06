@@ -1,0 +1,9 @@
+{
+  "app": "/tmp/tmp.1vYrxEeH9v/slint-sw-small",
+  "cpu": "Intel(R) Celeron(R) N5105 @ 2.00GHz",
+  "kernel": "6.8.0-147-generic",
+  "cpu_window_s": 300,
+  "cold_start_ms": 26.138919,
+  "idle_rss_mb": 28.577792,
+  "idle_cpu_percent": 0.00999998375925971
+}

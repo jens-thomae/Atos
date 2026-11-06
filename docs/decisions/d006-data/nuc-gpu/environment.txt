@@ -1,0 +1,22 @@
+date: 2026-11-06T09:49:08Z
+host: nuc
+cpu: Intel(R) Celeron(R) N5105 @ 2.00GHz
+cores: 4
+kernel: Linux 6.8.0-147-generic x86_64
+governor: powersave
+os: Ubuntu 24.04.5 LTS
+sway: sway version 1.9
+wtype: 0.4-3
+mesa: 25.2.8-0ubuntu0.24.04.4
+runs: 5  cpu_window: full
+compositor: own  sway_renderer: gles2
+d006-iced: cce13ba3d961d850
+d006-iced-wgpu: c4dda1fe4dac69dd
+d006-slint: 85f7fe54c92f0db7
+output: HEADLESS-1 1920x1080@60Hz scale 1.0
+egl: Mesa Intel(R) UHD Graphics (JSL)
+fixture digest: 184f3d8ea40f1ef1a3ec2434cfaffa66d1b1d6e03f95226b0cadf742e723022c  -
+renderer iced: iced tiny-skia CPU
+renderer iced-wgpu: iced Vulkan Intel(R) UHD Graphics (JSL)
+renderer slint: slint gl Mesa Intel(R) UHD Graphics (JSL)
+renderer slint-sw: slint software (CPU)
