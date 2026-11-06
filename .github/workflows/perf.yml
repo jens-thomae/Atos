@@ -124,7 +124,7 @@ jobs:
             echo "- egl: ${egl:-none}"
             echo "- Test app renderer: none reported (budget-test-app draws nothing)"
             echo
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"  # also in the log, readable without the run page
           case "$egl" in
             "" | *llvmpipe* | *softpipe* | *swrast*)
               echo "::error::compositor is not on the GPU (egl: ${egl:-none}); not measuring"; exit 1 ;;
