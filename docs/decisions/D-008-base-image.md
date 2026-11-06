@@ -72,7 +72,7 @@ From §7:
 | --- | --- | --- |
 | **R1** signed read-only image | **Meets.** Sealed composefs images: fs-verity root, digest in a Secure-Boot-signed UKI ([composefs](https://bootc.dev/bootc/bootc-composefs.7.html)). Transport signatures with OCI signing tools; we did not check the details. `/etc` and `/var` stay writable, and user data lives in `/var/home`. | **Meets.** dm-verity `/usr` with the root hash in a signed UKI; downloads verified with OpenPGP ([sysupdate.d](https://www.freedesktop.org/software/systemd/man/latest/sysupdate.d.html)). User data on its own partition. |
 | **R2** background staging, applied on restart | **Meets.** `bootc upgrade` stages and applies at shutdown ([bootc-upgrade](https://bootc.dev/bootc/man/bootc-upgrade.8.html)); there is a timer for automatic updates ([bootc-rollback](https://bootc.dev/bootc/man/bootc-rollback.8.html) names `bootc-fetch-apply-updates.timer`). Layer-level downloads. | **Meets.** `systemd-sysupdate-update.timer` downloads into the free slot; the new UKI boots on restart. Whole-image downloads. The GUI-facing API is being replaced in v263. |
-| **R3** "Previous version" boot entry, no terminal | **Partly.** The previous deployment stays as a boot entry, but bootc keeps one booted and one rollback deployment, not more. Showing it as "Previous version" in the boot menu, and a GUI rollback action, are our work. | **Partly.** Older UKIs stay as systemd-boot entries (`InstancesMax=`; KDE Linux keeps 3–4, [background](https://linux.kde.org/docs/background)). Naming and a GUI action are our work. |
+| **R3** "Previous version" boot entry, no terminal | **Partly.** The previous deployment stays as a boot entry, but bootc keeps one booted and one rollback deployment, not more; on composefs, *"Rollback with GRUB and UKIs assumes exactly two deployments"* ([composefs](https://bootc.dev/bootc/bootc-composefs.7.html)). Showing it as "Previous version" in the boot menu, and a GUI rollback action, are our work. | **Partly.** Older UKIs stay as systemd-boot entries (`InstancesMax=`; KDE Linux keeps 3–4, [background](https://linux.kde.org/docs/background)). Naming and a GUI action are our work. |
 | **R4** full-disk encryption by default | **Meets at install.** `bootc install to-disk --block-setup tpm2-luks` ([install-to-disk](https://bootc.dev/bootc/man/bootc-install-to-disk.8.html)). Combining it with sealed composefs and systemd-boot: **not checked**. OS and user data share one encrypted root. | **Meets by design.** systemd-repart can create TPM2-bound LUKS partitions at first boot. GNOME OS designs it this way, but has not shipped it by default with Secure Boot (**uncertain**, [discussion](https://discourse.gnome.org/t/why-did-gnome-os-choose-systemd-sysupdate-over-bootc/24642)). |
 | **R5** developer mode | **Partly.** `bootc usr-overlay` gives a writable `/usr`, but it is transient: *"discarded on reboot"* and held in RAM ([usr-overlay](https://bootc.dev/bootc/man/bootc-usr-overlay.8.html)). Persistent changes: build a derived image locally (`FROM` our image) and switch to it. A **sealed** system only boots UKIs signed by a key it trusts, so that path needs a developer key. Design work. | **Partly to meets.** `systemd-sysext --mutable=yes` (since v256) gives a persistent writable overlay on `/usr` ([systemd-sysext](https://www.freedesktop.org/software/systemd/man/latest/systemd-sysext.html)). There is no package layering; extensions are images. |
 
@@ -97,17 +97,17 @@ B1 cannot be judged from documents. Both options use the same kernel, initrd and
 | systemd-sysupdate | [GNOME OS](https://codethink.co.uk/articles/2024/GNOME-OS-systemd-sysupdate) | Nightly and preview images for testing GNOME; not a general-purpose release |
 | systemd-sysupdate | [ParticleOS](https://github.com/systemd/particleos) (systemd's own, mkosi) | Experimental, no releases; you build and sign your own image |
 
-**I found no general-purpose desktop that ships systemd-sysupdate to regular users.** bootc ships at scale, both commercially and on desktops.
+**I found no general-purpose desktop that ships systemd-sysupdate to regular users.** bootc ships at scale, both commercially and on desktops, **but that scale is bootc on the ostree backend.** RHEL image mode, Universal Blue and the Fedora Atomic line all run ostree. The setup this write-up recommends, **sealed composefs**, has one listed production user (Luft, since 2026, maturity not checked). composefs was declared stable only recently: upstream promises in-place upgrades only for *"every composefs system installed since bootc 1.16.0"*, and `bootc edit`, `bootc install reset` and a separate XBOOTLDR partition are not yet supported on it ([composefs](https://bootc.dev/bootc/bootc-composefs.7.html)). So sealed composefs has little production track record so far.
 
 ### 3.4 Base distribution
 
-Versions are from [Repology](https://repology.org/project/mesa/versions) ([kernel](https://repology.org/project/linux/versions)) on 2026-11-06. Repology does not list Fedora 45 yet. Fedora 45 was declared GO for 3 November 2026 ([Phoronix](https://phoronix.com/news/Fedora-45-Ships-Next-Week); **uncertain** whether it has shipped).
+Versions are from [Repology](https://repology.org/project/mesa/versions) ([kernel](https://repology.org/project/linux/versions)) on 2026-11-06. Repology does not list Fedora 45 yet, so the Fedora 45 figures come from [Fedora Packages](https://packages.fedoraproject.org/pkgs/mesa/mesa-libGL/fedora-45.html) and the release notice. Fedora 45 was released on 3 November 2026 ([Phoronix](https://phoronix.com/news/Fedora-45-Released)).
 
 | | Fedora | Debian | Arch-based | CentOS Stream 10 | From upstream (own packages) |
 | --- | --- | --- | --- | --- | --- |
 | Update cadence | New release every ~6 months; each supported ~13 months | Stable every ~2 years | Rolling, no releases | Continuous, tracks the next RHEL minor | Ours |
-| Mesa (stable) | 26.2.6 (F44) | 25.0.7 (13), 26.1.6 in backports | 26.2.6 | 26.1.1 | Ours to track |
-| Kernel (stable) | 7.2.15 (F44; Fedora moves kernels forward within a release) | 6.12 LTS (13), 7.2 in backports | 7.2.14 | 6.12 plus backports | Ours to track |
+| Mesa (stable) | 26.2.3 at F45 release, 26.2.6 in F45 updates; 26.2.6 (F44) | 25.0.7 (13), 26.1.6 in backports | 26.2.6 | 26.1.1 | Ours to track |
+| Kernel (stable) | 7.2 at F45 release, 7.3 announced as the next update; 7.2.15 (F44). Fedora moves kernels forward within a release | 6.12 LTS (13), 7.2 in backports | 7.2.14 | 6.12 plus backports | Ours to track |
 | Fit with D-006 (fresh GPU stack) | Good | Weak on stable; backports are a second channel we would track | Good | Kernel weak for new laptops | Whatever we pay for |
 | Flatpak (D-003) | First-class, preinstalled on Fedora desktops | Packaged | Packaged | Packaged | Ours to build |
 | Signing infrastructure | Signed packages; Fedora's shim and kernel are Secure Boot signed | Signed packages; signed shim and kernel | Signed packages; **no** signed shim or kernel from Arch | Signed packages; signed shim and kernel | None; all ours |
@@ -117,7 +117,7 @@ Versions are from [Repology](https://repology.org/project/mesa/versions) ([kerne
 
 Notes:
 
-- **Secure Boot is our own cost on every base.** A sealed image means a UKI that **we** sign, so our key must be trusted on the user's machine, either through a Microsoft-signed Atos shim or by enrolling our key. The distribution's signed shim does not cover our UKI. Getting a shim signed means going through [shim-review](https://github.com/rhboot/shim-review). Since 27 June 2026, Microsoft signs only with its UEFI CA 2023.
+- **Secure Boot is our own cost on every base.** A sealed image means a UKI that **we** sign, so our key must be trusted on the user's machine, either through a Microsoft-signed Atos shim or by enrolling our key. The distribution's signed shim does not cover our UKI. Getting a shim signed means going through [shim-review](https://github.com/rhboot/shim-review). Since 27 June 2026, Microsoft signs only with its UEFI CA 2023, so a new Atos shim would carry **only** that signature. Machines whose firmware `db` lacks the 2023 CA would not boot it unless the firmware or `db` is updated, or the user enrols our key.
 - **RHEL** itself is ruled out: Red Hat's image mode documentation states that rhel-bootc images and images built on them fall under the RHEL EULA and may not be publicly redistributed ([RHEL 10 image mode docs](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems/introducing-image-mode-for-rhel); **uncertain**: the page refused automated access, so this comes from a search-result excerpt of it).
 - **Building from upstream** means owning a package build farm and a security response for every package. That is a distribution's worth of work, and it does not fit §3's "integrator" stance.
 - **D-005 on Fedora:** Fedora's image tools send an anonymous `countme` counter with repository metadata requests (`rpm-ostree-countme.timer`, [docs](https://coreos.github.io/rpm-ostree/countme/)). It is anonymous, but it is still a call home that is on by default. Our image must mask the timer, and we should check that `bootc` and any `dnf` in the image send nothing.
@@ -130,7 +130,7 @@ Notes:
 
 Why, in the §2 priority order:
 
-1. **Stability.** bootc's CLI and API are declared stable, and it ships to over 100,000 desktop users and to RHEL customers. systemd-sysupdate has been marked experimental again as of v262, its GUI-facing D-Bus API goes away in v263, and its only desktop users are pre-beta. With no upstream contributions (D-007), every breaking change in sysupdate is adaptation work we carry.
+1. **Stability.** bootc's CLI and API are declared stable, and it ships to over 100,000 desktop users and to RHEL customers. **That evidence is for bootc on the ostree backend.** Sealed composefs, which this recommendation uses, has one listed production user and was declared stable only recently (section 3.3); the owner should weigh that next to sysupdate's "experimental" label. systemd-sysupdate has been marked experimental again as of v262, its GUI-facing D-Bus API goes away in v263, and its only desktop users are pre-beta. With no upstream contributions (D-007), every breaking change in sysupdate is adaptation work we carry.
 2. **Fresh GPU stack (D-006).** Fedora stable carries the same Mesa as Arch (26.2.6) and current kernels, with a six-month release rhythm and Bodhi testing before updates land. Debian stable is a year behind on Mesa. Arch is just as fresh but has no release staging and no signed shim.
 3. **Update size on laptops.** bootc downloads only changed layers. sysupdate downloads the whole image unless we build our own delta system.
 4. **Tooling.** Containerfiles build on our existing GitHub Actions runners with podman, and `fedora-bootc` is the best-supported base image.
@@ -140,7 +140,7 @@ What it costs, and the risk:
 - **B2 is not met on sealed images today.** The composefs backend has no boot counting yet. Options, cheapest first:
   - (a) Wait. Upstream says it is *"likely to be added"*. B2 only blocks a release (Phase 4), not Phase 1.
   - (b) Carry a patch that adds systemd-boot `+tries` counting to bootc's composefs UKI entries. That is the same mechanism sysupdate uses.
-  - (c) Start Phase 1 on the ostree backend, which has entry counting, and move to sealed composefs later. This gives up R1's boot-time sealing until then.
+  - (c) Start Phase 1 on the ostree backend, which has entry counting, and move to sealed composefs later. This gives up R1's boot-time sealing until then, and **the move is not free**: *"There is no in-place transition from an ostree system to the composefs backend yet, so for now a system has to be reinstalled"* ([composefs](https://bootc.dev/bootc/bootc-composefs.7.html)). Any machine installed on ostree would need a reinstall.
 
   **The size of patch (b) is not known.**
 - **R5 under sealing.** A persistent developer mode needs locally built images to boot. That means a developer signing key enrolled on that machine, or the machine dropping out of sealed mode. The design is a Phase 1 or Phase 2 card.
@@ -161,7 +161,7 @@ If the recommendation is accepted:
 
 - **D-008** becomes "bootc on Fedora: sealed composefs images with UKI and systemd-boot; Fedora as base distribution."
 - **Build tooling it implies:**
-  - podman/buildah with a `Containerfile` `FROM quay.io/fedora/fedora-bootc:<release>`;
+  - podman/buildah with a `Containerfile` `FROM quay.io/fedora/fedora-bootc:45` (Fedora 45, released 2026-11-03, as the Phase 1 starting point);
   - a container registry (for example ghcr.io; public pulls need no account, which fits D-005);
   - OCI image signing;
   - `bootc container ukify` for sealed UKIs;
@@ -182,8 +182,8 @@ If systemd-sysupdate is chosen instead, the build is mkosi, and Phase 1 starts w
 For the owner:
 
 1. **Reference hardware for Phase 1.** The Phase 1 gate is "boots and updates on the reference hardware". The NUC runs Ubuntu as our CI runner. Installing Atos on it would remove the runner. Should there be a second disk, a second NUC, or a schedule for taking the runner offline?
-2. **Secure Boot strategy.** Do we apply for a Microsoft-signed Atos shim through shim-review, or have users enrol our key at install (C11)? This affects R1 on real laptops.
-3. **B2 path.** If bootc is picked: wait for upstream, carry a boot-counting patch, or start on the ostree backend? (Section 4.)
+2. **Secure Boot strategy.** Do we apply for a Microsoft-signed Atos shim through shim-review, or have users enrol our key at install (C11)? This affects R1 on real laptops. A new shim is signed only with Microsoft UEFI CA 2023, so older laptops whose firmware `db` lacks that CA need a firmware or `db` update, or our key enrolled.
+3. **B2 path.** If bootc is picked: wait for upstream, carry a boot-counting patch, or start on the ostree backend? Starting on ostree means every machine installed in that period needs a reinstall to move to sealed composefs, because there is no in-place transition yet. (Section 4.)
 4. **How "default" countme is treated.** Is masking Fedora's anonymous `countme` enough for D-005, or should the build also strip it from repository configs?
 5. **Update channel and rhythm.** Do we follow each Fedora release within weeks, or lag by one? Not asked by the card, but it decides how long each Fedora release supports us.
 
