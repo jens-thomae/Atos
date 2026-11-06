@@ -1,0 +1,41 @@
+name: Upstream watch
+
+# Weekly: new cosmic-comp Epoch tags, security-keyword commits on upstream master, and the
+# 3-month master fallback (D-007, #57). Opens issues only; never merges. Logic and docs:
+# tools/ci/upstream-watch.sh, docs/components/c2-compositor/upstream.md.
+# Hosted runner on purpose (never the NUC). Test: Actions > Upstream watch > Run workflow, dry_run on.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the issues it would open, open nothing"
+        type: boolean
+        default: true
+      since_days:
+        description: "Look back this many days for security-keyword commits"
+        default: "8"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # the upstream clone is anonymous; no token in git config
+      - run: bash tools/ci/test-upstream-watch.sh
+      - run: bash tools/ci/upstream-watch.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          SINCE_DAYS: ${{ inputs.since_days || '8' }}
