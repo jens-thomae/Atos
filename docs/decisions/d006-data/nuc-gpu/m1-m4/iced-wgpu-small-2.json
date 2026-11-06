@@ -1,0 +1,9 @@
+{
+  "app": "/tmp/tmp.1vYrxEeH9v/iced-wgpu-small",
+  "cpu": "Intel(R) Celeron(R) N5105 @ 2.00GHz",
+  "kernel": "6.8.0-147-generic",
+  "cpu_window_s": 300,
+  "cold_start_ms": 129.59895699999998,
+  "idle_rss_mb": 119.410688,
+  "idle_cpu_percent": 0.0033333285583512845
+}

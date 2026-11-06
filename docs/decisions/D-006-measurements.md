@@ -52,6 +52,49 @@ Workflow run 42071246272 on the self-hosted runner `nuc` (Ubuntu 24.04.5, kernel
 **M7 on the NUC, through AT-SPI:** libcosmic 0 of 12 steps verifiable, as before. Slint: 6 fully verified (2, 4, 5, 6, 8, 10), 2 partly (1, 3), 4 not verifiable (7, 9, 11, 12): same as VM and CI, nothing failed.
 **libcosmic steps 8, 9 and 11 not reproduced on the NUC (behavioural evidence only):** steps 9 and 11 (`wl-paste` and the `SPIKE_OPEN` line) gave `notes-2.txt`, not the expected `notes-1.txt`. The step-8 screenshot shows `empty` selected after the Properties dialog closed (VM and CI: `docs`), so the stray key most likely happened in step 8, and the script's two *Down* presses in step 9 landed one row further. Step 8 itself is unverified on the NUC: only its end-state screenshot is kept, and nothing shows whether the Properties dialog opened or which menu item *Enter* triggered; the app copied and printed the row it had selected, so the output is consistent with its own selection. **Why the selection was one row off before step 9 is not established.** A timing explanation (one *Down* of the menu step reaching the list on the slower machine, libcosmic produces a frame every ~76 ms here) is plausible but unconfirmed, and I did not rerun on the NUC. Slint passed both steps; libcosmic's step 12 probe (`item-09999.md`) passed. Treat libcosmic's steps 9 and 11 as "not reproduced on the NUC", not as a proven app defect.
 
+## GPU measurement on the reference NUC (#36)
+
+Workflow run [42195032297](https://github.com/jens-thomae/Atos/actions/runs/42195032297) (`d006-measure.yml -f nuc=true`, `main` at the merge of #39), runner `nuc` with option A from [`reference-runner.md`](../reference-runner.md) (`runner` in group `render`, `mesa-vulkan-drivers`). Same machine as above (Celeron N5105, Ubuntu 24.04.5, kernel 6.8.0-147, Mesa 25.2.8, sway 1.9, 1920 × 1080 @ 60 Hz). Four variants, 5 runs per number, full 300 s idle window, warm page cache, same fixture digest. Raw data: [`d006-data/nuc-gpu/`](d006-data/nuc-gpu/) (`summary.md` is the job summary, `environment.txt` the renderer proof).
+
+**The GPU was used.** sway ran headless with its GLES2 renderer (`sway_renderer: gles2` in `environment.txt`) on `/dev/dri/renderD128`. `egl:` line (Wayland platform, `eglinfo -B` while sway ran): `Mesa Intel(R) UHD Graphics (JSL)`. This supersedes deviation 1 above for the numbers in this section; the earlier NUC section stays as measured.
+
+| Variant | Renderer line from the app (stderr) | Counts as |
+| --- | --- | --- |
+| libcosmic default | `iced tiny-skia CPU` | CPU by design; compositor on the Intel GPU |
+| libcosmic `--features wgpu` | `iced Vulkan Intel(R) UHD Graphics (JSL)` | GPU run (Vulkan) |
+| Slint default (femtovg) | `slint gl Mesa Intel(R) UHD Graphics (JSL)` | GPU run (GL) |
+| Slint software renderer | `slint software (CPU)` | CPU by design; compositor on the Intel GPU |
+
+### G1–G5 (`D-006-toolkit.md` §4.1), N = 1, 300 MB shell share
+
+| Variant | G1 cold ≤ 300 ms, every launch | G2 10k ≤ 500 ms, every launch | G3 idle CPU median ≤ 1 % | G4 dropped frames, median 0, no run > 1 | G5 1 × M3 ≤ 300 MB | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| libcosmic default | ✅ max 57 ms | ✅ max 90 ms | ✅ 0.00 % | ❌ median 66, max 74 | ✅ 34 MB | **FAIL** |
+| libcosmic `wgpu` | ✅ max 232 ms | ✅ max 160 ms | ✅ 0.00 % | ❌ median 2, max 2 | ✅ 119 MB | **FAIL** |
+| Slint default (GL) | ❌ max 313 ms | ✅ max 159 ms | ✅ 0.01 % | ❌ median 1, max 2 | ✅ 103 MB | **FAIL** |
+| Slint software | ✅ max 32 ms | ✅ max 88 ms | ✅ 0.01 % | ✅ median 0, max 0 | ✅ 29 MB | **PASS** |
+
+### M1–M5 medians (min–max, n = 5)
+
+| Metric | libcosmic default | libcosmic `wgpu` | Slint default (GL) | Slint software |
+| --- | --- | --- | --- | --- |
+| M1 cold start | 52.6 ms (51.0–56.9) | 131.1 ms (127.8–232.3) | 109.4 ms (108.2–312.9) ¹ | 27.1 ms (26.1–32.1) |
+| M2 10k first paint | 87.4 ms (85.6–90.3) | 157.5 ms (156.8–160.3) | 156.8 ms (153.8–158.9) | 85.4 ms (71.3–87.9) |
+| M3 idle RSS | 34.0 MB | 119.4 MB (119.1–124.9) | 102.7 MB (102.6–110.7) | 28.5 MB |
+| M4 idle CPU | 0.00 % | 0.00 % | 0.01 % | 0.01 % |
+| M5 p50 / p95 / p99 / max | 75.3 / 244.7 / 255.1 / 259.9 ms | 16.6 / 17.0 / 20.6 / 30.3 ms | 16.6 / 18.0 / 18.6 / 25.9 ms | 16.3 / 17.8 / 18.3 / 20.3 ms |
+| M5 commits; dropped frames per run | 111; **66** (60–74) | 598; **2** (1–2) | 604; **1** (0–2) | 608; **0** (0–0) |
+
+¹ The first Slint GL launch after the compositor started was 313 ms (harness exit 1, a §7 breach by 13 ms); the other four were 108–110 ms. The same first-launch effect as in the sections above. It alone decides G1 for this variant, but G1 is "every launch" and it is counted.
+
+### Observations (facts, no recommendation: that is #14)
+
+- On the GPU path, Slint GL and libcosmic `wgpu` both hold the 60 Hz frame interval (p50 16.6 ms) but each drops 1–2 frames per run (max interval 26–30 ms, just over the 25 ms threshold; where in the run they fall was not examined). Both therefore fail G4 as written, by one or two frames. Only Slint's software renderer drops none.
+- libcosmic's default renderer (tiny-skia) scrolls at about 13 fps on this CPU (p50 75 ms, 66 dropped frames), the same as in the headless-pixman run: the GPU compositor does not help a CPU-drawn client.
+- Memory: the GPU variants cost about 3–4 × the CPU variants (103–119 MB against 29–34 MB), G5 holds with a wide margin everywhere.
+- M6 and M7 ran for libcosmic default and Slint default only (the wgpu and software variants are not run for accessibility, `D006_A11Y_VARIANTS`). Results are unchanged: M6 libcosmic 26 of 26 missing, Slint 17 of 26 missing or wrong. M7 libcosmic steps 9 and 11 fail again (`notes-2.txt` instead of `notes-1.txt`, as in the NUC section above): a second NUC occurrence, still not explained. Slint passes every verifiable step.
+- The G1–G5 verdicts here do not turn "provisional" into "decided": gates G1, G4 and the choice of variant for the shell are for the owner (§4.1, #14).
+
 ## Deviations from the brief
 
 1. **Reference hardware: sway headless, not the DRM backend.** The runner is an unprivileged service user without a seat, so sway cannot take the display. The NUC job also uses sway headless with software rendering (`egl:` line: llvmpipe); the GPU path stays unmeasured. For the owner to decide whether a DRM or `WLR_RENDER_DRM_DEVICE` run is wanted.
