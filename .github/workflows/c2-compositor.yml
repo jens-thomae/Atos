@@ -1,0 +1,55 @@
+name: C2 compositor
+
+# Separate from ci.yml: C2 is its own Cargo workspace (components/c2-compositor/) with a
+# heavy dependency tree (Smithay, libcosmic) and needs system libraries. Runs only when
+# C2 or this file changes, so other PRs do not spend hosted minutes on it (docs/ci.md).
+on:
+  pull_request:
+    paths:
+      - "components/c2-compositor/**"
+      - ".github/workflows/c2-compositor.yml"
+      - "rust-toolchain.toml"
+  push:
+    branches: [main]
+    paths:
+      - "components/c2-compositor/**"
+      - ".github/workflows/c2-compositor.yml"
+      - "rust-toolchain.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  c2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: components/c2-compositor
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libudev-dev libgbm-dev libxkbcommon-dev \
+            libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev \
+            libdisplay-info-dev libpixman-1-dev libfontconfig-dev pkg-config clang
+
+      # rustup is preinstalled; this installs the version pinned in rust-toolchain.toml.
+      - run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: components/c2-compositor
+
+      - run: cargo build --workspace --locked
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
