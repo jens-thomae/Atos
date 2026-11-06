@@ -90,4 +90,12 @@ Then `podman pull ghcr.io/jens-thomae/atos/c1-base:latest` or `bootc switch --en
 
 ## Hosted CI minutes (Free plan, docs/ci.md)
 
-Per run: the `changes` job (well under 1 minute), plus either `build` on a pull request or `publish` on `main`. Minutes measured on the first runs are in the pull request for card #50. The base layers dominate: about 1 GB is pulled from quay.io on every run. ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded.
+GitHub bills each job rounded up to a whole minute.
+
+| Run | Measured | Billed |
+| --- | --- | --- |
+| Pull request: `changes` + `build` | 7 s + 46 s (pull about 40 s, build and lint 2 s) | 2 min |
+| Merge to `main`: `changes` + `publish` | not run yet; estimate: build 1 min, first push of about 1 GB 2–4 min | about 4–6 min first run, then about 2–3 min |
+| Docs-only | `changes` only | 1 min |
+
+ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded. The base pull from quay.io (about 1 GB) happens on every run.
