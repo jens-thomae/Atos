@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Weekly upstream check for atos-comp (C2, D-007): opens issues, never merges anything.
-# Env: DRY_RUN=true prints instead of opening; UPSTREAM, SINCE_DAYS, FALLBACK_DAYS override defaults.
+# Env: FORK_TAG overrides the fork point parsed from the C2 README (the tests set it); DRY_RUN=true prints instead of opening; UPSTREAM, SINCE_DAYS, FALLBACK_DAYS override defaults.
 # Needs git, gh (GH_TOKEN with issues:write) and jq. Upstream is read anonymously (plain git clone).
 set -euo pipefail
 UPSTREAM=${UPSTREAM:-https://github.com/pop-os/cosmic-comp}
@@ -10,8 +10,8 @@ FALLBACK_DAYS=${FALLBACK_DAYS:-90} # owner decision on #57: master merge after 3
 KEYWORDS='security|CVE|overflow|use-after|unsound|crash'
 root=$(cd "$(dirname "$0")/../.." && pwd)
 
-fork=$(grep -oE '\| Tag \| `epoch-[0-9.]+`' "$root/docs/components/c2-compositor/README.md" \
-  | grep -oE 'epoch-[0-9.]+' | head -n1 || true)
+fork=${FORK_TAG:-$(grep -oE '\| Tag \| `epoch-[0-9.]+`' "$root/docs/components/c2-compositor/README.md" \
+  | grep -oE 'epoch-[0-9.]+' | head -n1 || true)}
 [ -n "$fork" ] || { echo "no fork-point tag found in the C2 README" >&2; exit 1; }
 
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
@@ -50,9 +50,9 @@ fi
 
 # 3. Recent master commits mentioning security keywords (false positives are expected: read, then close).
 $git log --since="$SINCE_DAYS days ago" -i -E --grep="$KEYWORDS" --format='%H %s' HEAD | while read -r sha subject; do
-  open "C2: cherry-pick upstream fix ${sha:0:8}" "Upstream commit <$UPSTREAM/commit/$sha> matched the security keywords:
+  open "C2: cherry-pick upstream fix ${sha:0:8}" "Upstream commit <$UPSTREAM/commit/$sha> matched the security keywords (subject as code, so it pings nobody):
 
-> $subject
+    $subject
 
 Read it. If it is a reachable security fix, cherry-pick it (upstream.md, Security watch); otherwise close this card as not applicable. Opened by the upstream-watch workflow." 0
 done
