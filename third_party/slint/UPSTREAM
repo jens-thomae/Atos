@@ -1,0 +1,5 @@
+# Pinned upstream Slint (https://github.com/slint-ui/slint). Read by tools/slint-fork/slint-fork.sh.
+# Change only through the rebase routine in docs/components/c4-toolkit/rebase.md.
+repo=https://github.com/slint-ui/slint
+tag=v1.18.1
+commit=372cf0ee5577c3dfec309a45e7b778ba4e81b734

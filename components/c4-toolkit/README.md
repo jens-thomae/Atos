@@ -2,4 +2,4 @@
 
 Requirements: [`docs/spec.md` §6 C4 UI toolkit and SDK](../../docs/spec.md#c4-ui-toolkit-and-sdk).
 
-No code yet.
+The Slint fork (pin, patch queue, rebase routine) is documented in [`docs/components/c4-toolkit/`](../../docs/components/c4-toolkit/README.md). No C4 code yet.

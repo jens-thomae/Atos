@@ -1,0 +1,73 @@
+# C4 Slint fork (card #52): builds our pinned Slint + patch queue and the D-006 Slint spike against it.
+# A separate file so it never touches ci.yml. Docs: docs/components/c4-toolkit/.
+# Manual run with a dry-run rebase: gh workflow run slint-fork.yml -f rebase_ref=master
+name: Slint fork
+
+on:
+  pull_request:
+    paths:
+      - third_party/slint/**
+      - tools/slint-fork/**
+      - spikes/d006-slint/**
+      - .github/workflows/slint-fork.yml
+  push:
+    branches: [main]
+    paths:
+      - third_party/slint/**
+      - tools/slint-fork/**
+      - spikes/d006-slint/**
+      - .github/workflows/slint-fork.yml
+  workflow_dispatch:
+    inputs:
+      rebase_ref:
+        description: Dry-run the patch queue onto this upstream ref (tag, branch or sha); empty = skip
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: spikes/d006-slint
+
+      # Slint's documented Linux build dependencies (spikes/d006-slint/README.md).
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfontconfig-dev libxkbcommon-dev
+
+      - name: Fetch the pinned Slint and apply the patch queue
+        run: tools/slint-fork/slint-fork.sh setup
+
+      # Release build, as the spike's README does. The spike's own Cargo.lock is left alone:
+      # path sources replace the crates.io entries, so cargo rewrites it here (not committed).
+      - name: Build the d006-slint spike against the fork
+        working-directory: spikes/d006-slint
+        run: cargo build --release --config ../../third_party/slint/patch.toml
+
+      # A passing build could still have come from crates.io if the patch did not apply.
+      - name: Check the spike used the fork
+        working-directory: spikes/d006-slint
+        run: cargo tree -p slint --config ../../third_party/slint/patch.toml 2>/dev/null | head -1 | grep -F third_party/slint/src
+
+      - name: Dry-run rebase
+        if: github.event_name == 'workflow_dispatch' && inputs.rebase_ref != ''
+        run: tools/slint-fork/slint-fork.sh rebase "$REBASE_REF"
+        env:
+          REBASE_REF: ${{ inputs.rebase_ref }}

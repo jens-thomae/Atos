@@ -2,3 +2,5 @@
 /target
 __pycache__/
 *.pyc
+/third_party/slint/src/
+/third_party/slint/patch.toml
