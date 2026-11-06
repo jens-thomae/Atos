@@ -8,10 +8,10 @@ This spike tests the largest known risk of D-006 (§4.3 costs, §5): whether Sli
 
 **Yes, and more cheaply than D-006 estimated.** A panel-like layer surface and a popover (an `xdg_popup` parented to it) render through Slint's public FemtoVG renderer. Both appear on AT-SPI with their controls named, and an AT-SPI *click* on the panel's button opens the popover.
 
-- **No Slint patch was needed.** The backend uses public `slint::platform` API, plus four `#[doc(hidden)]` hooks that Slint's own backends use. The patch queue stays empty for this card.
+- **No Slint patch was needed.** The backend uses public `slint::platform` API, plus `#[doc(hidden)]` hooks that Slint's own Qt and testing backends implement ([section 5](#5-slint-internals-touched-and-the-risk-on-each-release)). The patch queue stays empty for this card.
 - **The accessibility port is small.** Slint's 1,011-line AccessKit adapter runs unchanged except for an 85-line diff (52 added, 33 removed). It **3-way-merges with no conflicts onto Slint `master` (1.19.0-dev)**, and the spike builds and passes its checks there without changes, after raising the `accesskit` and `accesskit_unix` pins.
-- **Popover time depends on one design choice.** If each open builds a fresh EGL context and renderer (the obvious port of Slint's popup model), the first open takes about 112 ms in the dev VM and the later ones vary. A **pre-warmed popup window that is reused** brings it down to a few milliseconds. Both modes are measured; the NUC numbers on the GPU are in [section 4](#4-measurements).
-- **Memory fits the single-process shell share.** Idle RSS with the popover used is about 141 MB (pooled) in the VM, against the 300 MB share. Most of it is Mesa (about 78 MB file-backed).
+- **The popover meets §7 on the NUC's GPU, with a wide margin.** Key press to popover presented: **33.4 ms for the first open and 29.0 ms median (max 34.4 ms) over 29 more** when each open builds its own EGL context and renderer (the obvious port of Slint's popup model). With a **pre-warmed popup window that is reused**: **11.6 ms first, 2.5 ms median (max 4.8 ms)**. Budget: ≤ 100 ms. These are lower bounds (headless output, [section 3](#3-how-the-popover-time-is-measured)). On software rendering (hosted CI, dev VM), only the pooled mode keeps the first open under 100 ms.
+- **Memory is a third of the single-process shell share.** On the NUC, idle RSS is **100.7 MB** 5 s after the first frame, and **98.4 MB (pooled) or 105.1 MB (not pooled) after 30 popover opens**. The share is 300 MB (D-006 G5). About 68 MB of it is file-backed (Mesa's Intel driver, Slint). Idle CPU over 60 s was 0.00 %.
 - **Estimate to productise: 8–11 builder cards** ([section 6](#6-cards-to-productise)), within D-006's 6–12 for the layer-shell backend plus its accessibility port.
 
 ## 1. Approach
@@ -69,11 +69,40 @@ Every control has a role and a name. The gap is the popover's own node: a `frame
 
 ## 4. Measurements
 
-### 4.1 Reference NUC, GPU (Intel UHD, `gles2` sway)
+### 4.1 Reference NUC, GPU
 
-Pending: the `measure-nuc` job of the T-59 workflow (label `t59-nuc` on the PR).
+[Run 42246103328](https://github.com/jens-thomae/Atos/actions/runs/42246103328), job `measure-nuc`, 2026-11-06. Intel Celeron N5105, kernel 6.8.0-147, sway 1.9 headless on `gles2`, Mesa 25.2.8. Renderer proof: sway's Wayland clients and the spike's own context both report `Mesa Intel(R) UHD Graphics (JSL)`. 30 keyboard opens per mode, idle CPU over 60 s.
 
-### 4.2 Dev VM (indicative only)
+| Metric | Budget | New EGL context per open | Pre-warmed popup pool |
+| --- | --- | --- | --- |
+| Popover fully visible, first open | ≤ 100 ms | **33.4 ms** ✅ | **11.6 ms** ✅ |
+| Popover fully visible, later opens, median / max (n = 29) | ≤ 100 ms | **29.0 / 34.4 ms** ✅ | **2.5 / 4.8 ms** ✅ |
+| Idle RSS after 30 opens | ≤ 300 MB (shell share) | 105.1 MB (anon 37.0, file 68.1) ✅ | 98.4 MB (anon 30.7, file 67.7) ✅ |
+| Start to first panel frame (budgets harness) | – | | 83 ms |
+| Idle RSS 5 s after first frame (budgets harness) | ≤ 300 MB | | 100.7 MB ✅ |
+| Idle CPU over 60 s | ≤ 1 % | | 0.00 % ✅ |
+
+The popover was on screen in every opening path (pixel inside 250,250,250 against 64,64,64 outside), and the AT-SPI tree matched [section 2](#2-what-the-spike-shows) line for line.
+
+What the numbers say:
+
+- Without the pool, about 25–30 ms of each open is building the context and FemtoVG (shaders, glyph atlas). On this GPU that fits the budget three times over. With the pool, an open costs a configure round trip and one frame.
+- 2.5 ms is less than a refresh interval because the headless output presents on commit. On a real 60 Hz display, add up to 16.7 ms.
+- These numbers are for one simple popover. A launcher or control centre with more content costs more per frame; the pool keeps the set-up cost out of it.
+
+### 4.2 Hosted CI (software rendering, indicative)
+
+Same run, job `measure-hosted`: x86_64 Xeon 8370C, sway on pixman, llvmpipe. 20 opens per mode.
+
+| Metric | New EGL context per open | Pre-warmed popup pool |
+| --- | --- | --- |
+| Popover fully visible, first open | 101.9 ms ❌ | 28.4 ms |
+| Later opens, median / max (n = 19) | 45.4 / 85.2 ms | 2.7 / 4.8 ms |
+| Idle RSS after 20 opens | 180.2 MB | 137.3 MB |
+
+On software GL, building a context costs far more, and only the pooled mode keeps the first open under budget. This matters for the software fallback of D-006.
+
+### 4.3 Dev VM (indicative only)
 
 Lima VM on an Apple M1 Max, aarch64, sway 1.9 with pixman, llvmpipe. Not the reference hardware. Software rendering, and VM timing noise of tens of milliseconds between runs.
 
@@ -127,7 +156,7 @@ Estimate in builder cards (one session each), from what the spike had to build a
 
 ## 7. For the owner
 
-1. **Proposed: shell popovers use a pre-warmed, reused popup window** (one per popover kind, or a small pool), not a new window per open. In the VM this is the difference between 112 ms and 28 ms for the first open, and it also uses about 40 MB less RSS. The cost is one idle EGL context per pooled window. A design consequence for C3/C4, not decided by this spike.
+1. **Proposed: shell popovers use a pre-warmed, reused popup window** (one per popover kind, or a small pool), not a new window per open. On the NUC's GPU both modes pass (33 ms against 12 ms for the first open), so this buys margin for heavier popovers. On the software fallback it decides the budget (102 ms against 28 ms in hosted CI), and it saves RSS there (about 40 MB). The cost is one idle EGL context per pooled window. On the NUC the pooled run still ended with less RSS than the unpooled one (98 MB against 105 MB after 30 opens). A design consequence for C3/C4, not decided by this spike.
 2. **Proposed: carry the AccessKit adapter as a patch in the Slint queue, not as a copy in C4.** The patch would move `accesskit.rs` out of the winit backend into a backend-neutral internal module, generic over a small window trait. The rebase routine (`slint-fork.sh rebase`) then shows conflicts per release, instead of a manual 3-way merge of a copied file. The spike kept the copy because it measures the port's diff size directly.
 3. The keyboard-exclusive panel (`T59_EXCLUSIVE_KEYBOARD`) and the `wtype` input path are measurement choices, not shell design.
 
