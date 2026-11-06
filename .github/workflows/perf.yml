@@ -76,6 +76,18 @@ jobs:
             echo "cold=no (page caches not dropped, see docs/reference-runner.md)" >> "$GITHUB_OUTPUT"
           fi
 
+      # GPU access is option A in docs/reference-runner.md (permanent since #44).
+      - name: Check the GPU set-up (docs/reference-runner.md)
+        run: |
+          for c in sway swaymsg eglinfo; do
+            command -v "$c" >/dev/null || { echo "::error::$c is missing on the NUC (docs/reference-runner.md step 7)"; exit 1; }
+          done
+          [ -r /dev/dri/renderD128 ] && [ -w /dev/dri/renderD128 ] || { echo "::error::runner cannot open /dev/dri/renderD128: owner does option A (docs/reference-runner.md)"; exit 1; }
+
+      # The compositor runs on the GPU, as on the laptops and desktops Atos targets: headless sway
+      # with the gles2 renderer on the render node, set up as in tools/d006/measure.sh. Apps are
+      # measured inside it. No silent fallback: the step fails unless the GL renderer that the
+      # Wayland platform gives clients is a hardware driver.
       - name: Budgets
         timeout-minutes: 10
         # Explicit `bash` adds pipefail, so `tee` does not hide a breach.
@@ -83,6 +95,23 @@ jobs:
         env:
           COLD: ${{ steps.caches.outputs.cold }}
         run: |
+          work=$(mktemp -d)
+          export XDG_RUNTIME_DIR="$work/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"
+          export MESA_SHADER_CACHE_DIR="$work/mesa-cache"  # no warm shader cache from earlier runs
+          trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$work"' EXIT
+          echo 'output HEADLESS-1 mode 1920x1080@60Hz scale 1' >"$work/sway.conf"
+          # wlroots does not fall back to pixman when WLR_RENDERER is set; it exits instead.
+          WLR_BACKENDS=headless WLR_RENDERER=gles2 WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128 \
+            WLR_LIBINPUT_NO_DEVICES=1 sway -c "$work/sway.conf" >results/sway.log 2>&1 & sway=$!
+          for _ in $(seq 100); do ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock >/dev/null 2>&1 && break; sleep 0.1; done
+          if ! kill -0 "$sway" 2>/dev/null || ! ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock >/dev/null 2>&1; then
+            echo "::error::sway did not start on gles2 (results/sway.log)"; tail -20 results/sway.log; exit 1
+          fi
+          WAYLAND_DISPLAY=$(cd "$XDG_RUNTIME_DIR" && echo wayland-?) SWAYSOCK=$(echo "$XDG_RUNTIME_DIR"/sway-ipc.*.sock)
+          export WAYLAND_DISPLAY SWAYSOCK
+          # Renderer proof: only the Wayland platform block counts (GBM and device report the GPU anyway).
+          egl=$(eglinfo -B 2>/dev/null | awk '/platform:$/ { p = ($0 ~ /^Wayland platform:/) } p && /OpenGL ES profile renderer/' \
+            | sort -u | sed 's/^[^:]*: *//')
           {
             echo "### Environment"
             echo
@@ -91,8 +120,15 @@ jobs:
             echo "- Kernel: $(uname -r)"
             echo "- CPU governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
             echo "- Cold cache: $COLD"
+            echo "- Compositor: $(sway --version), headless, gles2 on /dev/dri/renderD128"
+            echo "- egl: ${egl:-none}"
+            echo "- Test app renderer: none reported (budget-test-app draws nothing)"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
+          case "$egl" in
+            "" | *llvmpipe* | *softpipe* | *swrast*)
+              echo "::error::compositor is not on the GPU (egl: ${egl:-none}); not measuring"; exit 1 ;;
+          esac
           bin/budgets "$PWD/bin/budget-test-app" --cpu-window full --json results/budget-test-app.json \
             | tee -a "$GITHUB_STEP_SUMMARY"
 

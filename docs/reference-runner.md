@@ -21,7 +21,7 @@ sudo apt-get install -y --no-install-recommends curl ca-certificates libicu74 li
 | `curl`, `ca-certificates` | Download the runner over HTTPS (step 3) |
 | `libicu74`, `libkrb5-3`, `liblttng-ust1t64`, `libssl3t64`, `zlib1g` | Libraries the runner (.NET) needs. The same list the runner's own `bin/installdependencies.sh` installs on Ubuntu 24.04, so that script never has to run as root |
 
-The measurements need nothing else today: binaries are built on GitHub-hosted runners, and the budget harness is a Rust program that needs only glibc and `/proc`. Packages for later measurements (for example sway for the D-006 prototypes, #12) are added by those cards.
+Binaries are built on GitHub-hosted runners, and the budget harness is a Rust program that needs only glibc and `/proc`. The measurements run inside a compositor on the GPU, which needs the packages in step 7 and the GPU access in [GPU access](#gpu-access-permanent-option-a).
 
 ## 2. Create the runner user
 
@@ -82,9 +82,9 @@ sudo bash -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc
 2. On the NUC: `systemctl status 'actions.runner.*'` shows `active (running)`, and `ps -o user= -C Runner.Listener` prints `runner`.
 3. Comment on #17 that the runner is online. An agent then adds the `perf` label to the open pull request for one on-demand run, and the next nightly run (01:30 UTC) shows up under **Actions** → **Perf**.
 
-## 7. Packages for the D-006 measurements (#12)
+## 7. Packages for the compositor and the D-006 measurements (#12)
 
-[`.github/workflows/d006-measure.yml`](../.github/workflows/d006-measure.yml) starts the Files prototypes in a headless sway compositor, injects keys and reads their accessibility trees. That needs, once, as the owner:
+[`.github/workflows/perf.yml`](../.github/workflows/perf.yml) measures inside a headless sway compositor. [`.github/workflows/d006-measure.yml`](../.github/workflows/d006-measure.yml) also starts the Files prototypes there, injects keys and reads their accessibility trees. That needs, once, as the owner:
 
 ```sh
 sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core mesa-utils
@@ -92,27 +92,27 @@ sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-
 
 | Package | Why |
 | --- | --- |
-| `sway`, `wtype` | Headless compositor (pixman software renderer) and key injection |
+| `sway`, `wtype` | Headless compositor and key injection |
 | `wl-clipboard`, `grim` | Clipboard check for *Copy Path*, screenshots of the walkthrough |
 | `at-spi2-core`, `gir1.2-atspi-2.0`, `python3-gi` | AT-SPI bus and the tree dump |
 | `libgl1-mesa-dri`, `libegl1`, `fontconfig`, `fonts-dejavu-core` | OpenGL ES through Mesa's software rasteriser (Slint's femtovg renderer) and a font |
 | `dbus-daemon`, `mesa-utils` | A private session bus per run; `eglinfo`, to record which GL renderer (llvmpipe or a GPU driver) the apps get |
 
-Without the GPU steps below the `runner` user has no login session, so sway could only run headless with the software renderer. The `measure-nuc` job now measures on the GPU (sway `gles2` on `/dev/dri/renderD128`, four variants: libcosmic default, libcosmic `wgpu`, Slint default, Slint software renderer) and **fails at its package check until the owner has done option A below**. Run it with `gh workflow run d006-measure.yml -f nuc=true` or the label `d006-nuc` on a pull request; the job takes about 2 h 15 min (idle CPU over the full 5 minutes, 5 runs per variant). The job summary evaluates the gates G1–G5 of [`D-006-toolkit.md`](decisions/D-006-toolkit.md#41-the-gpu-gates-exact) per variant and marks a variant **not measured** unless both the compositor's Wayland `egl:` line and the app's own renderer line show the Intel driver.
+The `runner` user has no login session, so sway runs headless; with the GPU access below it renders with `gles2` on the GPU's render node. Both `perf.yml`'s `measure` job and the D-006 `measure-nuc` job (four variants: libcosmic default, libcosmic `wgpu`, Slint default, Slint software renderer) need that access and **fail at their check without it**. Run it with `gh workflow run d006-measure.yml -f nuc=true` or the label `d006-nuc` on a pull request; the job takes about 2 h 15 min (idle CPU over the full 5 minutes, 5 runs per variant). The job summary evaluates the gates G1–G5 of [`D-006-toolkit.md`](decisions/D-006-toolkit.md#41-the-gpu-gates-exact) per variant and marks a variant **not measured** unless both the compositor's Wayland `egl:` line and the app's own renderer line show the Intel driver.
 
-## GPU measurements (D-006, #36)
+## GPU access (permanent, option A)
 
-Owner steps, once the card #36 is merged and before the run. Do this while no job is running, since step 3 restarts the runner. Everything is undone afterwards.
+Atos targets normal laptops and desktops that draw on the GPU, so the reference runner measures on the GPU too. The owner first set this up for the D-006 run (#36) and decided on 2026-11-06 to keep it for good (#44), for the nightly budgets and future GPU benchmarks. Without it, sway falls back to software rendering (pixman, llvmpipe), which no target machine uses.
 
-**Option A (recommended): give the runner the render node.**
+The set-up gives the runner two things: membership of the group `render` and the Intel Vulkan driver. Do this once, while no job is running, since step 3 restarts the runner.
 
-1. Check whether the Vulkan driver is already there. If `dpkg -s` prints `Status: install ok installed`, skip step 2 and the last line of the undo.
+1. Check whether the Vulkan driver is already there. If `dpkg -s` prints `Status: install ok installed`, skip step 2.
 
    ```sh
    dpkg -s mesa-vulkan-drivers 2>/dev/null | grep '^Status' || echo "not installed"
    ```
 
-2. Install the Intel Vulkan driver (for libcosmic's `wgpu` build). Note the "NEW packages" line apt prints, for the undo.
+2. Install the Intel Vulkan driver (for libcosmic's `wgpu` build). Note the "NEW packages" line apt prints, in case you remove it later.
 
    ```sh
    sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers
@@ -132,9 +132,15 @@ Owner steps, once the card #36 is merged and before the run. Do this while no jo
    ps -o user=,supgrp= -C Runner.Listener          # runner  runner,render
    ```
 
-This changes one group membership (render nodes allow GPU rendering and compute only, not display or input) and one driver package. No service, port, sudo right or persistent setting is added. Then start the run (above).
+**Why this is safe.** A render node (`/dev/dri/renderD*`) gives GPU rendering and compute only: no display, no mode setting, no input devices and no other user's screen. No service, port, sudo right or persistent setting is added. It stays safe only while all of these hold:
 
-**Undo**, after the run:
+- Fork pull-request workflows stay disabled (**Settings** → **Actions** → **General**), and the workflows keep their own fork rule, so only code from branches of this repository reaches the NUC.
+- The runner stays the unprivileged user `runner`: no password, not in `sudo`, no other groups than `runner` and `render` (plus the optional drop-caches rule below).
+- No untrusted code runs on the NUC: nothing from forks, no downloads outside the pinned workflow actions and the build artifacts, no other services or secrets under `runner`.
+
+**Every GPU job proves it.** `perf.yml` and `d006-measure.yml` record the GL renderer that sway's Wayland clients get (the `egl:` line) in the job summary. `perf.yml` fails rather than measure if that renderer is a software one (`llvmpipe`, `softpipe`) or missing, or if sway does not start on `gles2`.
+
+**How to remove it** (back to software-only, for example before handing the NUC on):
 
 ```sh
 sudo gpasswd -d runner render
@@ -143,11 +149,13 @@ ps -o user=,supgrp= -C Runner.Listener                    # runner  runner (no r
 sudo apt-get remove -y mesa-vulkan-drivers                # only if step 2 installed it
 ```
 
-If step 2's "NEW packages" line listed more than `mesa-vulkan-drivers`, remove those too by name. Don't use `apt-get autoremove` blindly; it may remove packages that other steps installed.
+If step 2's "NEW packages" line listed more than `mesa-vulkan-drivers`, remove those too by name. Don't use `apt-get autoremove` blindly; it may remove packages that other steps installed. After removal, the GPU jobs in `perf.yml` and `d006-measure.yml` fail at their check until the access is back.
 
-If the summary says the `egl:` line is still `llvmpipe` (headless sway did not hand the GPU to its clients; that wlroots picks the render node in headless mode is expected but **unverified on the NUC**), use option B.
+If a summary ever shows `llvmpipe` in the `egl:` line, headless sway did not hand the GPU to its clients; for the D-006 measurements, option B below runs sway on a real display instead.
 
-**Option B (fallback): a real display, as the owner, without touching the runner.** Needs a monitor and keyboard on the NUC and no root.
+### D-006 option B: a real display
+
+As the owner, without touching the runner. Needs a monitor and keyboard on the NUC and no root.
 
 1. On another machine, download the `d006-bundle` artifact of a workflow run (the hosted `build` job) from the run page; GitHub delivers it as a zip. Copy it to the NUC as `~/d006-bundle.zip`.
 2. Log in on the console (tty1) as the owner, so logind gives sway a seat. Unpack and start sway with [`tools/d006/sway-drm.conf`](../tools/d006/sway-drm.conf):
@@ -184,7 +192,7 @@ sudo -iu runner bash -c 'cd ~/actions-runner && ./config.sh remove --token <TOKE
 ```
 
 - **Re-register** (new name, moved machine, broken registration): get a new registration token and repeat steps 4 and 5. Step 3 is only needed for a fresh directory.
-- **Remove completely:** after the two blocks above, `sudo userdel -r runner` and, if it was added, `sudo rm /etc/sudoers.d/runner-drop-caches`.
+- **Remove completely:** after the two blocks above, `sudo userdel -r runner` (this also ends its `render` membership) and, if it was added, `sudo rm /etc/sudoers.d/runner-drop-caches`.
 - If the NUC is gone for good and cannot run `config.sh remove`, delete the runner on the same Settings page (**Remove** → **Force remove this runner**).
 
 ## Optional: true cold start (decision for the owner)
