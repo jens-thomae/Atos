@@ -29,6 +29,8 @@ cargo build --release --config ../../third_party/slint/patch.toml
 
 `third_party/slint/src/` and `patch.toml` are generated and git-ignored. `patch.toml` is a `[patch.crates-io]` table with one path entry per Slint crate, so every Slint crate in the dependency graph (`slint`, `slint-build`, `i-slint-*`) comes from the checkout. A crate that uses Slint needs only `slint = "=1.18.1"` in its manifest and the `--config` flag. Nothing in a manifest names the checkout, so a crate still resolves from crates.io when the flag is missing. Root workspace crates that start using Slint (C3, C5) pass the same flag. Cargo rewrites that crate's `Cargo.lock` with path sources when it builds with the flag; do not commit that rewrite.
 
+**CI time** (Free plan minutes, [docs/ci.md](../../ci.md)): the `Slint fork` job took 7 min 58 s on a cold cache (7 min 15 s of it the spike's release build). It runs only when `third_party/slint/`, `tools/slint-fork/`, `spikes/d006-slint/` or its workflow change, so it costs about 8 minutes per such PR push, nothing otherwise.
+
 Check that the fork is in use: `cargo tree -p slint --config .../patch.toml | head -1` must print a path under `third_party/slint/src`. CI checks it.
 
 ## Add a patch
