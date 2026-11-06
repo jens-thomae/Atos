@@ -8,3 +8,5 @@ Free plan: 2,000 hosted minutes per month. `ci.yml` saves minutes as follows.
 - **Artifacts.** Every `upload-artifact` step sets `retention-days` (7 or 14).
 
 Docs-only commit used to demonstrate the skip: this file is documentation.
+
+Demo: docs-only change against the T-40 branch.
