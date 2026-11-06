@@ -11,9 +11,10 @@ on:
 permissions:
   contents: read
 
-# PRs: a new push cancels the older run. main: runs queue, so `latest` ends on the newest merge.
+# PRs: a new push cancels the older run. main: one group per commit, so no merge's run is
+# dropped from the queue and every merge gets a signed image.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -93,6 +94,8 @@ jobs:
 
       # Legacy .sig format and no Rekor upload: podman/bootc (containers/image) verify only this
       # format, and only key-based for GitHub identities. Why: docs/components/c1-base/README.md.
+      # These flags (and --new-bundle-format on verify) are deprecated in cosign v3: re-check them
+      # on every cosign-installer bump.
       - name: Sign
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
@@ -102,10 +105,12 @@ jobs:
             --new-bundle-format=false --use-signing-config=false --tlog-upload=false \
             "$IMAGE@$DIGEST"
 
-      # `latest` moves only after the signature verifies.
+      # `latest` moves only after the signature verifies, and points at that exact manifest:
+      # a registry-to-registry copy keeps the manifest bytes, so the digest (and signature) match.
       - name: Verify, then tag latest
         run: |
           cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
             "$IMAGE@$DIGEST" > /dev/null
-          podman push c1-base "docker://$IMAGE:latest"
+          skopeo copy "docker://$IMAGE@$DIGEST" "docker://$IMAGE:latest"
+          [ "$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:latest")" = "$DIGEST" ]
           echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"

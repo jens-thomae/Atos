@@ -19,17 +19,17 @@ The digest changes only through a reviewed change to the `FROM` line. CI builds 
 2. Label `org.opencontainers.image.title=Atos base`.
 3. `bootc container lint`: fails the build on image problems bootc knows about.
 
-`dnf` in the image still has `countme=1` in Fedora's repo files. It sends the counter only when `dnf` runs on the host. Whether to strip it too is D-008 open question 4, for the owner.
+`bootc` itself sends no counter: it only pulls our image from our registry. `dnf` in the image still has `countme=1` in Fedora's repo files. It sends the counter only when `dnf` runs on the host. Whether to strip it too is D-008 open question 4, for the owner.
 
 ## Where it goes
 
 | Event | Result |
 | --- | --- |
 | Pull request (not docs-only) | Build and countme check. No registry token, no signing key. |
-| Merge to `main` (not docs-only) | Build, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then move `:latest`. |
+| Merge to `main` (not docs-only) | Build, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Each merge has its own concurrency group, so none is dropped. |
 | Docs-only change (`tools/ci/is-docs-only.sh`) | Skipped. |
 
-**Public pulls (owner step, once).** A package pushed from a private repository starts private. After the first push to `main`, set the package to public: GitHub → Packages → `atos/c1-base` → Package settings → Change visibility → Public. Then pulls need no account (D-005). The REST API cannot change package visibility.
+**Public pulls (owner step, once).** A package pushed from a private repository starts private. After the first push to `main`, set the package to public: GitHub → Packages → `atos/c1-base` → Package settings → Change visibility → Public. **This cannot be undone:** a public package cannot be made private again. Then pulls need no account (D-005). The REST API cannot change package visibility.
 
 ## Signing: CI-held test key
 
@@ -40,6 +40,8 @@ Why not keyless (Sigstore with GitHub's OIDC token):
 - **The OS could not check it.** bootc and podman verify through containers/image. Its `sigstoreSigned` policy matches Fulcio certificates only by `subjectEmail`; GitHub Actions certificates carry a URI identity, which no field can match ([containers-policy.json(5)](https://github.com/containers/container-libs/blob/main/image/docs/containers-policy.json.5.md), [container-libs#388](https://github.com/containers/container-libs/issues/388), open on 2026-11-06).
 - **cosign v3's default bundle format is not readable by containers/image yet** (same issue). So the workflow signs with `--new-bundle-format=false`.
 - Keyless would write the private repository's name, workflow path and commit into the public Rekor log on every merge.
+
+The sign flags `--new-bundle-format=false`, `--use-signing-config=false` and `--tlog-upload=false` (and `--new-bundle-format` on verify) are deprecated in cosign v3. They work on the pinned v3.1.4; re-check them on every cosign or cosign-installer bump.
 
 A key signature in the legacy format is the one form both `cosign verify` and the OS's own policy check accept today.
 
