@@ -111,7 +111,7 @@ jobs:
           export WAYLAND_DISPLAY SWAYSOCK
           # Renderer proof: only the Wayland platform block counts (GBM and device report the GPU anyway).
           egl=$(eglinfo -B 2>/dev/null | awk '/platform:$/ { p = ($0 ~ /^Wayland platform:/) } p && /OpenGL ES profile renderer/' \
-            | sort -u | sed 's/^[^:]*: *//')
+            | sort -u | sed 's/^[^:]*: *//') || true  # eglinfo exits non-zero when any platform fails
           {
             echo "### Environment"
             echo
