@@ -119,18 +119,24 @@ fn open(ui: &AppWindow, state: &mut State, row: i32) {
 }
 
 /// `glGetString(name)` through the context's loader (GL_RENDERER = 0x1F01).
-fn gl_string(get_proc_address: &dyn Fn(&std::ffi::CStr) -> *const std::ffi::c_void, name: u32) -> String {
+fn gl_string(
+    get_proc_address: &dyn Fn(&std::ffi::CStr) -> *const std::ffi::c_void,
+    name: u32,
+) -> String {
     let p = get_proc_address(c"glGetString");
     if p.is_null() {
         return "unknown (no glGetString)".into();
     }
     // SAFETY: glGetString has this signature in every GL and GL ES version.
-    let f: unsafe extern "system" fn(u32) -> *const std::ffi::c_char = unsafe { std::mem::transmute(p) };
+    let f: unsafe extern "system" fn(u32) -> *const std::ffi::c_char =
+        unsafe { std::mem::transmute(p) };
     let s = unsafe { f(name) };
     if s.is_null() {
         "unknown".into()
     } else {
-        unsafe { std::ffi::CStr::from_ptr(s) }.to_string_lossy().into_owned()
+        unsafe { std::ffi::CStr::from_ptr(s) }
+            .to_string_lossy()
+            .into_owned()
     }
 }
 
@@ -256,10 +262,10 @@ fn main() -> Result<(), slint::PlatformError> {
         use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent as W};
         let mut first_frame = Some(first_frame);
         ui.window().on_winit_window_event(move |_, ev| {
-            if matches!(ev, W::RedrawRequested) {
-                if let Some(f) = first_frame.take() {
-                    slint::Timer::single_shot(Duration::ZERO, f);
-                }
+            if matches!(ev, W::RedrawRequested)
+                && let Some(f) = first_frame.take()
+            {
+                slint::Timer::single_shot(Duration::ZERO, f);
             }
             EventResult::Propagate
         });
@@ -271,7 +277,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     RenderingState::RenderingSetup => {
                         // Renderer proof: the GL_RENDERER string of the context the app drew with.
                         if let slint::GraphicsAPI::NativeOpenGL { get_proc_address } = api {
-                            eprintln!("D006_RENDERER: slint gl {}", gl_string(get_proc_address, 0x1F01));
+                            eprintln!(
+                                "D006_RENDERER: slint gl {}",
+                                gl_string(get_proc_address, 0x1F01)
+                            );
                         } else {
                             eprintln!("D006_RENDERER: slint unknown graphics API");
                         }
