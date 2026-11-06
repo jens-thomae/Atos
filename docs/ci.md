@@ -10,3 +10,4 @@ Free plan: 2,000 hosted minutes per month. `ci.yml` saves minutes as follows.
 
 Docs-only commit used to demonstrate the skip: this file is documentation.
 - **`audit.yml`** (cargo audit and cargo deny, both workspaces, `docs/components/c2-compositor/upstream.md`): no compile, about 1–2 minutes. Runs only when a manifest, lockfile or the policy changes, plus once a week.
+- **Source bundle (`c1-base.yml` publish, #85).** Adds about 1 minute to a publish run (`git archive`, `rpm -qa`, a one-layer build, push, sign). Package size: about 10 MB per image (`git archive | gzip` of the tree on 2026-11-06 was 9.5 MB; the tarball differs per commit, so layers are not shared). Measured numbers are to be recorded from the first run on `main`.

@@ -88,7 +88,8 @@ jobs:
       # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - run: podman build --pull=missing --build-context repo=. -t c1-base components/c1-base
+      # The label tells users where the corresponding source is (GPL, D-013); the tag is built below.
+      - run: podman build --pull=missing --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source" -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
       - name: UKI and systemd-boot are signed and seal the image (#54)
@@ -108,6 +109,33 @@ jobs:
           podman push --digestfile digest c1-base "docker://$IMAGE:$GITHUB_SHA"
           echo "DIGEST=$(cat digest)" >> "$GITHUB_ENV"
 
+      # Corresponding source (GPL, D-013, #85): the package is public, the repository is not. A FROM-scratch
+      # image under the sibling tag `<sha>-source`: no extra tooling, and podman/skopeo/cosign treat it like the
+      # image (an oras artifact would need a tool the runner lacks). `git archive` ships tracked files only:
+      # no .git, no CI credentials (checkout uses persist-credentials: false), nothing untracked.
+      - name: Build source bundle
+        run: |
+          # The only private-key file in the tree is the TEST db key, which D-014 already treats as public.
+          leaked=$(git ls-files | grep -iE '\.(key|pem|p12|pfx|gpg)$|(^|/)(id_[a-z0-9]+|\.env)$' | grep -vx 'components/c1-base/secureboot-test/db.key' || true)
+          [ -z "$leaked" ] || { echo "::error::key-like files in the source tree: $leaked"; exit 1; }
+          mkdir src
+          git archive --prefix="atos-$GITHUB_SHA/" -o "src/atos-$GITHUB_SHA.tar.gz" HEAD
+          podman run --rm c1-base rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > src/fedora-packages.txt
+          [ -s src/fedora-packages.txt ]
+          cat > src/README.md <<EOF
+          # Corresponding source of $IMAGE:$GITHUB_SHA
+
+          - atos-$GITHUB_SHA.tar.gz: the Atos repository at commit $GITHUB_SHA (atos-comp, Slint-linked code, image recipe).
+            Rust dependencies are pinned in the Cargo.lock files and come from crates.io and the git revisions named there.
+          - fedora-packages.txt: every Fedora package (NVR) in the image. Their sources are at
+            https://src.fedoraproject.org (git, per package and release) and https://koji.fedoraproject.org (source RPMs).
+          - Licence: D-013, our own source is MIT OR Apache-2.0; binaries carry the licence of what they link (atos-comp and Slint-linked code: GPL-3.0-only).
+          EOF
+          printf 'FROM scratch\nLABEL org.atos.source-of="%s:%s"\nCOPY . /\n' "$IMAGE" "$GITHUB_SHA" > src/Containerfile
+          podman build -t c1-base-source src
+          podman push --digestfile source-digest c1-base-source "docker://$IMAGE:$GITHUB_SHA-source"
+          echo "SRC_DIGEST=$(cat source-digest)" >> "$GITHUB_ENV"
+
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3, cosign v3.1.4
 
       # Legacy .sig format and no Rekor upload: podman/bootc (containers/image) verify only this
@@ -121,7 +149,7 @@ jobs:
         run: |
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
             --new-bundle-format=false --use-signing-config=false --tlog-upload=false \
-            "$IMAGE@$DIGEST"
+            "$IMAGE@$DIGEST" "$IMAGE@$SRC_DIGEST"
 
       # `latest` moves only after the signature verifies, and points at that exact manifest:
       # a registry-to-registry copy keeps the manifest bytes, so the digest (and signature) match.
@@ -129,6 +157,8 @@ jobs:
         run: |
           cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
             "$IMAGE@$DIGEST" > /dev/null
+          cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
+            "$IMAGE@$SRC_DIGEST" > /dev/null
           skopeo copy "docker://$IMAGE@$DIGEST" "docker://$IMAGE:latest"
           [ "$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:latest")" = "$DIGEST" ]
-          echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`); source \`$IMAGE@$SRC_DIGEST\` (tag \`$GITHUB_SHA-source\`)" >> "$GITHUB_STEP_SUMMARY"
