@@ -49,6 +49,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - run: podman build --pull=missing -f components/c1-base/Containerfile -t c1-base .
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
@@ -77,6 +80,9 @@ jobs:
           [ "$HAS_KEY" = true ] || { echo "::error::COSIGN_PRIVATE_KEY secret missing, see docs/components/c1-base/README.md"; exit 1; }
           [ -f components/c1-base/cosign.pub ] || { echo "::error::components/c1-base/cosign.pub missing"; exit 1; }
 
+      # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - run: podman build --pull=missing -f components/c1-base/Containerfile -t c1-base .
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
