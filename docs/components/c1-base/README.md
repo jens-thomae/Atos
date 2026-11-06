@@ -17,15 +17,40 @@ The digest changes only through a reviewed change to the `FROM` line. CI builds 
 
 1. `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
 2. Label `org.opencontainers.image.title=Atos base`.
-3. `bootc container lint`: fails the build on image problems bootc knows about.
+3. The compositor and session (below).
+4. `bootc container lint`: fails the build on image problems bootc knows about.
 
 `bootc` itself sends no counter: it only pulls our image from our registry. `dnf` in the image still has `countme=1` in Fedora's repo files. It sends the counter only when `dnf` runs on the host. Whether to strip it too is D-008 open question 4, for the owner.
+
+## Session: greetd autologin into atos-comp
+
+Booting the image lands in a graphical session run by `atos-comp` (C2), with Xwayland. Card #58.
+
+- **Build.** The first stage of the Containerfile builds `components/c2-compositor/` with the pinned toolchain (`rust-toolchain.toml`, rustup-init pinned by version and sha256) on the same Fedora base, then copies `atos-comp` (30 MB, stripped) and its two data files into the image. The build context is the repository root (`.dockerignore` limits what is sent): `podman build -f components/c1-base/Containerfile .`. Thin LTO instead of upstream's fat LTO keeps the build short (3 min 47 s cold in the dev VM); revisit when the budgets need it.
+- **Runtime packages:** `greetd`, `xorg-x11-server-Xwayland`, Mesa DRI drivers, `libinput`, `xterm` (the X11 test client until a native X11 app is in the suite) and a font.
+- **Session path:** `greetd` (enabled, default target `graphical.target`) starts `atos-comp` as user `atos` through `initial_session` (autologin) on tty1. If the compositor exits, greetd falls back to a text login on tty1. The user comes from `rootfs/usr/lib/sysusers.d/atos.conf` with a locked password, so it can only be reached through greetd's autologin. `atos-comp` starts Xwayland itself (`DISPLAY=:0`).
+- **Why greetd with autologin, not SDDM or GDM.** A display manager is not decided by the spec; this is the smallest thing that gets a session. greetd is a small Rust daemon with no GUI toolkit dependency (SDDM pulls Qt, GDM pulls GNOME), speaks PAM and logind properly, and `initial_session` is exactly autologin. The shell (C3) or first-run (C11) can later replace it with a real greeter by changing `rootfs/etc/greetd/config.toml`. Autologin is acceptable only while there is no installer, user accounts or disk encryption (C11); it must be revisited there.
+
+### Demo (dev VM, 2026-11-06)
+
+Built and installed in the dev VM (aarch64, Apple M1 Max, QEMU without KVM, so software emulation and about 7 minutes to boot): `bootc install to-disk --via-loopback` of the image, booted with `qemu-system-aarch64 -device virtio-gpu-pci`. The VM kernel cannot mount xfs, so the test disk used ext4. Not a budget measurement.
+
+| Boot to the session | An X11 app (`xterm`, `DISPLAY=:0`) |
+| --- | --- |
+| ![session](session-boot.png) | ![xterm](session-xterm.png) |
+
+The second screenshot started `xterm` through a test-only edit of the greetd command on the test disk; the image itself starts only `atos-comp`. The window frame is still COSMIC's look (D-007). No shell surfaces yet (C3).
+
+### Size and cost
+
+- **Image size:** 2.10 GB to 2.56 GB uncompressed (+0.46 GB, arm64 as built in the dev VM; `podman images`). The CI amd64 compressed size is in the PR once its first run has finished.
+- **CI:** the image build now includes the Rust build of `atos-comp`. Cold, the dev VM took 3 min 47 s for it; hosted time is in the PR (first run). There is no build cache between runs, so every pull-request push and every merge to `main` pays it again. If this is too much for the Free plan, the next step is a registry or `actions/cache` build cache (card to be filed by the owner's choice).
 
 ## Where it goes
 
 | Event | Result |
 | --- | --- |
-| Pull request (not docs-only) | Build and countme check. No registry token, no signing key. |
+| Pull request (not docs-only) | Build, countme check and session check (greetd enabled, `atos-comp`, `Xwayland`). No registry token, no signing key. |
 | Merge to `main` (not docs-only) | Build, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Each merge has its own concurrency group, so none is dropped. |
 | Docs-only change (`tools/ci/is-docs-only.sh`) | Skipped. |
 

@@ -1,0 +1,6 @@
+# Build context for components/c1-base/Containerfile is the repository root: send only what it copies.
+*
+!rust-toolchain.toml
+!components/c1-base/rootfs
+!components/c2-compositor
+components/c2-compositor/target

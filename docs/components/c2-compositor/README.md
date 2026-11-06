@@ -71,3 +71,5 @@ The window frame and top bar are still COSMIC's look (out of scope for this fork
 Fork changes beyond renaming, needed to pass clippy on the repository toolchain (1.99.1; upstream pins 1.93): `rust-version` raised from 1.93 to 1.99.1; `AtomicUsize::fetch_update` replaced by `try_update` (same semantics, `src/utils/ids.rs`, `src/shell/element/stack.rs`); one needless `&` removed in `src/shell/focus/mod.rs`. The fluent file `resources/i18n/*/cosmic_comp.ftl` is renamed `atos_comp.ftl` (the `fl!` macro names it after the crate).
 
 Build times: cold `cargo build` in the dev VM (aarch64, M1 Max) 1 min 42 s, `cargo clippy` after that 8 s. Hosted CI time: see the first run of the `C2 compositor` workflow in the PR.
+
+The image build (C1, card #58) compiles this workspace as the first stage of `components/c1-base/Containerfile` and boots it as the session on real DRM/KMS with Xwayland: see [C1 base image](../c1-base/README.md#session-greetd-autologin-into-atos-comp).

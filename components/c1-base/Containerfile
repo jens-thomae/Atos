@@ -1,9 +1,52 @@
 # Atos base image (C1). Docs: docs/components/c1-base/README.md
+# Build from the repository root: podman build -f components/c1-base/Containerfile .
 # Base: fedora-bootc 45 (D-008), multi-arch index digest; version 45.20261105.0.
-FROM quay.io/fedora/fedora-bootc:45@sha256:c3cccbe8c7263cfc610ca9697cf4e0a34bb5b590b394f413f1c159ef63fb15ac
+ARG BASE=quay.io/fedora/fedora-bootc:45@sha256:c3cccbe8c7263cfc610ca9697cf4e0a34bb5b590b394f413f1c159ef63fb15ac
+
+# Stage 1: build atos-comp (C2). The same base image, so its layers are already pulled.
+FROM ${BASE} AS comp
+RUN dnf -y install --setopt=install_weak_deps=False gcc clang pkgconf-pkg-config git curl \
+      systemd-devel mesa-libgbm-devel mesa-libEGL-devel libxkbcommon-devel wayland-devel \
+      libinput-devel dbus-devel libseat-devel libdisplay-info-devel pixman-devel fontconfig-devel
+# rustup-init pinned as in tools/dev-vm/atos.yaml (aarch64, for the dev VM) plus the amd64 CI build.
+ARG RUSTUP_VERSION=1.29.3
+# /root is a symlink into /var in bootc images, so keep the toolchain elsewhere.
+ENV CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup
+RUN set -eux; \
+    case "$(uname -m)" in \
+      x86_64) t=x86_64-unknown-linux-gnu ;; \
+      aarch64) t=aarch64-unknown-linux-gnu ;; \
+    esac; \
+    curl -fsSL -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$t/rustup-init"; \
+    curl -fsSL "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$t/rustup-init.sha256" | sed 's# .*#  /tmp/rustup-init#' | sha256sum --check; \
+    chmod +x /tmp/rustup-init; /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain none; rm /tmp/rustup-init
+COPY rust-toolchain.toml /src/rust-toolchain.toml
+COPY components/c2-compositor /src/components/c2-compositor
+WORKDIR /src/components/c2-compositor
+# ponytail: thin LTO (upstream uses fat) to keep the hosted build short; revisit with the budgets.
+ENV PATH=/opt/cargo/bin:$PATH CARGO_PROFILE_RELEASE_LTO=thin CARGO_TERM_COLOR=never
+RUN cp ../../rust-toolchain.toml . && cargo build --release --locked && strip target/release/atos-comp
+
+# Stage 2: the image.
+FROM ${BASE}
 
 # D-005: no call home. Fedora's anonymous countme counter runs from this timer.
 RUN systemctl mask rpm-ostree-countme.timer
+
+# Session: greetd autologins `atos` into atos-comp; Xwayland is started by the compositor.
+# xterm is the X11 test client for the Xwayland check; replace it once a native X11 app is in the suite.
+RUN dnf -y install --setopt=install_weak_deps=False greetd greetd-selinux \
+      xorg-x11-server-Xwayland mesa-dri-drivers mesa-libgbm libinput libseat libdisplay-info \
+      libxkbcommon pixman fontconfig dejavu-sans-fonts xterm \
+    && dnf clean all \
+    && rm -rf /var/cache/* /var/lib/dnf/repos /var/log/dnf5.log /var/lib/greetd/.config \
+    && systemctl set-default graphical.target \
+    && systemctl enable greetd.service
+
+COPY components/c1-base/rootfs/ /
+COPY --from=comp /src/components/c2-compositor/target/release/atos-comp /usr/bin/atos-comp
+COPY --from=comp /src/components/c2-compositor/data/keybindings.ron /usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults
+COPY --from=comp /src/components/c2-compositor/data/tiling-exceptions.ron /usr/share/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 LABEL org.opencontainers.image.title="Atos base"
 
