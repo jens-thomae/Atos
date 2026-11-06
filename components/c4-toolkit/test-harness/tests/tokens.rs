@@ -16,7 +16,10 @@ fn tokens_follow_theme_and_accent() {
     assert_eq!(rgb(ui.get_accent_colour()), (0x8F, 0xA3, 0xE0));
     ui.set_accent_name(AccentName::Teal);
     assert_eq!(rgb(ui.get_accent_colour()), (0x2F, 0x7C, 0x82));
-    assert_eq!(ui.get_select_colour().alpha(), (0.16f32 * 255.0).round() as u8);
+    assert_eq!(
+        ui.get_select_colour().alpha(),
+        (0.16f32 * 255.0).round() as u8
+    );
     assert_eq!(ui.get_body_size(), 14.0);
     assert_eq!(ui.get_space_4(), 16.0);
     assert_eq!(ui.get_window_radius(), 14.0);
