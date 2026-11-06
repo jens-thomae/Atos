@@ -519,25 +519,38 @@ fn contrast_report(t: &Value) -> R<Contrast> {
                 );
             }
         }
-        let panel = c("panel")?.over(window);
-        check(
-            theme,
-            "text on panel over wallpaper",
-            c("text")?,
-            panel,
-            4.5,
-            false,
-        );
-        check(
-            theme,
-            "text-3 on panel over wallpaper",
-            c("text-3")?,
-            panel,
-            4.5,
-            false,
-        );
+        // Frosted panel: worst case over each wallpaper stop.
+        let mut panel = window;
+        for wp in ["wallpaper", "wallpaper-glow", "wallpaper-edge"] {
+            panel = c("panel")?.over(c(wp)?);
+            for txt in ["text", "text-3"] {
+                check(
+                    theme,
+                    &format!("{txt} on panel over {wp}"),
+                    c(txt)?,
+                    panel,
+                    4.5,
+                    false,
+                );
+            }
+        }
         for s in ["success", "warning", "error"] {
-            check(theme, &format!("{s} on window"), c(s)?, window, 4.5, false);
+            for (bg_name, bg) in [
+                ("window", window),
+                ("sidebar", sidebar),
+                ("card", card),
+                ("group", group),
+            ] {
+                // The canvas only claims status colours on the window.
+                check(
+                    theme,
+                    &format!("{s} on {bg_name}"),
+                    c(s)?,
+                    bg,
+                    4.5,
+                    bg_name != "window",
+                );
+            }
         }
         check(
             theme,
@@ -558,6 +571,24 @@ fn contrast_report(t: &Value) -> R<Contrast> {
                 &format!("accent {name} on window"),
                 acc,
                 window,
+                4.5,
+                adv,
+            );
+            for (bg_name, bg) in [("sidebar", sidebar), ("card", card)] {
+                check(
+                    theme,
+                    &format!("accent {name} on {bg_name}"),
+                    acc,
+                    bg,
+                    4.5,
+                    adv,
+                );
+            }
+            check(
+                theme,
+                &format!("on-accent on accent {name} hover"),
+                c("on-accent")?,
+                a.hover[i],
                 4.5,
                 adv,
             );
@@ -620,6 +651,132 @@ fn contrast_report(t: &Value) -> R<Contrast> {
     Ok(report)
 }
 
+// ---- literal check: UI code takes design values from the generated globals only ---------------
+
+/// `.slint` files that may hold literals: the generated file, and test fixtures (not UI code).
+const LITERAL_EXEMPT: [&str; 2] = [OUT, "components/c4-toolkit/test-harness/"];
+
+/// Lines of `src` with a literal colour, length or duration. Comments and strings are ignored;
+/// zero is allowed (`0px`).
+fn literal_violations(src: &str) -> Vec<String> {
+    let c: Vec<char> = src.chars().collect();
+    let (mut i, mut line, mut bad) = (0, 1, Vec::new());
+    let ident = |ch: char| ch.is_alphanumeric() || ch == '_' || ch == '-';
+    while i < c.len() {
+        match c[i] {
+            '\n' => line += 1,
+            '/' if c.get(i + 1) == Some(&'/') => {
+                while i < c.len() && c[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            '/' if c.get(i + 1) == Some(&'*') => {
+                i += 2;
+                while i + 1 < c.len() && !(c[i] == '*' && c[i + 1] == '/') {
+                    line += (c[i] == '\n') as usize;
+                    i += 1;
+                }
+                i += 2;
+                continue;
+            }
+            '"' => {
+                i += 1;
+                while i < c.len() && c[i] != '"' {
+                    if c[i] == '\\' {
+                        i += 1;
+                    }
+                    line += (c.get(i) == Some(&'\n')) as usize;
+                    i += 1;
+                }
+            }
+            '#' if c.get(i + 1).is_some_and(char::is_ascii_hexdigit) => {
+                let e = (i + 1..c.len())
+                    .find(|&k| !c[k].is_alphanumeric())
+                    .unwrap_or(c.len());
+                bad.push(format!(
+                    "line {line}: colour literal {}",
+                    c[i..e].iter().collect::<String>()
+                ));
+                i = e;
+                continue;
+            }
+            ch if ch.is_ascii_digit() && (i == 0 || !(ident(c[i - 1]) || c[i - 1] == '.')) => {
+                let e = (i..c.len())
+                    .find(|&k| !(c[k].is_ascii_digit() || c[k] == '.'))
+                    .unwrap_or(c.len());
+                let u = (e..c.len())
+                    .find(|&k| !c[k].is_alphabetic())
+                    .unwrap_or(c.len());
+                let (num, unit): (String, String) =
+                    (c[i..e].iter().collect(), c[e..u].iter().collect());
+                if ["px", "phx", "pt", "rem", "ms", "s"].contains(&unit.as_str())
+                    && num.parse::<f64>().is_ok_and(|v| v != 0.0)
+                {
+                    bad.push(format!("line {line}: literal {num}{unit}"));
+                }
+                i = u;
+                continue;
+            }
+            ch if ch.is_alphabetic() => {
+                let e = (i..c.len()).find(|&k| !ident(c[k])).unwrap_or(c.len());
+                let word: String = c[i..e].iter().collect();
+                if ["rgb", "rgba", "hsv", "hsl"].contains(&word.as_str()) && c.get(e) == Some(&'(')
+                {
+                    bad.push(format!("line {line}: colour function {word}("));
+                }
+                i = e;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bad
+}
+
+fn slint_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            if p.file_name()
+                .is_some_and(|n| n != "target" && n != "node_modules")
+            {
+                slint_files(&p, out);
+            }
+        } else if p.extension().is_some_and(|x| x == "slint") {
+            out.push(p);
+        }
+    }
+}
+
+/// Literal violations in every non-exempt `.slint` file under `components/`.
+fn literal_report(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    slint_files(&root.join("components"), &mut files);
+    let mut bad = Vec::new();
+    for f in files {
+        let rel = f
+            .strip_prefix(root)
+            .unwrap_or(&f)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if LITERAL_EXEMPT.iter().any(|x| rel.starts_with(x)) {
+            continue;
+        }
+        let src = std::fs::read_to_string(&f).unwrap_or_default();
+        bad.extend(
+            literal_violations(&src)
+                .into_iter()
+                .map(|v| format!("{rel}: {v}")),
+        );
+    }
+    bad
+}
+
 /// Every `proposed` entry must name a real token, so the list cannot rot.
 fn proposed_missing(t: &Value) -> Vec<String> {
     let list = t
@@ -678,7 +835,12 @@ fn main() -> std::process::ExitCode {
             std::fs::write(&path, &out).map_err(|e| format!("{OUT}: {e}"))?;
             println!("wrote {OUT}");
         }
-        let fails = report.failures;
+        let mut fails = report.failures;
+        fails.extend(
+            literal_report(&root)
+                .into_iter()
+                .map(|v| format!("literal design value (use tokens): {v}")),
+        );
         if fails.is_empty() {
             Ok(())
         } else {
@@ -733,6 +895,19 @@ mod tests {
             generate(&t).unwrap(),
             "{OUT} is stale: run `cargo run -p tokens`"
         );
+    }
+
+    #[test]
+    fn literal_check_flags_bad_and_passes_clean() {
+        let bad = "Rectangle { background: #1f1c19; width: 32px; animate x { duration: 200ms; } border-color: rgba(1,2,3,0.5); }";
+        assert_eq!(literal_violations(bad).len(), 4);
+        let clean = "// 32px #fff in a comment\n/* 5ms */\nRectangle { background: Palette.window; width: Size.control; x: 0px; opacity: 0.4; text: \"12px #abc\"; }";
+        assert_eq!(literal_violations(clean), Vec::<String>::new());
+    }
+
+    #[test]
+    fn no_literals_in_ui_code() {
+        assert_eq!(literal_report(&repo_root()), Vec::<String>::new());
     }
 
     #[test]

@@ -20,7 +20,7 @@
 
 ## What is generated
 
-`tokens.slint` exports Slint globals: `Fonts`, `Type` (text styles), `Palette`, `Space`, `Radius`, `Size`, `Elevation`, `Motion`. UI code reads only these, never literals.
+`tokens.slint` exports Slint globals: `Fonts`, `Type` (text styles), `Palette`, `Space`, `Radius`, `Size`, `Elevation`, `Motion`. UI code reads only these, never literals. `cargo run -p tokens -- --check` (and a nextest test) fails on a colour, length or duration literal (`#fff`, `rgb(`, `12px`, `200ms`; zero is allowed) in any `.slint` file under `components/`, except the generated file and the test fixtures in `components/c4-toolkit/test-harness/`.
 
 - Theme: set `Palette.dark`. Accent: set `Palette.accent-name` (an `AccentName`). Every colour follows both.
 - Elevation levels have two shadow layers (`elevation-2-near`, `elevation-2-far`); draw them as two stacked rectangles, since Slint draws one shadow per element.
@@ -33,7 +33,9 @@
 
 ## Known contrast misses (owner decision)
 
-The check fails the build for the neutrals, status colours, destructive and the default (blue) accent. It only warns for the values below, which are the canvas's own:
+The check fails the build for text on the surfaces, status colours on the window, destructive, the frosted panel over every wallpaper stop and the default (blue) accent. It only warns for the values below, which are the canvas's own. Not checked yet: 3:1 for non-text UI (lines, focus ring, toggle track).
+
+- Success and warning text on the sidebar (light): 4.40:1 and 4.49:1.
 
 - Accents other than blue, as text or as a fill under `on-accent`, miss 4.5:1 in one or both themes (in dark they have no lighter variant yet).
 - Warning text on the privacy indicator background (light): 4.29:1.

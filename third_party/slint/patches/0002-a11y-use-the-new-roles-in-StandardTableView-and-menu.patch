@@ -1,0 +1,200 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Atos <atos@localhost>
+Date: Fri, 6 Nov 2026 21:45:02 +0100
+Subject: [PATCH] a11y: use the new roles in StandardTableView and menus
+
+Rows carry label, selected state, index and default action; headers carry the column title; menu items carry title, enabled, checked, expandable and default action.
+---
+ internal/compiler/widgets/common/menu-base.slint    | 8 ++++++++
+ internal/compiler/widgets/cosmic/tableview.slint    | 8 ++++++++
+ internal/compiler/widgets/cupertino/tableview.slint | 8 ++++++++
+ internal/compiler/widgets/fluent/tableview.slint    | 8 ++++++++
+ internal/compiler/widgets/material/tableview.slint  | 8 ++++++++
+ 5 files changed, 40 insertions(+)
+
+diff --git a/internal/compiler/widgets/common/menu-base.slint b/internal/compiler/widgets/common/menu-base.slint
+index d721727..13a77c6 100644
+--- a/internal/compiler/widgets/common/menu-base.slint
++++ b/internal/compiler/widgets/common/menu-base.slint
+@@ -84,6 +84,7 @@ export component MenuFrameBase inherits Rectangle {
+     in property <length> margin;
+ 
+     clip: true;
++    accessible-role: menu;
+     min-width: max(root.layout-min-width, layout.min-width);
+ 
+     layout := VerticalLayout {
+@@ -125,6 +126,13 @@ export component MenuItemBase {
+         touch-area := TouchArea {
+             visible: !entry.is-separator;
+             enabled: entry.enabled;
++            accessible-role: menu-item;
++            accessible-label: entry.title;
++            accessible-enabled: entry.enabled;
++            accessible-checkable: entry.checked;
++            accessible-checked: entry.checked;
++            accessible-expandable: entry.has-sub-menu;
++            accessible-action-default => { root.activate(entry, self.absolute-position.y); }
+ 
+             layout := HorizontalLayout {
+                 padding-top: root.vertical-padding;
+diff --git a/internal/compiler/widgets/cosmic/tableview.slint b/internal/compiler/widgets/cosmic/tableview.slint
+index b0a7f31..a8385e1 100644
+--- a/internal/compiler/widgets/cosmic/tableview.slint
++++ b/internal/compiler/widgets/cosmic/tableview.slint
+@@ -6,6 +6,7 @@ import { ListView } from "../common/listview.slint";
+ import { StateLayer, StateLayerBase } from "components.slint";
+ 
+ component TableViewColumn inherits Rectangle {
++    accessible-role: column-header;
+     in property <SortOrder> sort-order: SortOrder.unsorted;
+ 
+     callback clicked <=> touch-area.clicked;
+@@ -91,6 +92,10 @@ component TableViewCell inherits Rectangle {
+ }
+ 
+ component TableViewRow inherits Rectangle {
++    accessible-role: row;
++    accessible-item-selectable: true;
++    accessible-item-selected: root.selected;
++    accessible-action-default => { root.clicked(); }
+     in property <bool> selected;
+     in property <bool> even;
+ 
+@@ -207,6 +212,7 @@ export component StandardTableView {
+                 min-height: root.min-header-height;
+ 
+                 for column[index] in root.columns : TableViewColumn {
++                    accessible-label: column.title;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+                     min-width: max(column.min-width, column.width);
+@@ -233,6 +239,8 @@ export component StandardTableView {
+ 
+         scroll-view := ListView {
+             for row[idx] in root.rows : TableViewRow {
++                accessible-label: row[0].text; // ponytail: first cell names the row
++                accessible-item-index: idx;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+ 
+diff --git a/internal/compiler/widgets/cupertino/tableview.slint b/internal/compiler/widgets/cupertino/tableview.slint
+index aa39b6e..182331e 100644
+--- a/internal/compiler/widgets/cupertino/tableview.slint
++++ b/internal/compiler/widgets/cupertino/tableview.slint
+@@ -5,6 +5,7 @@ import { CupertinoPalette, CupertinoFontSettings, Icons } from "styling.slint";
+ import { ListView } from "../common/listview.slint";
+ 
+ component TableViewColumn inherits Rectangle {
++    accessible-role: column-header;
+     in property <SortOrder> sort-order: SortOrder.unsorted;
+     in property <bool> last;
+ 
+@@ -87,6 +88,10 @@ component TableViewCell inherits Rectangle {
+ }
+ 
+ component TableViewRow inherits Rectangle {
++    accessible-role: row;
++    accessible-item-selectable: true;
++    accessible-item-selected: root.selected;
++    accessible-action-default => { root.clicked(); }
+     in property <bool> selected;
+     in property <bool> even;
+ 
+@@ -203,6 +208,7 @@ export component StandardTableView {
+                 min-height: root.min-header-height;
+ 
+                 for column[index] in root.columns : TableViewColumn {
++                    accessible-label: column.title;
+                     last: index == root.columns.length - 1;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+@@ -232,6 +238,8 @@ export component StandardTableView {
+ 
+         scroll-view := ListView {
+             for row[idx] in root.rows : TableViewRow {
++                accessible-label: row[0].text; // ponytail: first cell names the row
++                accessible-item-index: idx;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+ 
+diff --git a/internal/compiler/widgets/fluent/tableview.slint b/internal/compiler/widgets/fluent/tableview.slint
+index 8825004..5fe1834 100644
+--- a/internal/compiler/widgets/fluent/tableview.slint
++++ b/internal/compiler/widgets/fluent/tableview.slint
+@@ -5,6 +5,7 @@ import { FluentPalette, FluentFontSettings, Icons } from "styling.slint";
+ import { ListView } from "../common/listview.slint";
+ 
+ component TableViewColumn inherits Rectangle {
++    accessible-role: column-header;
+     in property <SortOrder> sort-order: SortOrder.unsorted;
+ 
+     callback clicked <=> touch-area.clicked;
+@@ -94,6 +95,10 @@ component TableViewCell inherits Rectangle {
+ }
+ 
+ component TableViewRow inherits Rectangle {
++    accessible-role: row;
++    accessible-item-selectable: true;
++    accessible-item-selected: root.selected;
++    accessible-action-default => { root.clicked(); }
+     in property <bool> selected;
+     in property <bool> even;
+ 
+@@ -226,6 +231,7 @@ export component StandardTableView {
+                 min-height: root.min-header-height;
+ 
+                 for column[index] in root.columns : TableViewColumn {
++                    accessible-label: column.title;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+                     min-width: max(column.min-width, column.width);
+@@ -252,6 +258,8 @@ export component StandardTableView {
+ 
+         scroll-view := ListView {
+             for row[idx] in root.rows : TableViewRow {
++                accessible-label: row[0].text; // ponytail: first cell names the row
++                accessible-item-index: idx;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+ 
+diff --git a/internal/compiler/widgets/material/tableview.slint b/internal/compiler/widgets/material/tableview.slint
+index 98933bb..9c047ec 100644
+--- a/internal/compiler/widgets/material/tableview.slint
++++ b/internal/compiler/widgets/material/tableview.slint
+@@ -6,6 +6,7 @@ import { StateLayer } from "components.slint";
+ import { MaterialPalette, Icons } from "styling.slint";
+ 
+ component TableViewColumn inherits Rectangle {
++    accessible-role: column-header;
+     in property <SortOrder> sort-order: SortOrder.unsorted;
+ 
+     callback clicked <=> state-layer.clicked;
+@@ -90,6 +91,10 @@ component TableViewCell inherits Rectangle {
+ }
+ 
+ component TableViewRow inherits Rectangle {
++    accessible-role: row;
++    accessible-item-selectable: true;
++    accessible-item-selected: root.selected;
++    accessible-action-default => { root.clicked(); }
+     in property <bool> selected;
+     out property <length> mouse-x <=> state-layer.mouse-x;
+     out property <length> mouse-y <=> state-layer.mouse-y;
+@@ -193,6 +198,7 @@ export component StandardTableView {
+                 vertical-stretch: 0;
+ 
+                 for column[index] in root.columns : TableViewColumn {
++                    accessible-label: column.title;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+                     min-width: max(column.min-width, column.width);
+@@ -219,6 +225,8 @@ export component StandardTableView {
+ 
+         scroll-view := ListView {
+             for row[idx] in root.rows : TableViewRow {
++                accessible-label: row[0].text; // ponytail: first cell names the row
++                accessible-item-index: idx;
+                 selected: idx == root.current-row;
+ 
+                 clicked => {
