@@ -10,9 +10,10 @@ This spike tests the largest known risk of D-006 (§4.3 costs, §5): whether Sli
 
 - **No Slint patch was needed.** The backend uses public `slint::platform` API, plus `#[doc(hidden)]` hooks that Slint's own Qt and testing backends implement ([section 5](#5-slint-internals-touched-and-the-risk-on-each-release)). The patch queue stays empty for this card.
 - **The accessibility port is small.** Slint's 1,011-line AccessKit adapter runs unchanged except for an 85-line diff (52 added, 33 removed). It **3-way-merges with no conflicts onto Slint `master` (1.19.0-dev)**, and the spike builds and passes its checks there without changes, after raising the `accesskit` and `accesskit_unix` pins.
-- **The popover meets §7 on the NUC's GPU, with a wide margin.** Key press to popover presented: **33.4 ms for the first open and 29.0 ms median (max 34.4 ms) over 29 more** when each open builds its own EGL context and renderer (the obvious port of Slint's popup model). With a **pre-warmed popup window that is reused**: **11.6 ms first, 2.5 ms median (max 4.8 ms)**. Budget: ≤ 100 ms. These are lower bounds (headless output, [section 3](#3-how-the-popover-time-is-measured)). On software rendering (hosted CI, dev VM), only the pooled mode keeps the first open under 100 ms.
-- **Memory is a third of the single-process shell share.** On the NUC, idle RSS is **100.7 MB** 5 s after the first frame, and **98.4 MB (pooled) or 105.1 MB (not pooled) after 30 popover opens**. The share is 300 MB (D-006 G5). About 68 MB of it is file-backed (Mesa's Intel driver, Slint). Idle CPU over 60 s was 0.00 %.
-- **Estimate to productise: 8–11 builder cards** ([section 6](#6-cards-to-productise)), within D-006's 6–12 for the layer-shell backend plus its accessibility port.
+- **The popover meets §7 on the NUC's GPU, with a wide margin, also with a cold shader cache.** Key press to popover presented, cold cache: **35.5 ms for the first open and 30.5 ms median (max 34.9 ms) over 29 more** when each open builds its own EGL context and renderer (the obvious port of Slint's popup model). With a **pre-warmed popup window that is reused**: **11.6 ms first, 2.5 ms median (max 5.2 ms)**; warm cache the same (11.7 ms). Budget: ≤ 100 ms. These are lower bounds (headless output, [section 3](#3-how-the-popover-time-is-measured)). The cold cache costs the panel's first frame instead (285 ms against 83 ms warm).
+- **On FemtoVG with software GL (llvmpipe)** the cold first open misses the budget in every mode (269–300 ms); warm and pooled it passes (84–96 ms). The target is GPU rendering; this matters only for machines without a usable GPU driver.
+- **Memory is about a third of the single-process shell share.** On the NUC, idle RSS is **98–110 MB after 30 popover opens** and 100.7–107.6 MB 5 s after the first frame. The share is 300 MB (D-006 G5). About 68 MB of it is file-backed (Mesa's Intel driver, Slint). Idle CPU over 60 s was 0.00 %.
+- **Estimate to productise: 9–12 builder cards** ([section 6](#6-cards-to-productise)), within D-006's 6–12 for the layer-shell backend plus its accessibility port.
 
 ## 1. Approach
 
@@ -38,7 +39,7 @@ slint::Window ── WindowAdapter = LayerWindow ── AccessKitAdapter (port o
 `measure.sh` runs headless sway, starts the spike with the AT-SPI bus switched on and does the following:
 
 1. Dumps the tree with only the panel (`atspi-1-panel.txt`), then presses the panel's *Quick settings* button **through AT-SPI's Action interface**, the path an assistant uses as its fallback (C12). Then it dumps the tree again with the popover open (`atspi-2-popover.txt`).
-2. Checks that the popover is on screen: one pixel inside it must differ from one outside it. Checked for the AT-SPI open and for a keyboard open in both pool modes. CI fails otherwise.
+2. Checks that the popover is on screen: one pixel inside it must differ from one outside it. Checked for the AT-SPI open and for one keyboard open in each timed run. Both CI jobs fail otherwise (`check.sh`).
 3. Opens and closes the popover N times from the keyboard (`wtype`: Space opens, Escape closes), with and without the pool, and records the popover times and the RSS after 5 s idle.
 4. Runs the budgets harness for start-up, idle RSS and idle CPU.
 
@@ -64,58 +65,52 @@ Every control has a role and a name. The gap is the popover's own node: a `frame
 
 - **Covers:** Slint's popup instantiation and layout, the backend's surface and role set-up, the compositor round trip for the popup's configure, rendering, and the compositor presenting the frame.
 - **Not covered:** input device and kernel latency before the compositor, and scanout after presentation. On a headless output "presented" means the compositor committed the frame to its virtual output, so add up to one refresh interval for a real display. The §7 budget (100 ms) leaves room for that, but the NUC numbers below are a lower bound on what a user sees.
-- The first open after start is reported separately (the "cold" case §4.1 G1 insists on). The popover has no open animation. If the design system gives it one, "fully visible" ends when the animation ends.
+- **Shader cache.** Every launch of the spike starts with its own empty Mesa shader cache (**cold**: first start after install or after a Mesa update). One extra run (pool on) reuses the cache its cold run filled (**warm**: every later login). The first open after start is reported separately in both. The page cache is warm in every run: the binary was just copied to the machine (as in the D-006 measurements).
+- The popover has no open animation. If the design system gives it one, "fully visible" ends when the animation ends.
 - Input comes from `wtype` (keyboard) because the NUC has it and no pointer injector. The panel takes the keyboard (`KeyboardInteractivity::Exclusive`, `T59_EXCLUSIVE_KEYBOARD`, a measurement setting) so no click is needed first. A real panel uses on-demand focus.
 
 ## 4. Measurements
 
 ### 4.1 Reference NUC, GPU
 
-[Run 42246103328](https://github.com/jens-thomae/Atos/actions/runs/42246103328), job `measure-nuc`, 2026-11-06. Intel Celeron N5105, kernel 6.8.0-147, sway 1.9 headless on `gles2`, Mesa 25.2.8. Renderer proof: sway's Wayland clients and the spike's own context both report `Mesa Intel(R) UHD Graphics (JSL)`. 30 keyboard opens per mode, idle CPU over 60 s.
+[Run 42256850785](https://github.com/jens-thomae/Atos/actions/runs/42256850785), job `measure-nuc`, commit d24eabd, 2026-11-06. Intel Celeron N5105, kernel 6.8.0-147, sway 1.9 headless on `gles2`, Mesa 25.2.8. Renderer proof: sway's Wayland clients and the spike's own context both report `Mesa Intel(R) UHD Graphics (JSL)`. 30 keyboard opens per run, idle CPU over 60 s. The job fails unless the tree and pixel checks pass (`check.sh`).
 
-| Metric | Budget | New EGL context per open | Pre-warmed popup pool |
+| Metric | Budget | New EGL context per open, cold cache | Pre-warmed pool, cold cache | Pre-warmed pool, warm cache |
+| --- | --- | --- | --- | --- |
+| Popover fully visible, first open | ≤ 100 ms | **35.5 ms** ✅ | **11.6 ms** ✅ | **11.7 ms** ✅ |
+| Later opens, median / max (n = 29) | ≤ 100 ms | **30.5 / 34.9 ms** ✅ | **2.5 / 5.2 ms** ✅ | **2.4 / 4.5 ms** ✅ |
+| Idle RSS after 30 opens | ≤ 300 MB (shell share) | 110.3 MB (anon 41.7, file 68.6) ✅ | 105.2 MB (anon 36.9, file 68.3) ✅ | 98.4 MB (anon 30.6, file 67.8) ✅ |
+
+| Metric (budgets harness, pool on) | Budget | Cold cache | Warm cache ([run 42246103328](https://github.com/jens-thomae/Atos/actions/runs/42246103328)) |
 | --- | --- | --- | --- |
-| Popover fully visible, first open | ≤ 100 ms | **33.4 ms** ✅ | **11.6 ms** ✅ |
-| Popover fully visible, later opens, median / max (n = 29) | ≤ 100 ms | **29.0 / 34.4 ms** ✅ | **2.5 / 4.8 ms** ✅ |
-| Idle RSS after 30 opens | ≤ 300 MB (shell share) | 105.1 MB (anon 37.0, file 68.1) ✅ | 98.4 MB (anon 30.7, file 67.7) ✅ |
-| Start to first panel frame (budgets harness) | – | | 83 ms |
-| Idle RSS 5 s after first frame (budgets harness) | ≤ 300 MB | | 100.7 MB ✅ |
-| Idle CPU over 60 s | ≤ 1 % | | 0.00 % ✅ |
+| Start to first panel frame | – | 285 ms | 83 ms |
+| Idle RSS 5 s after first frame | ≤ 300 MB | 107.6 MB ✅ | 100.7 MB ✅ |
+| Idle CPU over 60 s | ≤ 1 % | 0.00 % ✅ | 0.00 % ✅ |
 
 The popover was on screen in every opening path (pixel inside 250,250,250 against 64,64,64 outside), and the AT-SPI tree matched [section 2](#2-what-the-spike-shows) line for line.
 
 What the numbers say:
 
-- Without the pool, about 25–30 ms of each open is building the context and FemtoVG (shaders, glyph atlas). On this GPU that fits the budget three times over. With the pool, an open costs a configure round trip and one frame.
+- **On the GPU the cold cache costs the panel, not the popover.** FemtoVG uses the same shaders in every surface. The panel's first frame compiles them (285 ms to first frame cold, 83 ms warm), and the popover finds them in the cache. A popover that is the first thing to draw after a cold start would pay that cost itself.
+- Without the pool, about 25–30 ms of each open is building the context and FemtoVG (glyph atlas, GL objects). On this GPU that fits the budget three times over. With the pool, an open costs a configure round trip and one frame.
 - 2.5 ms is less than a refresh interval because the headless output presents on commit. On a real 60 Hz display, add up to 16.7 ms.
-- These numbers are for one simple popover. A launcher or control centre with more content costs more per frame; the pool keeps the set-up cost out of it.
+- These numbers are for one simple popover. A launcher or control centre with more content costs more per frame.
 
-### 4.2 Hosted CI (software rendering, indicative)
+### 4.2 Hosted CI: FemtoVG on software GL (llvmpipe), indicative
 
-Same run, job `measure-hosted`: x86_64 Xeon 8370C, sway on pixman, llvmpipe. 20 opens per mode.
+Same run, job `measure-hosted`: x86_64 AMD EPYC 7763, sway on pixman, Mesa llvmpipe. 20 opens per run. This is FemtoVG on a software OpenGL driver, **not** Slint's software renderer (`renderer-software`, D-006's fallback), which the spike's backend does not have ([section 6](#6-cards-to-productise), card 8).
 
-| Metric | New EGL context per open | Pre-warmed popup pool |
-| --- | --- | --- |
-| Popover fully visible, first open | 101.9 ms ❌ | 28.4 ms |
-| Later opens, median / max (n = 19) | 45.4 / 85.2 ms | 2.7 / 4.8 ms |
-| Idle RSS after 20 opens | 180.2 MB | 137.3 MB |
+| Metric | New EGL context per open, cold | Pool, cold | Pool, warm |
+| --- | --- | --- | --- |
+| Popover fully visible, first open | 291.4 ms ❌ | 269.1 ms ❌ | 83.5 ms ✅ |
+| Later opens, median / max (n = 19) | 37.9 / 117.8 ms | 2.5 / 3.2 ms | 2.4 / 2.8 ms |
+| Idle RSS after 20 opens | 188.9 MB | 153.4 MB | 141.0 MB |
 
-On software GL, building a context costs far more, and only the pooled mode keeps the first open under budget. This matters for the software fallback of D-006.
+On llvmpipe the popover's first open needs shader variants the panel did not compile, and compiling them costs about 200 ms. A warm cache or the pool alone does not fix the cold case there; pre-compiling at start-up would (card 6).
 
 ### 4.3 Dev VM (indicative only)
 
-Lima VM on an Apple M1 Max, aarch64, sway 1.9 with pixman, llvmpipe. Not the reference hardware. Software rendering, and VM timing noise of tens of milliseconds between runs.
-
-| Metric | Budget | New EGL context per open | Pre-warmed popup pool |
-| --- | --- | --- | --- |
-| Popover fully visible, first open | ≤ 100 ms | 111.6 ms ❌ | 28.2 ms ✅ |
-| Popover fully visible, later opens, median / max (n = 9) | ≤ 100 ms | 38.6 / 88.9 ms | 3.5 / 8.4 ms |
-| Idle RSS after 10 opens | ≤ 300 MB (shell share) | 178.6 MB | 140.7 MB |
-| Start to first panel frame (budgets harness) | – | | 181 ms (85 ms in another run) |
-| Idle RSS 5 s after first frame (budgets harness) | ≤ 300 MB | | 140.3 MB |
-| Idle CPU over 10 s | ≤ 1 % | | 0.10 % |
-
-RSS breakdown (pooled): RssAnon 62 MB, RssFile 78 MB, almost all of the file-backed part Mesa's driver. Without the pool, RSS climbs to about 180–190 MB after a few opens and then stays flat over 30 opens (no leak: every popup window was dropped). It is allocator and driver retention from repeated context creation. The same run on Slint `master` gave 125 ms and 15.5 ms for the first open (no pool and pool).
+Lima VM on an Apple M1 Max, aarch64, sway 1.9 with pixman, llvmpipe. Same picture as hosted CI: first open 300.4 ms (no pool, cold), 278.3 ms (pool, cold), 96.2 ms (pool, warm); later opens 2.6 ms median with the pool. Without the pool, RSS climbs to about 180–190 MB after a few opens and then stays flat over 30 opens (no leak: every popup window was dropped). It is allocator and driver retention from repeated context creation. The dry run on Slint `master` ([section 5](#5-slint-internals-touched-and-the-risk-on-each-release)) gave the same results within VM noise.
 
 ## 5. Slint internals touched, and the risk on each release
 
@@ -134,7 +129,7 @@ RSS breakdown (pooled): RssAnon 62 MB, RssFile 78 MB, almost all of the file-bac
 - **The port.** It is a fork of one upstream file. Every Slint release that changes `internal/backends/winit/accesskit.rs` must be merged into it. The procedure is a 3-way merge of upstream's change onto our copy (`git merge-file ours base theirs`), then a build. **Measured dry run, 1.18.1 → `master` at `b4448d8` (2026-11-06, 1.19.0-dev):** upstream changed the file by 55 diff lines since 1.18.1 and moved `accesskit` from 0.24 to 0.25 (`accesskit_unix` 0.22 to 0.24). The merge had **0 conflicts**. The spike needed **0 code changes**, only the three version pins. It built and passed the tree, pixel and timing checks. Effort: about 15 minutes, mostly build time. That is one data point, not a forecast: a release that restructures the adapter (for example moving it into `i-slint-core`, as its own doc comment suggests) costs a re-port, likely one card.
 - **The backend's hooks** are the ones Slint's own Qt and testing backends implement, so they change rarely and visibly. A break there shows up as a compile error, not a silent change.
 - **Behaviour without a compile error is the real risk.** Example from this spike: a window with no component crashes `accesskit_consumer`, which upstream never hits. The CI job (tree, pixel and timing checks) is the guard and must run on every Slint bump.
-- **Licence.** `src/accesskit.rs` is Slint's GPL-3.0-only file and stays under it (D-013). The spike's manifest says GPL-3.0-only.
+- **Licence (D-013).** `src/accesskit.rs` is a modified copy of a Slint file. We take Slint under GPL-3.0-only only, so its header says `GPL-3.0-only` (upstream's grant of the two SixtyFPS licences is not ours to repeat), keeps SixtyFPS's copyright and notes the modification. Our own files carry `MIT OR Apache-2.0` headers; the manifest says `(MIT OR Apache-2.0) AND GPL-3.0-only`, and the linked binary is GPL-3.0-only. Cards 1 and 5 should keep this layout.
 
 **Compared with D-006 §3.4's expectation** ("rechecked, and often adapted, on every Slint release, a few hours to a day per minor release"): the first measured rebase cost minutes. The estimate stays until a real release is followed. Repeat this measurement in [rebase.md](rebase.md)'s log at the first real rebase.
 
@@ -149,14 +144,15 @@ Estimate in builder cards (one session each), from what the spike had to build a
 | 3 | Outputs: one surface per output, hotplug, fractional scaling (`wp_fractional_scale_v1` + viewporter) | 1–2 |
 | 4 | Popups: nested menus (popup in popup), tooltips, constraint handling, Escape and close semantics matching Slint's in-window popups, grab rules | 1 |
 | 5 | Accessibility: move the port into the Slint patch queue as a backend-neutral module (see 7.2), name and role the popover and relate it to its parent (A6), window bounds, focus across surfaces, tree checks in CI | 1–2 |
-| 6 | Rendering: damage tracking (buffer age), presentation-paced frames, shared GL context or shader cache across surfaces, measured against the popover budget and G5 | 1 |
+| 6 | Rendering: damage tracking (buffer age), presentation-paced frames, shared GL context, shader pre-compilation at start-up (render the pooled popover once off screen), measured against the popover budget and G5 with a cold cache | 1 |
 | 7 | Text input for shell surfaces (`text-input-v3`, IME), needed for the launcher and command palette | 1 |
+| 8 | Software fallback: Slint's `renderer-software` into `wl_shm` buffers when no GPU context can be created (D-006), with its own popover and RSS measurement | 1 |
 
-**Total: 8–11 cards**, high confidence for 1–4, medium for 5–7. D-006 §3.4 expected 4–8 for the backend plus 2–4 for its accessibility port (6–12). Clipboard is not counted here; it is the separate clipboard card.
+**Total: 9–12 cards**, high confidence for 1–4 and 8, medium for 5–7. D-006 §3.4 expected 4–8 for the backend plus 2–4 for its accessibility port (6–12). Clipboard is not counted here; it is the separate clipboard card.
 
 ## 7. For the owner
 
-1. **Proposed: shell popovers use a pre-warmed, reused popup window** (one per popover kind, or a small pool), not a new window per open. On the NUC's GPU both modes pass (33 ms against 12 ms for the first open), so this buys margin for heavier popovers. On the software fallback it decides the budget (102 ms against 28 ms in hosted CI), and it saves RSS there (about 40 MB). The cost is one idle EGL context per pooled window. On the NUC the pooled run still ended with less RSS than the unpooled one (98 MB against 105 MB after 30 opens). A design consequence for C3/C4, not decided by this spike.
+1. **Proposed: shell popovers use a pre-warmed, reused popup window** (one per popover kind, or a small pool), not a new window per open. On the NUC's GPU both modes pass (35 ms against 12 ms for the first open, cold cache), so this buys margin for heavier popovers. On FemtoVG with software GL it decides the later opens (median 38 ms with a 118 ms worst case, against 2.5 ms) and saves about 35–50 MB RSS, but only shader pre-compilation (card 6) fixes the cold first open there. The cost is one idle EGL context per pooled window. On the NUC the pooled runs still ended with less RSS than the unpooled one (98–105 MB against 110 MB after 30 opens). A design consequence for C3/C4, not decided by this spike.
 2. **Proposed: carry the AccessKit adapter as a patch in the Slint queue, not as a copy in C4.** The patch would move `accesskit.rs` out of the winit backend into a backend-neutral internal module, generic over a small window trait. The rebase routine (`slint-fork.sh rebase`) then shows conflicts per release, instead of a manual 3-way merge of a copied file. The spike kept the copy because it measures the port's diff size directly.
 3. The keyboard-exclusive panel (`T59_EXCLUSIVE_KEYBOARD`) and the `wtype` input path are measurement choices, not shell design.
 
