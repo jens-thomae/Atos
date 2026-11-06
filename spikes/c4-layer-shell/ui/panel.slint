@@ -1,0 +1,58 @@
+// Spike UI for #59: one panel-like layer surface and one popover. Not the shell's design: colours
+// come from the std-widgets palette and lengths are placeholders (no design system yet, out of scope).
+import { Button, Palette, CheckBox } from "std-widgets.slint";
+
+export component Panel inherits Window {
+    title: "Atos panel";
+    preferred-height: 40px;
+    background: Palette.alternate-background;
+    in property <string> clock: "12:00";
+    forward-focus: keys;
+
+    popover := PopupWindow {
+        x: 8px;
+        // Below the panel, i.e. outside the 40 px layer surface: needs an xdg_popup.
+        y: root.height + 4px;
+        width: 280px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Palette.background;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Palette.border;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text { text: "Quick settings"; font-size: 15px; color: Palette.foreground; }
+                CheckBox { text: "Wi-Fi"; checked: true; }
+                CheckBox { text: "Bluetooth"; }
+                Button { text: "Close"; clicked => { popover.close(); } }
+            }
+        }
+    }
+
+    // Space or Return opens the popover (the keyboard path of the measurement; wtype on the NUC).
+    keys := FocusScope {
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                popover.show();
+                return accept;
+            }
+            reject
+        }
+        HorizontalLayout {
+            padding: 4px;
+            spacing: 12px;
+            alignment: start;
+            Button {
+                text: "Quick settings";
+                clicked => { popover.show(); }
+            }
+            Text {
+                text: root.clock;
+                vertical-alignment: center;
+                color: Palette.foreground;
+            }
+        }
+    }
+}

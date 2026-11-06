@@ -1,0 +1,29 @@
+[package]
+name = "c4-layer-shell"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+# src/accesskit.rs is a port of Slint's GPL-3.0-only file; the binary links Slint (D-013).
+license = "GPL-3.0-only"
+
+# Outside the main workspace (spikes are excluded there).
+[workspace]
+
+# Every crate below is already in Slint's own dependency tree at this version (Cargo.lock of
+# spikes/d006-slint), so the spike adds no new third-party code. Exact pins: the i-slint-core
+# items we use are internal (#[doc(hidden)]) and carry no semver promise.
+[dependencies]
+# No backend-winit: our own platform is the only backend (no winit in the process).
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-femtovg"] }
+i-slint-core = { version = "=1.18.1", features = ["accessibility-text"] }
+accesskit = "=0.24.1"
+accesskit_unix = { version = "=0.22.1", default-features = false, features = ["async-io"] }
+sctk = { package = "smithay-client-toolkit", version = "=0.19.2", default-features = false, features = ["calloop", "xkbcommon"] }
+wayland-backend = { version = "=0.3.17", features = ["client_system"] }
+glutin = { version = "=0.32.3", default-features = false, features = ["egl", "wayland"] }
+raw-window-handle = "=0.6.2"
+libc = "=0.2.191"
+
+[build-dependencies]
+slint-build = "=1.18.1"
