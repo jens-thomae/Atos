@@ -84,9 +84,8 @@ jobs:
         run: |
           [ "$HAS_KEY" = true ] || { echo "::error::COSIGN_PRIVATE_KEY secret missing, see docs/components/c1-base/README.md"; exit 1; }
           [ -f components/c1-base/cosign.pub ] || { echo "::error::components/c1-base/cosign.pub missing"; exit 1; }
-          # Content check, not names: any private key block in the tree fails. The only one allowed is the TEST db key (D-014: public).
-          leaked=$(git grep -lE 'PRIVATE KEY-----' HEAD -- . ':!components/c1-base/secureboot-test/db.key' || true)
-          [ -z "$leaked" ] || { echo "::error::private key material in the source tree: $leaked"; exit 1; }
+          # Content check, not names; the TEST db key is the only private key allowed (D-014: public).
+          bash tools/ci/check-no-private-keys.sh
 
       # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
       - name: Free runner disk

@@ -143,7 +143,7 @@ The package `ghcr.io/jens-thomae/atos/c1-base` is public while the repository is
 
 - **Format.** A plain `FROM scratch` image, not an oras artifact: the runner has no oras, and podman, skopeo and cosign handle it like the image. Contents: `atos-<sha>.tar.gz` (`git archive` of the commit), `fedora-packages.txt` (`rpm -qa` NVRs; Fedora's sources are at src.fedoraproject.org and koji) and a `README.md`.
 - **Pointer.** The image carries the label `org.atos.source=<image>:<sha>-source` (set with `--label` on the publish build, so the Containerfile is untouched). The source image carries `org.atos.source-of` and `org.atos.source-of-image-id` (the image's config digest, known before the push; the tag alone is mutable).
-- **Excluded.** `git archive` ships tracked files only: no `.git` history, no untracked files, no CI credentials (the checkout does not persist its token, and signing secrets never touch the tree). The publish job fails, right after checkout and before any build, if `git grep 'PRIVATE KEY-----'` finds anything in the tree other than the TEST db key (D-014: public). The tree itself, `docs/` included, is published as it stands.
+- **Excluded.** `git archive` ships tracked files only: no `.git` history, no untracked files, no CI credentials (the checkout does not persist its token, and signing secrets never touch the tree). The publish job fails, right after checkout and before any build, if `tools/ci/check-no-private-keys.sh` (a content check; test: `tools/ci/test-check-no-private-keys.sh`) finds a private key block in the tree other than the TEST db key (D-014: public). The tree itself, `docs/` included, is published as it stands.
 - **Fetch it anonymously** (once the package is public):
 
 ```sh
