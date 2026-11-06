@@ -9,6 +9,7 @@ on:
       - third_party/slint/**
       - tools/slint-fork/**
       - spikes/d006-slint/**
+      - components/c4-toolkit/test-harness/**
       - .github/workflows/slint-fork.yml
   push:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - third_party/slint/**
       - tools/slint-fork/**
       - spikes/d006-slint/**
+      - components/c4-toolkit/test-harness/**
       - .github/workflows/slint-fork.yml
   workflow_dispatch:
     inputs:
@@ -47,7 +49,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: spikes/d006-slint
+          workspaces: |
+            spikes/d006-slint
+            components/c4-toolkit/test-harness
 
       # Slint's documented Linux build dependencies (spikes/d006-slint/README.md).
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfontconfig-dev libxkbcommon-dev
@@ -65,6 +69,35 @@ jobs:
       - name: Check the spike used the fork
         working-directory: spikes/d006-slint
         run: cargo tree -p slint --config ../../third_party/slint/patch.toml 2>/dev/null | head -1 | grep -F third_party/slint/src
+
+      # Screenshot-test harness (card #60, docs/components/c4-toolkit/screenshot-tests.md).
+      # Same nextest pin as ci.yml; kept in this workflow so main CI never builds Slint.
+      - name: Install cargo-nextest
+        env:
+          NEXTEST_VERSION: 0.9.150
+          NEXTEST_SHA256: b0959bc64232974224cf9fb22c915845398c0e8668fa7831eb5b43fb1eef781f
+        run: |
+          curl -fsSL -o nextest.tar.gz "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${NEXTEST_SHA256}  nextest.tar.gz" | sha256sum --check
+          tar -xzf nextest.tar.gz -C ~/.cargo/bin
+          rm nextest.tar.gz
+
+      - name: Screenshot tests
+        working-directory: components/c4-toolkit/test-harness
+        env:
+          SCREENSHOT_DIFF_DIR: ${{ github.workspace }}/screenshot-diffs
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --config ../../../third_party/slint/patch.toml -- -D warnings
+          cargo nextest run --config ../../../third_party/slint/patch.toml
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: screenshot-diffs
+          path: screenshot-diffs
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Dry-run rebase
         if: github.event_name == 'workflow_dispatch' && inputs.rebase_ref != ''

@@ -58,3 +58,7 @@ Slint is used under **GPL-3.0-only**, one of its three options. We do not use th
 | – | (none yet) | | | The queue is created by this card; patches follow in #62 (accessibility roles), #59 (layer-shell) and the clipboard card |
 
 See [rebase.md](rebase.md) for the routine and the first dry-run record.
+
+## Testing
+
+Headless screenshot and accessibility-tree tests: [screenshot-tests.md](screenshot-tests.md).

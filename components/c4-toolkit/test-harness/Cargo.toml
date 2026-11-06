@@ -1,0 +1,20 @@
+[package]
+name = "atos-ui-test"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# Outside the root workspace like the spike: it builds Slint, which needs the fork
+# (`--config third_party/slint/patch.toml`) and its own CI job (slint-fork.yml).
+[workspace]
+
+[dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2"] }
+i-slint-backend-testing = { version = "=1.18.1", features = ["renderer-software"] }
+# PNG read/write for references and diffs; nothing else.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
+slint-build = "=1.18.1"
