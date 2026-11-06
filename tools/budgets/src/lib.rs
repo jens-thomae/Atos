@@ -98,8 +98,8 @@ pub const METRICS: [(&str, &str, &str, f64); 3] = [
 /// The raw results of one harness run as a flat JSON object.
 /// `info` holds string fields (app, machine), `values` the numbers in [`METRICS`] order.
 pub fn results_json(info: &[(&str, &str)], cpu_window_s: u64, values: [f64; 3]) -> String {
-    // ponytail: Rust's `{:?}` string escaping equals JSON's except for control characters,
-    // which never appear in paths or /proc fields; use a JSON crate if that changes.
+    // ponytail: `{:?}` is not exact JSON: control characters come out as `\u{…}`, which JSON
+    // rejects. They never appear in paths or /proc fields; use a JSON crate if that changes.
     let mut fields: Vec<String> = info.iter().map(|(k, v)| format!("{k:?}: {v:?}")).collect();
     fields.push(format!("\"cpu_window_s\": {cpu_window_s}"));
     for ((key, ..), value) in METRICS.iter().zip(values) {
@@ -122,6 +122,11 @@ pub fn compare(
     current: &str,
     threshold_percent: f64,
 ) -> Result<(String, bool), String> {
+    if !threshold_percent.is_finite() || threshold_percent < 0.0 {
+        return Err(format!(
+            "threshold must be a finite, non-negative percentage, got {threshold_percent}"
+        ));
+    }
     let mut table = "| Metric | Previous nightly | This run | Change | Result |\n| --- | --- | --- | --- | --- |\n".to_string();
     let mut regressed = false;
     for (key, name, unit, limit) in METRICS {
@@ -147,6 +152,13 @@ pub fn compare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compare_rejects_bad_threshold() {
+        for t in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(compare("", "", t).is_err(), "{t}");
+        }
+    }
 
     #[test]
     fn json_round_trip() {
