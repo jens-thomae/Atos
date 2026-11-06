@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Spike #59: Slint on wlr-layer-shell with an AccessKit tree. Not production code (see
 //! docs/components/c4-toolkit/layer-shell-spike.md).
 

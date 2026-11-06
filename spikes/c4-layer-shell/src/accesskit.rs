@@ -1,5 +1,6 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified by Atos: we take Slint under GPL-3.0-only only (D-013), so this copy is GPL-3.0-only.
 
 use std::collections::HashMap;
 use std::pin::Pin;

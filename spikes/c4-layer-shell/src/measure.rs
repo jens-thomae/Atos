@@ -1,4 +1,5 @@
-//! Timing hooks for #59, printed to stdout as `T59_*` lines (read by tools/t59/measure.sh).
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//! Timing hooks for #59, printed to stdout as `T59_*` lines (read by measure.sh).
 //!
 //! Popover fully visible = the compositor's presentation time of the popover's first frame
 //! (wp_presentation, CLOCK_MONOTONIC) minus the time this process received the key or button

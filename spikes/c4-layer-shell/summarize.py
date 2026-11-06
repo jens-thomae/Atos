@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT OR Apache-2.0
 """Summary of one measure.sh run (#59). Usage: summarize.py <out dir>"""
 import json, os, statistics, sys
 
@@ -18,9 +19,11 @@ def ok(b):
 print("### #59 layer-shell spike\n")
 print("```\n" + read("environment.txt").strip() + "\n" + read("popover-pixels.txt").strip() + "\n```\n")
 print("| Metric | Budget | Measured | Result |\n| --- | --- | --- | --- |")
-for pool, label in (("0", "new EGL context per open"), ("1", "pre-warmed popup pool")):
+for run, label in (("0-cold", "new EGL context per open, cold shader cache"),
+                   ("1-cold", "pre-warmed popup pool, cold shader cache"),
+                   ("1-warm", "pre-warmed popup pool, warm shader cache")):
     vis = []
-    for line in read(f"popover-pool{pool}.txt").splitlines():
+    for line in read(f"popover-{run}.txt").splitlines():
         f = line.split()
         if f[0] == "T59_POPOVER_VISIBLE_MS" and f[1].replace(".", "").isdigit():
             vis.append(float(f[1]))
@@ -31,7 +34,7 @@ for pool, label in (("0", "new EGL context per open"), ("1", "pre-warmed popup p
     print(f"| Popover fully visible, first open ({label}) | ≤ {BUDGET_MS} ms | {vis[0]:.1f} ms | {ok(vis[0] <= BUDGET_MS)} |")
     print(f"| Popover fully visible, later opens, median / max, n={len(rest)} ({label}) | ≤ {BUDGET_MS} ms | "
           f"{statistics.median(rest):.1f} / {max(rest):.1f} ms | {ok(max(rest) <= BUDGET_MS)} |")
-    rss = dict(l.split(":", 1) for l in read(f"rss-pool{pool}.txt").splitlines() if ":" in l)
+    rss = dict(l.split(":", 1) for l in read(f"rss-{run}.txt").splitlines() if ":" in l)
     if "VmRSS" in rss:
         mb = int(rss["VmRSS"].split()[0]) / 1024
         parts = ", ".join(f"{k} {int(v.split()[0]) / 1024:.1f}" for k, v in rss.items() if k != "VmRSS")

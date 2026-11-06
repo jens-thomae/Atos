@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! A Slint platform on smithay-client-toolkit: top-level windows become wlr-layer-shell surfaces,
 //! Slint popups become xdg_popups parented to them (`zwlr_layer_surface_v1.get_popup`), rendered by
 //! Slint's public FemtoVG renderer on EGL (glutin). Each surface gets its own AccessKit adapter

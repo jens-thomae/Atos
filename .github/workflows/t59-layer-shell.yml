@@ -1,7 +1,9 @@
 # Spike #59: Slint on wlr-layer-shell with an AccessKit tree (spikes/c4-layer-shell/).
 # Hosted run (headless sway, software rendering): on pull requests that change the spike, and with
 # the label `t59-measure`. Reference NUC on the GPU: only with the label `t59-nuc` (or
-# `gh workflow run t59-layer-shell.yml -f nuc=true` once this file is on main).
+# `gh workflow run t59-layer-shell.yml -f nuc=true` once this file is on main). The NUC job runs only on
+# the `labeled` event (and dispatch): later pushes do not re-measure, so NUC numbers belong to the
+# commit that was labeled. Remove and re-add the label to measure a new commit.
 # Write-up: docs/components/c4-toolkit/layer-shell-spike.md.
 name: T-59 layer-shell spike
 
@@ -64,7 +66,7 @@ jobs:
         run: |
           mkdir -p bundle
           cp target/release/budgets spikes/c4-layer-shell/target/release/c4-layer-shell bundle/
-          cp spikes/c4-layer-shell/measure.sh spikes/c4-layer-shell/atspi_dump.py spikes/c4-layer-shell/summarize.py bundle/
+          cp spikes/c4-layer-shell/{measure.sh,check.sh,atspi_dump.py,summarize.py} bundle/
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: t59-bundle
@@ -94,21 +96,9 @@ jobs:
           bundle/measure.sh bundle/c4-layer-shell bundle/budgets results
           cat results/summary.md >>"$GITHUB_STEP_SUMMARY"
           { echo; echo '#### AT-SPI tree with the popover open'; echo '```'; cat results/atspi-2-popover.txt; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
-      # The acceptance check of #59: both surfaces are on the AT-SPI bus with named controls.
-      - name: Check the AT-SPI tree
-        run: |
-          grep -q "Quick settings" results/atspi-1-panel.txt
-          grep -q "'Wi-Fi'" results/atspi-2-popover.txt
-          grep -q "'Bluetooth'" results/atspi-2-popover.txt
-      # And on screen: a pixel inside the popover differs from one outside it (every opening path).
-      - name: Check the popover is drawn
-        run: |
-          cat results/popover-pixels.txt
-          [ "$(wc -l <results/popover-pixels.txt)" -eq 3 ]
-          while read -r line; do
-            inside=${line#*inside }; inside=${inside%%,*}; outside=${line##*outside }
-            [ -n "$inside" ] && [ "$inside" != "$outside" ] || { echo "::error::popover not drawn: $line"; exit 1; }
-          done <results/popover-pixels.txt
+      # The acceptance checks of #59: tree and pixels (spikes/c4-layer-shell/check.sh).
+      - name: Check the AT-SPI tree and that the popover is drawn
+        run: bundle/check.sh results
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
@@ -149,6 +139,8 @@ jobs:
         run: |
           bundle/measure.sh bundle/c4-layer-shell bundle/budgets results
           cat results/summary.md >>"$GITHUB_STEP_SUMMARY"
+      - name: Check the AT-SPI tree and that the popover is drawn
+        run: bundle/check.sh results
       # Same rule as perf.yml: a software renderer is not a GPU measurement.
       - name: Check the renderer is the GPU
         run: |

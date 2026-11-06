@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Spike #59: run the layer-shell panel in headless sway, show its AT-SPI tree, time the popover and
 # read idle memory. Needs sway, wtype, grim, dbus-run-session, python3-gi + gir1.2-atspi-2.0, eglinfo.
 # Usage: measure.sh <spike binary> <budgets binary> <out dir>
@@ -13,7 +14,9 @@ BIN=$(realpath "$1"); BUDGETS=$(realpath "$2"); mkdir -p "$3"; OUT=$(realpath "$
 RENDERER=${T59_RENDERER:-pixman}; OPENS=${T59_OPENS:-20}; WINDOW=${T59_CPU_WINDOW:-10}
 WORK=$(mktemp -d)
 export XDG_RUNTIME_DIR="$WORK/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"
-export MESA_SHADER_CACHE_DIR="$WORK/mesa-cache"  # cold shader cache: the first popover pays for it
+# Every launch gets its own empty Mesa shader cache (cold), except the `warm` run, which reuses the
+# cache its cold run filled (an installed system after first use). The page cache stays warm.
+export MESA_SHADER_CACHE_DIR="$WORK/mesa-atspi"
 trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 case "$RENDERER" in
@@ -66,26 +69,30 @@ kill $APP; wait $APP 2>/dev/null || true
 
 # --- 2. Popover fully visible, keyboard path, without and with the popup pool -------------------
 # Pool 0: every open creates the popover's EGL context and renderer. Pool 1: one pre-warmed popup
-# window is reused (see src/platform.rs).
-for POOL in 0 1; do
-  T59_POPUP_POOL=$POOL T59_EXCLUSIVE_KEYBOARD=1 "$BIN" >"$OUT/app-pool$POOL.log" 2>"$OUT/app-pool$POOL.err" & APP=$!
-  for _ in $(seq 100); do grep -q BUDGET_FIRST_FRAME "$OUT/app-pool$POOL.log" && break; sleep 0.1; done
+# window is reused (see src/platform.rs). Run names: <pool>-<shader cache>.
+for RUN in 0-cold 1-cold 1-warm; do
+  POOL=${RUN%-*}
+  export MESA_SHADER_CACHE_DIR="$WORK/mesa-pool$POOL"
+  [ "${RUN#*-}" = cold ] && rm -rf "$MESA_SHADER_CACHE_DIR"
+  T59_POPUP_POOL=$POOL T59_EXCLUSIVE_KEYBOARD=1 "$BIN" >"$OUT/app-$RUN.log" 2>"$OUT/app-$RUN.err" & APP=$!
+  for _ in $(seq 100); do grep -q BUDGET_FIRST_FRAME "$OUT/app-$RUN.log" && break; sleep 0.1; done
   sleep 1.5
   # A virtual keyboard that stays alive keeps the seat's keyboard, so each wtype below is one press.
   wtype -s 3600000 -k Shift_L & KEEP=$!
   sleep 0.5
   for i in $(seq "$OPENS"); do
     wtype -k space; sleep 0.6
-    [ "$i" = 2 ] && echo "pool $POOL, open 2: inside $(px $IN_X $IN_Y), outside $(px $OUT_X $OUT_Y)" | tee -a "$OUT/popover-pixels.txt"
+    [ "$i" = 2 ] && echo "run $RUN, open 2: inside $(px $IN_X $IN_Y), outside $(px $OUT_X $OUT_Y)" | tee -a "$OUT/popover-pixels.txt"
     wtype -k Escape; sleep 0.4
   done
   kill $KEEP 2>/dev/null || true
   sleep 5  # idle after the popover was used: the steady state of a running shell
-  grep -E '^(VmRSS|RssAnon|RssFile|RssShmem):' /proc/$APP/status >"$OUT/rss-pool$POOL.txt"
+  grep -E '^(VmRSS|RssAnon|RssFile|RssShmem):' /proc/$APP/status >"$OUT/rss-$RUN.txt"
   kill $APP; wait $APP 2>/dev/null || true
-  grep '^T59_' "$OUT/app-pool$POOL.log" >"$OUT/popover-pool$POOL.txt" || true
+  grep '^T59_' "$OUT/app-$RUN.log" >"$OUT/popover-$RUN.txt" || true
 done
 
-# --- 3. Idle RSS and CPU at start (budgets harness, single process, pool on) ---------------------
+# --- 3. Idle RSS and CPU at start (budgets harness, single process, pool on, cold shader cache) ---
+export MESA_SHADER_CACHE_DIR="$WORK/mesa-budgets"
 "$BUDGETS" "$BIN" --cpu-window "$WINDOW" --json "$OUT/budgets.json" >"$OUT/budgets.md" 2>"$OUT/budgets.err" || echo "budgets harness exit $?"
 python3 -I "$HERE/summarize.py" "$OUT" | tee "$OUT/summary.md"

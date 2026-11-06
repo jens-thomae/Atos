@@ -4,8 +4,9 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.99.1"
 publish = false
-# src/accesskit.rs is a port of Slint's GPL-3.0-only file; the binary links Slint (D-013).
-license = "GPL-3.0-only"
+# D-013: our own files are MIT OR Apache-2.0 (per-file SPDX headers); src/accesskit.rs is a modified
+# copy of a Slint file, which we take under GPL-3.0-only only. The binary links Slint: GPL-3.0-only.
+license = "(MIT OR Apache-2.0) AND GPL-3.0-only"
 
 # Outside the main workspace (spikes are excluded there).
 [workspace]

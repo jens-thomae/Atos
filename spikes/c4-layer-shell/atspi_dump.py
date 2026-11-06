@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT OR Apache-2.0
 """AT-SPI tree of the spike (#59): dump, or press a button by name through the Action interface.
 Usage: atspi_dump.py dump <out.txt> | atspi_dump.py press <button name>"""
 import sys
