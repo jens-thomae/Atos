@@ -53,8 +53,10 @@ jobs:
       - run: podman build --pull=missing -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
-      - name: UKI seals the image (#54)
-        run: components/c1-base/check-seal.sh c1-base
+      - name: UKI and systemd-boot are signed and seal the image (#54)
+        run: |
+          sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
+          components/c1-base/check-seal.sh c1-base
 
   publish:
     needs: changes
@@ -81,8 +83,10 @@ jobs:
       - run: podman build --pull=missing -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
-      - name: UKI seals the image (#54)
-        run: components/c1-base/check-seal.sh c1-base
+      - name: UKI and systemd-boot are signed and seal the image (#54)
+        run: |
+          sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
+          components/c1-base/check-seal.sh c1-base
 
       - name: Push
         env:

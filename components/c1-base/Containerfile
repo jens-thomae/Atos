@@ -13,7 +13,7 @@ RUN dnf -y install systemd-boot-unsigned \
     && rpm -e $(rpm -qa 'shim-*' 'grub2-efi-*') \
     && rm -rf /usr/lib/bootupd /run/dnf /var/lib/dnf /var/cache/* /var/log/*
 
-# Install config (filesystem with fs-verity, systemd-boot loader.conf, kernel arguments) and the
+# Install config (filesystem with fs-verity, kernel arguments) and the
 # TEST Secure Boot keys. systemd-boot enrols the set named `auto` by itself, but only in a VM in
 # setup mode (`secure-boot-enroll if-safe`, loader.conf(5)).
 COPY usr/ /usr/

@@ -44,7 +44,7 @@ provision:
       # libfontconfig-dev, libxkbcommon-dev: build dependencies of the D-006 prototypes.
       # bc: build-time arithmetic in tools/d006/m9-build.sh.
       # podman, qemu-system-arm, qemu-efi-aarch64 (AAVMF), fsverity, sbsigntool: build, boot and
-      #   tamper-test the sealed base image (tools/dev-vm/sealed-vm, #54).
+      #   tamper-test the sealed base image (tools/dev-vm/sealed.sh, #54).
       apt-get update
       apt-get install -y --no-install-recommends \
         build-essential pkg-config curl ca-certificates git \

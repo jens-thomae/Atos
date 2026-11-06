@@ -34,7 +34,7 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
 6. **`uki`** (not shipped): `bootc container ukify` computes the composefs digest of `rootfs`, writes it into the kernel command line (`composefs.digest=v1-sha512-12:<digest>`, plus the V2 `composefs=` form) and has `ukify` build a UKI signed with the test db key.
 7. **Final image**: `rootfs` plus the UKI in `/boot/EFI/Linux/<kver>.efi`. `/boot` is outside the digest; Secure Boot checks the UKI instead.
 
-[`check-seal.sh`](../../../components/c1-base/check-seal.sh) checks the result the way `bootc install` will. It imports the image's OCI layers into a scratch composefs repository and computes the digest. Then it checks that the UKI carries that digest. CI runs it on every build.
+[`check-seal.sh`](../../../components/c1-base/check-seal.sh) checks the result, and CI runs it on every build. First, `sbverify` checks that the UKI and `systemd-boot*.efi.signed` are signed by the test `db.crt`; this catches an output that silently stopped being signed. Second, it checks the digest the way `bootc install` will: it imports the image's OCI layers into a scratch composefs repository, computes the digest, and checks that the UKI carries it.
 
 ## Test Secure Boot keys
 
@@ -63,7 +63,7 @@ ATOS_VM=atos-c1 tools/dev-vm/vm run tools/dev-vm/sealed.sh all
 | `build` | `sudo podman build -t localhost/c1-base components/c1-base` | 45 s with cached layers |
 | `disk` | `bootc install to-disk --generic-image --via-loopback` into `~/sealed/disk.raw` (20 GB, sparse) | 34 s |
 | `boot` | Boots with fresh firmware variables (setup mode). systemd-boot enrols the test keys and resets; the UKI then boots with Secure Boot on. A report unit prints `bootctl status`, `bootc status`, `/proc/cmdline` and the root mount, then powers off. Serial log: `tools/dev-vm/out/sealed/boot.log` | 7 min 51 s |
-| `tamper` | See below. Log: `tools/dev-vm/out/sealed/tamper.log` | 2 min 43 s |
+| `tamper` | Three cases, see below. Logs: `tools/dev-vm/out/sealed/tamper-{object,erofs,uki}.log`. `tamper <case>` runs one | 5 min 49 s for all three |
 
 Notes:
 
@@ -74,24 +74,33 @@ Notes:
 
 ## Tamper check
 
-`sealed.sh tamper` works on a copy of the installed disk, `~/sealed/tampered.raw`:
+`sealed.sh tamper` runs three cases. Each starts from a fresh copy of the installed disk, `~/sealed/tampered.raw`, makes one change an attacker with offline write access could make, and boots the copy with the already-enrolled keys (Secure Boot on). The script stops QEMU once the boot halts. Results from 2026-11-06, filtered serial logs:
 
-1. It mounts the root partition and the deployed composefs EROFS image. The image is a metadata-only tree: for each file, it names the content object in `/composefs/objects/` by its fs-verity digest.
-2. It finds the object behind `/usr/lib/systemd/systemd`, appends 8 bytes and **re-enables fs-verity** on the modified file. This is what an attacker with offline write access to the disk could do. The file then has a valid fs-verity digest of its own, just not the one the image expects.
-3. It boots the copy with the same, already-enrolled firmware variables.
-
-Result (serial log, Secure Boot on). The kernel's overlayfs refuses the object because its fs-verity digest is not the one the signed image names. systemd in the initrd then cannot start the real init, and the machine stops:
+**1. `object`: a file in `/usr`.** The deployed EROFS image is a metadata-only tree: for each file, it names the content object in `/composefs/objects/` by its fs-verity digest. The script finds the object behind `/usr/lib/systemd/systemd`, appends 8 bytes and **re-enables fs-verity** on it, with composefs' own parameters (SHA-512, 4 KiB blocks). So the file has a valid digest of its own, just not the one the image names. The kernel's overlayfs refuses it, systemd in the initrd cannot start the real init, and the machine stops:
 
 ```
-[    0.000000] secureboot: Secure boot enabled
-[  121.497592] overlayfs: lower file 'a888b30b…5d20' has the wrong fs-verity digest
-[  122.251304] systemd[1]: Failed to execute /sbin/init, giving up: Input/output error
-[  122.258174] systemd[1]: Freezing execution.
+[  111.755030] overlayfs: lower file 'a888b30b…5d20' has the wrong fs-verity digest
+[  112.527978] systemd[1]: Failed to execute /sbin/init, giving up: Input/output error
+[  112.534131] systemd[1]: Freezing execution.
 ```
 
-A modified file that is not needed at boot is caught the same way when it is first read: the read fails with an I/O error. The script stops QEMU once the boot halts.
+A modified file that is not needed at boot is caught the same way when it is first read: the read fails with an I/O error.
 
-Other ways to tamper are caught earlier. A changed EROFS image no longer matches the digest in the UKI command line, so the initrd refuses to mount it. A changed UKI or systemd-boot fails the Secure Boot signature check in the firmware.
+**2. `erofs`: the image itself.** The script flips the last byte of the deployed EROFS image and re-enables fs-verity the same way. Its digest no longer matches the one in the UKI command line, so `bootc-root-setup` in the initrd refuses to mount it, and the boot drops to the emergency shell:
+
+```
+[  101.587408] initramfs-setup[504]:     1: Failed to mount composefs image
+[  101.693627] initramfs-setup[504]:     5: fs-verity content mismatch
+Entering emergency mode. Exit the shell to continue.
+```
+
+**3. `uki`: the signed command line.** The script changes the first digit of `composefs.digest=` inside the UKI on the ESP. The UKI's Secure Boot signature no longer matches, so the firmware refuses to load it when systemd-boot asks:
+
+```
+../src/boot/boot.c:3024@call_image_start: Error loading EFI binary \EFI\Linux\bootc\bootc_composefs-b35b9ce1….efi: Access denied
+```
+
+A changed systemd-boot is refused the same way, by the firmware, before any of this runs. That case is by design and not tested separately: it is the same signature check as case 3.
 
 ## Where it goes
 
