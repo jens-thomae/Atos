@@ -36,7 +36,7 @@ These runs happen on GitHub-hosted `ubuntu-24.04` runners, so their absolute num
 
 - **When:** nightly on `main` at 01:30 UTC, and on pull requests labelled `perf` (never from forks).
 - **Build:** on a GitHub-hosted `ubuntu-24.04` runner; the binaries reach the NUC as the `perf-binaries` artifact. Nothing compiles on the NUC.
-- **Measure:** the harness with the full 5-minute CPU window. The job summary names the environment (CPU, kernel, CPU governor, whether page caches were dropped) and shows the table; the raw results are the `perf-results` artifact (JSON).
+- **Measure:** the harness with the full 5-minute CPU window, inside a headless sway compositor on the GPU (`gles2` on `/dev/dri/renderD128`, option A in `reference-runner.md`). The job fails instead of measuring if the GL renderer that sway's Wayland clients get is a software one (`llvmpipe`, `softpipe`) or missing. The job summary names the environment (CPU, kernel, CPU governor, whether page caches were dropped, compositor and its `egl:` renderer line) and shows the table; the raw results are the `perf-results` artifact (JSON).
 - **Compare:** a hosted job runs `budgets compare` against the newest earlier nightly that left results. Regressions are marked in the summary and as a warning; they do not fail the run (a §7 breach does). The threshold is `REGRESSION_THRESHOLD_PERCENT` in the workflow.
 
 ## Budget coverage
