@@ -212,11 +212,11 @@ sudo -u runner sudo -n /usr/sbin/sysctl -q -w vm.drop_caches=3 && echo allowed
 
 - Effect: the kernel drops clean cached file data. No data is lost; the machine is briefly slower while caches refill.
 - Risk: anyone who can push a branch and label a pull request `perf` can trigger it. Worst case is a slower NUC, not access to anything.
-- Without the rule nothing breaks: the workflow tries `sudo -n`, carries on, and the job summary says `Cold cache: no`.
+- Without the rule nothing breaks: the workflow tries `sudo -n`, carries on, and the job summary says `Cold cache: no`. The failed `sudo -n` leaves a harmless failed-sudo entry in the NUC's log on every run.
 
 ## Security notes
 
-- Jobs run code from branches of this repository only. `perf.yml` never runs for pull requests from forks; keep **Settings** → **Actions** → **General** → fork pull request workflows turned off as a second guard.
+- Jobs run code from branches of this repository only. `perf.yml` never runs for pull requests from forks; keep **Settings** → **Actions** → **General** → fork pull request workflows turned off. Together with the private repository this is the primary guard. If the repository ever goes public, remove the runner or require approval for all outside contributors first.
 - Use the NUC for measurements only: no other secrets, keys or services under the `runner` user.
 - Other load on the NUC skews the numbers. Avoid using it around the nightly run at 01:30 UTC (about 10 minutes).
 - If the NUC is off, nightly jobs wait in the queue for up to 24 hours and then fail; nothing else is affected.
