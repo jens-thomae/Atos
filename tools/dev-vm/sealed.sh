@@ -63,7 +63,7 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
     | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|sh\[[0-9]+\]:|fs-verity|/sbin/init|$halt"
 }
 
-step_build() { sudo podman build -t "$IMAGE" "$HERE/../../components/c1-base"; }
+step_build() { sudo podman build --build-context repo="$HERE/../.." -t "$IMAGE" "$HERE/../../components/c1-base"; }
 
 step_disk() {
   rm -f "$WORK/disk.raw" && truncate -s 20G "$WORK/disk.raw"

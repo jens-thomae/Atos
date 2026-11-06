@@ -1,0 +1,12 @@
+# Autologin straight into the compositor (docs/components/c1-base/README.md, "Session").
+# default_session only runs if the initial session ends; it shows a text login on tty1 as a fallback.
+[terminal]
+vt = 1
+
+[default_session]
+command = "agreety --cmd /bin/bash"
+user = "greetd"
+
+[initial_session]
+command = "atos-comp"
+user = "atos"

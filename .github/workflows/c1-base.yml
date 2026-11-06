@@ -45,14 +45,19 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: podman build --pull=missing -t c1-base components/c1-base
+      # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - run: podman build --pull=missing --build-context repo=. -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
+      - name: Session is wired (greetd enabled, compositor and Xwayland present)
+        run: podman run --rm c1-base sh -c 'test "$(systemctl is-enabled greetd)" = enabled && atos-comp --version && test -x /usr/bin/Xwayland'
       - name: UKI and systemd-boot are signed and seal the image (#54)
         run: |
           sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
@@ -62,7 +67,7 @@ jobs:
     needs: changes
     if: github.event_name == 'push' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -80,7 +85,10 @@ jobs:
           [ "$HAS_KEY" = true ] || { echo "::error::COSIGN_PRIVATE_KEY secret missing, see docs/components/c1-base/README.md"; exit 1; }
           [ -f components/c1-base/cosign.pub ] || { echo "::error::components/c1-base/cosign.pub missing"; exit 1; }
 
-      - run: podman build --pull=missing -t c1-base components/c1-base
+      # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - run: podman build --pull=missing --build-context repo=. -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
       - name: UKI and systemd-boot are signed and seal the image (#54)
