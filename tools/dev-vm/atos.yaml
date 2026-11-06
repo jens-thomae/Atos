@@ -43,11 +43,14 @@ provision:
       #   injection, clipboard and screenshots for the D-006 measurements (tools/d006, #12).
       # libfontconfig-dev, libxkbcommon-dev: build dependencies of the D-006 prototypes.
       # bc: build-time arithmetic in tools/d006/m9-build.sh.
+      # podman, qemu-system-arm, qemu-efi-aarch64 (AAVMF), fsverity, sbsigntool: build, boot and
+      #   tamper-test the sealed base image (tools/dev-vm/sealed-vm, #54).
       apt-get update
       apt-get install -y --no-install-recommends \
         build-essential pkg-config curl ca-certificates git \
         weston at-spi2-core gir1.2-atspi-2.0 python3-gi zenity \
-        sway wtype wl-clipboard grim libfontconfig-dev libxkbcommon-dev bc
+        sway wtype wl-clipboard grim libfontconfig-dev libxkbcommon-dev bc \
+        podman qemu-system-arm qemu-efi-aarch64 fsverity sbsigntool
   - mode: user
     script: |
       #!/bin/bash
