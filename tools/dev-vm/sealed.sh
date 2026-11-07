@@ -22,6 +22,15 @@
 #            rollback  boots the default entry (dev-2) and runs `bootc rollback`
 #            back      boots the default entry: dev-1
 #            `update <step>` runs one step; `update` runs all of them in order
+#   counting automatic rollback through boot counting (#56), on its own disk ~/sealed/counting.raw:
+#            images      as for `update`, plus dev-bad (dev-2 whose atos-comp is /usr/bin/false)
+#            install     installs dev-1, as `update install` does
+#            stage-good  boots dev-1, stages dev-2 (`bootc upgrade` writes its entry with `+3`)
+#            good        boots dev-2 (counted), the health check passes, the entry loses its counter
+#            stage-bad   boots dev-2, stages dev-bad
+#            bad         boots dev-bad three times, the health check fails and reboots each time,
+#                        then systemd-boot boots dev-2 by itself
+#            `counting <step>` runs one step; `counting` runs all of them in order
 # Disks live on the VM disk in ~/sealed; logs go to tools/dev-vm/out/sealed/.
 # QEMU runs without KVM (Apple M1 has no nested virtualisation): a boot takes minutes.
 set -euo pipefail
@@ -46,6 +55,23 @@ ImportCredential=atos.*
 StandardOutput=journal+console
 ExecStart=/bin/sh -c "systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | head -20; echo; bootc status; echo; cat /proc/cmdline; findmnt -no SOURCE,FSTYPE,OPTIONS /; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; systemctl poweroff --no-block"'
 
+# Every boot, early: the image version and the boot counter systemd-boot reports (the entry file
+# after its rename, e.g. `...+2-1.conf`; none for an entry without a counter).
+# shellcheck disable=SC2016 # expands in the guest
+BOOTINFO='v=$(sed -n s/^IMAGE_VERSION=//p /usr/lib/os-release)
+e=$(tail -c +5 /sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f 2>/dev/null | tr -d "\000")
+echo "ATOS-BOOT image=${v:-dev-1} counter=${e:-none}"'
+# shellcheck disable=SC2016 # systemd expands it
+BOOTINFO_UNIT='[Unit]
+Description=Atos boot info (dev VM only)
+ConditionPathExists=!/etc/initrd-release
+After=local-fs.target
+[Service]
+Type=oneshot
+ImportCredential=atos.*
+StandardOutput=journal+console
+ExecStart=/bin/sh ${CREDENTIALS_DIRECTORY}/atos.bootinfo'
+
 # One systemd credential, passed over SMBIOS: cred <name> <content>
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 
@@ -61,6 +87,12 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
     cred systemd.unit-dropin.multi-user.target~atos-report $'[Unit]\nWants=atos-report.service'
     # Without KVM, udev in the initrd needs longer than the default 45 s to find the root partition.
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
+    # The same for the boot-counting timeouts (#56): a counted boot takes minutes here.
+    cred systemd.unit-dropin.atos-session-check.service~vm $'[Service]\nTimeoutStartSec=20min'
+    cred systemd.unit-dropin.boot-complete.target~vm $'[Unit]\nJobTimeoutSec=40min'
+    cred systemd.extra-unit.atos-bootinfo.service "$BOOTINFO_UNIT"
+    cred systemd.unit-dropin.sysinit.target~atos-bootinfo $'[Unit]\nWants=atos-bootinfo.service'
+    cred atos.bootinfo "$BOOTINFO"
     [ -z "${ACTION:-}" ] || cred atos.action "$ACTION")
   local nic=(-nic none) serial=(-serial file:"$log") sock=$WORK/serial.sock
   # shellcheck disable=SC2054 # commas are QEMU option syntax; no PXE option ROM (not installed)
@@ -69,8 +101,9 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
   [ -z "${MENU:-}" ] || serial=(-chardev socket,id=s0,path="$sock",server=on,wait=off,logfile="$log" -serial chardev:s0)
   echo "booting $disk, serial log: $log"
   rm -f "$log" "$sock"
-  timeout 45m qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none \
-    "${nic[@]}" \
+  # virtio-gpu: atos-comp needs a DRM device for the session the health check (#56) waits for.
+  timeout "${TIMEOUT:-45m}" qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none \
+    -device virtio-gpu-pci "${nic[@]}" \
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.secboot.fd \
     -drive if=pflash,format=raw,file="$vars" \
     -drive if=virtio,format=raw,file="$disk" \
@@ -85,7 +118,7 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
     sleep 5
   done
   tr -d '\r' < "$log" | grep -av 'EFI Internal Shell' | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
-    | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|sh\[[0-9]+\]:|fs-verity|/sbin/init|$halt"
+    | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|ATOS-BOOT|sh\[[0-9]+\]:|session-check|boot is (good|bad)|reboot: Restarting|fs-verity|/sbin/init|$halt"
 }
 
 step_build() { sudo podman build --build-context repo="$HERE/../.." -t "$IMAGE" "$HERE/../../components/c1-base"; }
@@ -217,14 +250,15 @@ update_images() {
   push "$IMAGE:dev-1" "$REG:dev-1"
   push "$IMAGE:dev-2" "$REG:dev-2"
 }
-update_install() {
+update_install() { # [disk]
+  local disk=${1:-$UDISK}
   registry_up
   push "$IMAGE:dev-1" "$REG:latest"
-  rm -f "$UDISK" && truncate -s 20G "$UDISK"
+  rm -f "$disk" && truncate -s 20G "$disk"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
     "$IMAGE:dev-1" bootc install to-disk --generic-image --via-loopback \
-    --target-imgref "$GUEST_REG:latest" /out/update.raw
+    --target-imgref "$GUEST_REG:latest" "/out/$(basename "$disk")"
 }
 # Runs in the guest: marks the plain-HTTP dev registry as insecure, then times `bootc upgrade`
 # and counts the bytes received on the network while it runs.
@@ -247,10 +281,38 @@ update_previous() { VARS=$UVARS MENU=1 boot "$UDISK" "$OUT/update-previous.log";
 update_rollback() { VARS=$UVARS ACTION='bootc rollback && bootc status' boot "$UDISK" "$OUT/update-rollback.log"; }
 update_back() { VARS=$UVARS boot "$UDISK" "$OUT/update-back.log"; }
 
+# Boot counting (#56). dev-bad is dev-2 with a compositor that exits at once: it boots, but the
+# session never comes up, so the health check fails.
+CDISK=$WORK/counting.raw CVARS=$WORK/counting-vars.fd
+# Printed after the report: the boot entries, with their counters.
+ENTRIES_ACTION='bootctl list --no-pager 2>&1 | grep -E "title|id:|tries" || true'
+counting_images() {
+  update_images
+  sed -e '/^LABEL org.opencontainers.image.title/i RUN echo IMAGE_VERSION=dev-bad >> /usr/lib/os-release' \
+    -e '/^LABEL org.opencontainers.image.title/i RUN ln -sf false /usr/bin/atos-comp' \
+    "$HERE/../../components/c1-base/Containerfile" > "$WORK/Containerfile.dev-bad"
+  grep -q IMAGE_VERSION=dev-bad "$WORK/Containerfile.dev-bad"
+  sudo podman build --build-context repo="$HERE/../.." \
+    -f "$WORK/Containerfile.dev-bad" -t "$IMAGE:dev-bad" "$HERE/../../components/c1-base"
+  push "$IMAGE:dev-bad" "$REG:dev-bad"
+}
+counting_install() { update_install "$CDISK"; }
+counting_stage() { # <image> <log> [fresh]: points :latest at <image>, boots the default entry, stages it
+  registry_up
+  push "$IMAGE:$1" "$REG:latest"
+  VARS=$CVARS NET=1 ACTION="$STAGE_ACTION
+$ENTRIES_ACTION" boot "$CDISK" "$OUT/$2.log" "${3:-}"
+}
+counting_stage-good() { counting_stage dev-2 counting-stage-good fresh; }
+counting_good() { VARS=$CVARS ACTION=$ENTRIES_ACTION boot "$CDISK" "$OUT/counting-good.log"; }
+counting_stage-bad() { counting_stage dev-bad counting-stage-bad; }
+counting_bad() { VARS=$CVARS TIMEOUT=120m ACTION=$ENTRIES_ACTION boot "$CDISK" "$OUT/counting-bad.log"; }
+
 case "${1:-}" in
   build|disk|boot) "step_$1" ;;
   tamper) step_tamper "${2:-}" ;;
   all) step_build; step_disk; step_boot; step_tamper ;;
   update) for s in ${2:-images install stage apply previous rollback back}; do "update_$s"; done ;;
-  *) sed -n '2,23p' "$0" >&2; exit 2 ;;
+  counting) for s in ${2:-images install stage-good good stage-bad bad}; do "counting_$s"; done ;;
+  *) sed -n '2,32p' "$0" >&2; exit 2 ;;
 esac

@@ -1,0 +1,102 @@
+From c363975543cfe4b8d6d2015cbdd6a60f51422eab Mon Sep 17 00:00:00 2001
+From: Jens Thomae <jens.thomae@proton.me>
+Date: Sat, 7 Nov 2026 13:32:31 +0100
+Subject: [PATCH] composefs: boot counting for staged systemd-boot UKI entries
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Atos carried patch (#56). A UKI entry written by an upgrade is named
+…+3.conf, so systemd-boot counts its boots and falls back to the previous
+entry after three failed ones; systemd-bless-boot drops the counter once
+boot-complete.target is reached. Status sorting puts entries with no tries
+left last, as systemd-boot does.
+---
+ crates/lib/src/bootc_composefs/boot.rs   | 37 +++++++++++++++++++++---
+ crates/lib/src/bootc_composefs/status.rs |  7 +++--
+ 2 files changed, 38 insertions(+), 6 deletions(-)
+
+diff --git a/crates/lib/src/bootc_composefs/boot.rs b/crates/lib/src/bootc_composefs/boot.rs
+index f8e12b7d..355acb07 100644
+--- a/crates/lib/src/bootc_composefs/boot.rs
++++ b/crates/lib/src/bootc_composefs/boot.rs
+@@ -521,6 +521,21 @@ pub fn type1_entry_conf_file_name(
+     format!("bootc_{os_id_safe}-{version}-{priority}.conf")
+ }
+ 
++/// Atos: tries systemd-boot gives a newly staged UKI entry before it falls back to the
++/// previous one (automatic boot assessment). `systemd-bless-boot` drops the counter once
++/// `boot-complete.target` is reached.
++pub(crate) const BOOT_COUNT_TRIES: u32 = 3;
++
++/// Atos: true if `file_name` carries a boot counter with no tries left (`+0` or `+0-N`).
++/// systemd-boot sorts such entries last, so we do too.
++pub(crate) fn boot_count_exhausted(file_name: &str) -> bool {
++    file_name
++        .strip_suffix(".conf")
++        .and_then(|n| n.rsplit_once('+'))
++        .map(|(_, counter)| counter.split('-').next() == Some("0"))
++        .unwrap_or(false)
++}
++
+ /// Generate sort key for the primary (new/upgraded) boot entry.
+ /// Format: bootc-{id}-0
+ /// Systemd-boot sorts ascending by sort-key, so "0" comes first.
+@@ -1739,11 +1754,15 @@ fn write_systemd_uki_config(
+         }
+     };
+ 
++    let mut primary_name =
++        type1_entry_conf_file_name(os_id, &bls_conf.version(), FILENAME_PRIORITY_PRIMARY);
++    // Atos: an upgrade's entry starts with a boot counter (`…+3.conf`); the first install has
++    // nothing to fall back to, so it gets none.
++    if booted_bls.is_some() {
++        primary_name = primary_name.replace(".conf", &format!("+{BOOT_COUNT_TRIES}.conf"));
++    }
+     entries_dir
+-        .atomic_write(
+-            type1_entry_conf_file_name(os_id, &bls_conf.version(), FILENAME_PRIORITY_PRIMARY),
+-            bls_conf.to_string().as_bytes(),
+-        )
++        .atomic_write(primary_name, bls_conf.to_string().as_bytes())
+         .context("Writing conf file")?;
+ 
+     if let Some(booted_bls) = booted_bls {
+@@ -2377,6 +2396,16 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn test_boot_count_exhausted() {
++        assert!(!boot_count_exhausted("bootc_fedora-45-1.conf"));
++        assert!(!boot_count_exhausted("bootc_fedora-45-1+3.conf"));
++        assert!(!boot_count_exhausted("bootc_fedora-45-1+1-2.conf"));
++        assert!(boot_count_exhausted("bootc_fedora-45-1+0.conf"));
++        assert!(boot_count_exhausted("bootc_fedora-45-1+0-3.conf"));
++        assert!(!boot_count_exhausted("bootc_fedora-45-1+0-3.conf.tmp"));
++    }
++
+     #[test]
+     fn test_type1_filename_generation() {
+         // Test basic os_id without hyphens
+diff --git a/crates/lib/src/bootc_composefs/status.rs b/crates/lib/src/bootc_composefs/status.rs
+index 80739117..bda96ef6 100644
+--- a/crates/lib/src/bootc_composefs/status.rs
++++ b/crates/lib/src/bootc_composefs/status.rs
+@@ -328,8 +328,11 @@ fn get_sorted_type1_boot_entries_helper(
+     // Sort based on bootloader type
+     configs_with_filenames.sort_by(|a, b| {
+         let ord = match bootloader {
+-            // For systemd-boot sort by sort-key
+-            Bootloader::Systemd => a.config.cmp(&b.config),
++            // For systemd-boot sort by sort-key; Atos: entries with no tries left go last,
++            // as systemd-boot does
++            Bootloader::Systemd => crate::bootc_composefs::boot::boot_count_exhausted(&a.filename)
++                .cmp(&crate::bootc_composefs::boot::boot_count_exhausted(&b.filename))
++                .then_with(|| a.config.cmp(&b.config)),
+             // For grub and grub-cc, sort by filename in descending order
+             // See: https://github.com/bootc-dev/bootc/issues/2221
+             Bootloader::Grub | Bootloader::GrubCC => b.filename.cmp(&a.filename),
+-- 
+2.50.1 (Apple Git-155)
+

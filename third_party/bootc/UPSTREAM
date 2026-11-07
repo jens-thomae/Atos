@@ -1,0 +1,6 @@
+# Pinned upstream bootc (https://github.com/bootc-dev/bootc): the version fedora-bootc 45 ships.
+# Sourced by components/c1-base/Containerfile, which builds it with patches/ applied (#56, D-008).
+# Change only through the rebase routine in docs/components/c1-base/boot-counting.md.
+repo=https://github.com/bootc-dev/bootc
+tag=v1.17.1
+commit=d01e723ae9480fa53aa9db09a7eff0439548e9f6

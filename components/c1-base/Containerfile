@@ -30,6 +30,21 @@ RUN cp ../../rust-toolchain.toml . \
     && strip -o /atos-comp target/release/atos-comp \
     && rm -rf target /opt/cargo /opt/rustup
 
+# bootc with our boot-counting patch (#56, D-008; docs/components/c1-base/boot-counting.md), built
+# from the upstream tag fedora-bootc 45 ships. Only the binary is copied into `base`.
+FROM ${BASE} AS bootc
+RUN dnf -y install --setopt=install_weak_deps=False cargo git-core clang-devel ostree-devel \
+      openssl-devel libzstd-devel
+ENV CARGO_HOME=/opt/cargo
+COPY --from=repo third_party/bootc /src
+RUN set -eux; . /src/UPSTREAM; \
+    git clone -q --depth 1 --branch "$tag" "$repo" /src/bootc; \
+    test "$(git -C /src/bootc rev-parse HEAD)" = "$commit"; \
+    cd /src/bootc && git apply /src/patches/*.patch \
+    && cargo build --release --locked --bin bootc \
+    && cargo test --release --locked -p bootc-lib boot_count \
+    && strip -o /bootc target/release/bootc && rm -rf target /opt/cargo
+
 FROM ${BASE} AS base
 
 # D-005: no call home. Fedora's anonymous countme counter runs from this timer.
@@ -58,6 +73,11 @@ COPY usr/ /usr/
 COPY secureboot-test/PK.auth secureboot-test/KEK.auth secureboot-test/db.auth /usr/lib/bootc/install/secureboot-keys/auto/
 
 COPY session/ /
+# Boot counting (#56): patched bootc names an upgrade's UKI entry `…+3.conf`; the health check
+# decides when a counted boot is good (usr/lib/systemd/system/atos-session-check.service).
+COPY --from=bootc /bootc /usr/bin/bootc
+RUN systemctl enable atos-session-check.service \
+    && semodule -i /usr/share/atos/selinux/atos-bless-boot.cil
 COPY --from=comp /atos-comp /usr/bin/atos-comp
 COPY --from=repo components/c2-compositor/data/keybindings.ron /usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults
 COPY --from=repo components/c2-compositor/data/tiling-exceptions.ron /usr/share/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
