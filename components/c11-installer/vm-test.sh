@@ -94,10 +94,12 @@ qemu_run() {
     -drive if=pflash,format=raw,file="$VARS" \
     -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
     -device "$TPMDEV",tpmdev=tpm0 \
-    -drive if=virtio,format=raw,file="$DISK" \
+    -drive if=none,id=hd,format=raw,file="$DISK" -device virtio-blk-pci,drive=hd,bootindex=1 \
     -serial file:"$log" "$@" &
+  # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
+  # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
   local pid=$!
-  local halt='Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|[Pp]assphrase for|recovery key for'
+  local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
     grep -av 'EFI Internal Shell' "$log" 2>/dev/null | grep -aqE "$halt" && kill "$pid"
     sleep 5
