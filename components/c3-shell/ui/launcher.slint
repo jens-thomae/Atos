@@ -1,0 +1,286 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// The launcher (#64): a search field over the installed apps, on a scrim over the whole output.
+// Values come only from the design tokens. There is no launcher mockup yet; panel, field and rows
+// follow the owner's command palette mockup on the design canvas (docs/design/README.md).
+import { Elevation, Fonts, Palette, Radius, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
+
+export struct AppItem {
+    name: string,
+    // Empty when no icon was found; the tile then shows `initial`.
+    icon: image,
+    initial: string,
+}
+
+component AppRow inherits Rectangle {
+    in property <AppItem> app;
+    in property <bool> current;
+    callback launch();
+    callback focused();
+
+    height: Space.s7;
+    border-radius: Radius.tile;
+    // The palette mockup's selected row: accent tint with an inset accent line.
+    background: fs.has-focus ? Palette.select : touch.pressed ? Palette.pressed : touch.has-hover ? Palette.hover : transparent;
+    border-width: fs.has-focus ? Size.hairline : 0;
+    border-color: Palette.select-outline;
+    accessible-role: button;
+    accessible-label: root.app.name;
+    accessible-action-default => { root.launch(); }
+
+    changed current => {
+        if self.current {
+            fs.focus();
+        }
+    }
+
+    fs := FocusScope {
+        changed has-focus => {
+            if self.has-focus {
+                root.focused();
+            }
+        }
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.launch();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.launch(); }
+    }
+
+    HorizontalLayout {
+        padding-left: Space.s3;
+        padding-right: Space.s3;
+        spacing: Space.s3;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: Size.control;
+                height: Size.control;
+                border-radius: Radius.control;
+                clip: true;
+                background: root.app.icon.width > 0 ? transparent : Palette.tab;
+
+                // The row's button carries the name; its parts stay off the accessibility tree.
+                Image {
+                    accessible-role: none;
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.app.icon;
+                }
+
+                if root.app.icon.width == 0: Text {
+                    accessible-role: none;
+                    text: root.app.initial;
+                    color: Palette.text;
+                    font-size: Type.label.size;
+                    font-weight: Type.label.weight;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Text {
+            accessible-role: none;
+            text: root.app.name;
+            color: Palette.text;
+            font-size: Type.body.size;
+            font-weight: Type.body.weight;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+export component Launcher inherits Window {
+    // The apps matching `query`, best first (the shell filters on `search`).
+    in property <[AppItem]> apps;
+    out property <string> query: field.text;
+    callback search(string);
+    // Index into `apps`.
+    callback launch(int);
+    callback dismiss();
+    // The screenshot test sets its bundled font here.
+    in property <string> font-family: Fonts.sans;
+    // Rows in view at once; more scroll.
+    out property <int> rows: 8;
+
+    // -1: the search field has focus; otherwise the focused row.
+    property <int> current: -1;
+
+    title: "Launcher";
+    background: Palette.scrim;
+    default-font-family: root.font-family;
+    forward-focus: field;
+
+    changed apps => {
+        root.current = -1;
+        field.focus();
+    }
+    changed current => {
+        if root.current < 0 {
+            field.focus();
+            return;
+        }
+        // Keep the focused row in view.
+        let top = Space.s2 + root.current * Space.s7;
+        if top < -list.content-y {
+            list.content-y = -top;
+        } else if top + Space.s7 > -list.content-y + list.height {
+            list.content-y = list.height - top - Space.s7;
+        }
+    }
+
+    // A click on the scrim closes the launcher.
+    TouchArea {
+        clicked => { root.dismiss(); }
+    }
+
+    keys := FocusScope {
+        capture-key-pressed(e) => {
+            if e.text == Key.Escape {
+                root.dismiss();
+                return accept;
+            }
+            if e.text == Key.DownArrow {
+                if root.current < root.apps.length - 1 {
+                    root.current += 1;
+                }
+                return accept;
+            }
+            if e.text == Key.UpArrow {
+                if root.current >= 0 {
+                    root.current -= 1;
+                }
+                return accept;
+            }
+            reject
+        }
+
+        // Elevation 3 is two shadows; Slint draws one per element.
+        Rectangle {
+            x: panel.x;
+            y: panel.y;
+            width: panel.width;
+            height: panel.height;
+            border-radius: panel.border-radius;
+            drop-shadow-offset-y: Elevation.elevation-3-far.y;
+            drop-shadow-blur: Elevation.elevation-3-far.blur;
+            drop-shadow-color: Elevation.elevation-3-far.color;
+        }
+
+        panel := Rectangle {
+            width: min(Size.launcher-width, root.width - 2 * Space.s5);
+            height: min(header.preferred-height + Size.hairline + root.rows * Space.s7 + 2 * Space.s2, root.height - 2 * Space.s5);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: Radius.dialog;
+            border-width: Size.hairline;
+            border-color: Palette.panel-line;
+            background: Palette.panel;
+            clip: true;
+            drop-shadow-offset-y: Elevation.elevation-3-near.y;
+            drop-shadow-blur: Elevation.elevation-3-near.blur;
+            drop-shadow-color: Elevation.elevation-3-near.color;
+
+            // Clicks inside the panel do not reach the scrim.
+            TouchArea { }
+
+            VerticalLayout {
+                header := HorizontalLayout {
+                    // The mockup's field row is 64 px high.
+                    height: Space.s7 + Space.s4;
+                    padding-left: Space.s4;
+                    padding-right: Space.s4;
+                    spacing: Space.s3;
+
+                    VerticalLayout {
+                        alignment: center;
+                        // Magnifier, the mockup's glyph (24-unit grid).
+                        Path {
+                            accessible-role: none;
+                            width: Space.s4 + Space.s1;
+                            height: Space.s4 + Space.s1;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            commands: "M 17 11 A 6 6 0 1 1 5 11 A 6 6 0 1 1 17 11 M 20 20 L 15.5 15.5";
+                            stroke: Palette.text-2;
+                            stroke-width: 1.5 * Size.hairline;
+                        }
+                    }
+
+                    Rectangle {
+                        field := TextInput {
+                            accessible-label: "Search apps";
+                            input-type: InputType.search;
+                            single-line: true;
+                            vertical-alignment: center;
+                            color: Palette.text;
+                            font-size: Type.search-input.size;
+                            font-weight: Type.search-input.weight;
+                            edited => { root.search(self.text); }
+                            accepted => {
+                                if root.apps.length > 0 {
+                                    root.launch(0);
+                                }
+                            }
+                            changed has-focus => {
+                                if self.has-focus {
+                                    root.current = -1;
+                                }
+                            }
+                        }
+
+                        if field.text == "": Text {
+                            accessible-role: none;
+                            width: 100%;
+                            height: 100%;
+                            text: "Search apps";
+                            color: Palette.text-3;
+                            font-size: Type.search-input.size;
+                            font-weight: Type.search-input.weight;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: Size.hairline;
+                    background: Palette.line;
+                }
+
+                list := Flickable {
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: Space.s2;
+                        padding-bottom: Space.s2;
+                        padding-left: Space.s3;
+                        padding-right: Space.s3;
+
+                        for app[i] in root.apps: AppRow {
+                            app: app;
+                            current: i == root.current;
+                            launch => { root.launch(i); }
+                            focused => { root.current = i; }
+                        }
+
+                        if root.apps.length == 0: Text {
+                            text: "No apps found";
+                            color: Palette.text-2;
+                            font-size: Type.body.size;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            height: Space.s7;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

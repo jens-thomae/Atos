@@ -1,8 +1,10 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
-# End-to-end check of the shell (#63) on our compositor: headless sway hosts atos-comp (nested,
+# End-to-end check of the shell (#63, #64) on our compositor: headless sway hosts atos-comp (nested,
 # winit backend); inside it the shell and two client windows run. Checks that the dock lists both
-# windows on the AT-SPI bus, that pressing the unfocused one through AT-SPI activates it, and
+# windows on the AT-SPI bus, that pressing the unfocused one through AT-SPI activates it, opens
+# and closes the launcher five times with `atos-shell --launcher` (the command atos-comp's launcher
+# shortcut runs) and logs each opening time, starts an app from the launcher through AT-SPI, and
 # measures the shell's idle RSS and CPU with the budgets harness (docs/budgets.md).
 # Needs sway, grim, weston (its demo clients), dbus-run-session, busctl, python3-gi + gir1.2-atspi-2.0.
 # Usage: run.sh <atos-shell> <atos-comp> <budgets> <out dir>
@@ -29,6 +31,21 @@ if [ "${1:-}" = inner ]; then
   python3 -I "$HERE/atspi.py" press "Flower, running" >"$OUT/press.txt" 2>&1 || true
   sleep 1.5
   python3 -I "$HERE/atspi.py" dump "$OUT/atspi-2.txt" || true
+  # Launcher: five openings, each timed by the shell (LAUNCHER_OPEN_MS, trigger to frame shown).
+  for i in 1 2 3 4 5; do
+    "$SHELL_BIN" --launcher; sleep 1
+    [ $i = 1 ] && { python3 -I "$HERE/atspi.py" dump "$OUT/atspi-launcher.txt" || true
+                    WAYLAND_DISPLAY=$HOST_WAYLAND_DISPLAY grim "$OUT/2-launcher.png" 2>/dev/null || true; }
+    "$SHELL_BIN" --launcher; sleep 0.5
+  done
+  grep '^LAUNCHER_OPEN_MS' "$OUT/shell.log" | cut -d' ' -f2 >"$OUT/launcher-open-ms.txt" || true
+  # Start the fixture app (weston-simple-shm) from the launcher through AT-SPI.
+  if command -v weston-simple-shm >/dev/null; then
+    "$SHELL_BIN" --launcher; sleep 1
+    python3 -I "$HERE/atspi.py" press "Smoke Test" >>"$OUT/press.txt" 2>&1 || true
+    sleep 2
+    python3 -I "$HERE/atspi.py" dump "$OUT/atspi-3.txt" || true
+  fi
   kill $SH; wait $SH 2>/dev/null || true
   # Idle RSS and CPU of a fresh shell process with the two windows in its dock.
   "$BUDGETS" "$SHELL_BIN" --cpu-window "$WINDOW" --json "$OUT/budgets.json" >"$OUT/budgets.md" 2>"$OUT/budgets.err" \
@@ -42,6 +59,10 @@ RENDERER=${SHELL_RENDERER:-pixman}; export WINDOW=${SHELL_CPU_WINDOW:-10}
 WORK=$(mktemp -d)
 export XDG_RUNTIME_DIR="$WORK/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"
 export MESA_SHADER_CACHE_DIR="$WORK/mesa"  # cold shader cache, as after install
+# The launcher's fixture app, next to the runner's own desktop entries in $XDG_DATA_DIRS.
+export XDG_DATA_HOME="$WORK/data"; mkdir -p "$XDG_DATA_HOME/applications"
+printf '[Desktop Entry]\nType=Application\nName=Smoke Test\nExec=weston-simple-shm\n' \
+  >"$XDG_DATA_HOME/applications/org.atos.E2eSmoke.desktop"
 trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 case "$RENDERER" in

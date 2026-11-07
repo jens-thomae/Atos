@@ -2,6 +2,14 @@
 fn main() {
     // Debug info makes the accessibility tree queryable from the tests (atos-ui-test).
     let config = slint_build::CompilerConfiguration::new().with_debug_info(true);
-    slint_build::compile_with_config("ui/dock.slint", config).unwrap();
+    slint_build::compile_with_config("ui/dock.slint", config.clone()).unwrap();
+    // The bundled test font for the launcher screenshot (tests/launcher.rs only).
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    slint_build::compile_with_output_path(
+        "tests/ui/launcher.slint",
+        out.join("test_font.rs"),
+        config,
+    )
+    .unwrap();
     println!("cargo:rerun-if-changed=../c4-toolkit/ui/tokens.slint");
 }
