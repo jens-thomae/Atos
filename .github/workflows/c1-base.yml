@@ -12,8 +12,8 @@ on:
 permissions:
   contents: read
 
-# PRs: a new push cancels the older run. main: one group per commit, so no merge's run is
-# dropped from the queue and every merge gets a signed image.
+# PRs: a new push cancels the older run. main: one group per commit, so every run starts. Only the
+# publish job serialises (job-level group below), so docs-only runs never queue behind or replace it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -68,6 +68,10 @@ jobs:
     if: github.event_name == 'push' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # One publish at a time, never cancelled while pushing; GitHub keeps only the newest waiting one (#109).
+    concurrency:
+      group: c1-base-main-publish
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -154,12 +158,26 @@ jobs:
 
       # `latest` moves only after the signature verifies, and points at that exact manifest:
       # a registry-to-registry copy keeps the manifest bytes, so the digest (and signature) match.
+      # It also never moves backwards: it moves only if this commit is ahead of the one `latest` names in its
+      # org.atos.source label. Runs are serialised, so this keeps `latest` monotonic (docs-only merges don't matter).
       - name: Verify, then tag latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
             "$IMAGE@$DIGEST" > /dev/null
           cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
             "$IMAGE@$SRC_DIGEST" > /dev/null
+          # No label (image from before #88, or no latest yet): move it. An API error fails the step, latest stays.
+          old=$(skopeo inspect --format '{{index .Labels "org.atos.source"}}' "docker://$IMAGE:latest" || true)
+          old=${old##*:}; old=${old%-source}
+          if [ -n "$old" ]; then
+            st=$(gh api "repos/$GITHUB_REPOSITORY/compare/$old...$GITHUB_SHA" --jq .status)
+            case "$st" in ahead|identical) ;; *)
+              echo "Pushed and signed \`$IMAGE@$DIGEST\` (tag \`$GITHUB_SHA\`); \`latest\` not moved: it is at $old ($st)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0 ;;
+            esac
+          fi
           skopeo copy "docker://$IMAGE@$DIGEST" "docker://$IMAGE:latest"
           [ "$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:latest")" = "$DIGEST" ]
           echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`); source \`$IMAGE@$SRC_DIGEST\` (tag \`$GITHUB_SHA-source\`)" >> "$GITHUB_STEP_SUMMARY"
