@@ -59,7 +59,7 @@ A oneshot unit in the deployment's `/etc` (outside the sealed `/usr`, so the ima
 
 - **Silent unlock plus autologin** (owner answer Q4 on #66). The disk unlocks silently through the TPM (D-015), and the image logs the passwordless `atos` user straight into a session (C1, greetd). **A stolen laptop therefore boots into a session; the encryption protects only a disk taken out of the machine,** or one moved to another machine or booted another way. User accounts and login come with the first-run flow (Phase 3).
 - **The window before the seal** (owner answer Q2). Until `atos-tpm-seal` has run, the disk unlocks with this machine's TPM and no PCR check. Anyone with the machine in that window can boot something else (a live USB with `systemd-cryptsetup … tpm2-device=auto` is enough) and read or change `/etc` and `/var`, which are outside the seal. With Secure Boot on, the window ends with the first boot, which normally follows the install directly.
-- **Without Secure Boot the window never ends** (review of #135; owner decision pending on #66). The seal needs Secure Boot on and the firmware out of setup mode. Until key enrolment at install (#123) lands, Atos keys are on no real machine: stock firmware with Microsoft keys won't start the Atos-signed UKI, so Secure Boot has to be off. **Every install on real hardware therefore stays in this state: the disk opens without a prompt for any OS booted on that machine, and is protected only when taken out of it.** The warning goes only to the boot console and `/run/issue.d/`; greetd's autologin means nobody sees it. The dev VM (systemd-boot enrols the TEST keys in setup mode) and CI do seal.
+- **Without Secure Boot the window never ends** (owner decision on #66, option A: keep the no-PCR slot while Secure Boot is off; not protected against booting another OS until #123). The seal needs Secure Boot on and the firmware out of setup mode. Until key enrolment at install (#123) lands, Atos keys are on no real machine: stock firmware with Microsoft keys won't start the Atos-signed UKI, so Secure Boot has to be off. **Every install on real hardware therefore stays in this state: the disk opens without a prompt for any OS booted on that machine, and is protected only when taken out of it.** The warning goes only to the boot console and `/run/issue.d/`; greetd's autologin means nobody sees it (a warning in the graphical session is a separate C3 card). The dev VM (systemd-boot enrols the TEST keys in setup mode) and CI do seal.
 - **No TPM.** The installer needs a TPM 2.0 (`systemd-cryptenroll --tpm2-device=auto` fails without one). A passphrase path is not part of this card.
 - **The installer media trusts Fedora's shim and Microsoft's UEFI CA** while it runs. That does not carry over to the installed system.
 
@@ -82,7 +82,7 @@ Dev VM (`atos-c11`, aarch64, QEMU **without KVM**, AAVMF Secure Boot, swtpm), 7 
 
 | Step | Result |
 | --- | --- |
-| `install` | Installed to an empty 20 GB disk. The installer reported 1,797 s (2,187 s from QEMU start to power-off). TCG emulation is several times slower than hardware, so this says nothing about the §7 budget of 10 minutes; the KVM run in CI measures it |
+| `install` | Installed to an empty 20 GB disk. The installer reported 1,797 s (2,187 s from QEMU start to power-off). TCG emulation is far slower than hardware, so this says nothing about the §7 budget; see the KVM number below |
 | `boot` (first) | Secure Boot enabled (user mode, keys enrolled by systemd-boot from `loader/keys/auto`). `atos-tpm-seal`: `/dev/vda2 bound to the TPM with PCR 7`. Keyslots afterwards: `0 tpm2`, `1 recovery`; the unit has removed itself |
 | `reboot` | Unlocked by the TPM with no prompt; booted to the report |
 | `stage`, `apply` | `bootc upgrade` staged dev-2; the next boot unlocked with no prompt and runs `IMAGE_VERSION=dev-2` (same signing key, so PCR7 is unchanged) |
@@ -92,4 +92,6 @@ Repeated after main gained boot counting (#126: `panic=10`, emergency drop-ins, 
 
 No step asks for an account or a network (D-005); the VM has no network during the install.
 
-Not yet measured: install time on hardware or under KVM (CI job `c11-installer.yml`), and x86_64 hardware with shim+MOK (PCR 7+14).
+**Install time under KVM** (CI, `c11-installer.yml`, GitHub's amd64 runner, 4 vCPU, payload on the ISO): **105 s** from QEMU start to power-off, live boot included; the installer itself reports 82 s. Budget (§7): 600 s; the job fails above it.
+
+Not yet measured: install time on real hardware, and x86_64 hardware with shim+MOK (PCR 7+14).

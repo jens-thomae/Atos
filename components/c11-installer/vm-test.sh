@@ -46,7 +46,8 @@ case "$(uname -m)" in
     TPMDEV=tpm-tis SERIAL=ttyS0 ;;
   *) echo "unsupported architecture" >&2; exit 1 ;;
 esac
-if [ -w /dev/kvm ]; then QEMU+=(-accel kvm -cpu host); else QEMU+=(-cpu max); fi
+# Per QEMU run; with KVM a prompt hidden on tty0 then fails in minutes, not after an hour.
+if [ -w /dev/kvm ]; then QEMU+=(-accel kvm -cpu host) TMO=15m; else QEMU+=(-cpu max) TMO=60m; fi
 
 # One systemd credential, passed over SMBIOS: cred <name> <content>
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
@@ -61,8 +62,11 @@ After=multi-user.target atos-tpm-seal.service
 [Service]
 Type=exec
 ImportCredential=atos.*
-StandardOutput=journal+console
-ExecStart=/bin/sh -c "systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -5; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; systemctl poweroff --no-block"'
+# The serial port, not the console: on x86_64 the kernel console is tty0 (the UKI has no console=).
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/'"$SERIAL"'
+ExecStart=/bin/sh -c "systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; systemctl poweroff --no-block"'
 
 # The unattended install: what a user does on tty1, minus the questions.
 INSTALL_UNIT="[Unit]
@@ -89,7 +93,7 @@ qemu_run() {
   rm -f "$log"
   echo "QEMU, serial log: $log"
   # shellcheck disable=SC2054 # commas are QEMU option syntax
-  timeout 60m "${QEMU[@]}" -smp 4 -m 4G -display none \
+  timeout "$TMO" "${QEMU[@]}" -smp 4 -m 4G -display none \
     -drive if=pflash,format=raw,readonly=on,file="${CODE:-$CODE_SB}" \
     -drive if=pflash,format=raw,file="$VARS" \
     -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
@@ -101,7 +105,8 @@ qemu_run() {
   local pid=$!
   local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
-    grep -av 'EFI Internal Shell' "$log" 2>/dev/null | grep -aqE "$halt" && kill "$pid"
+    m=$(tr -d '\r' < "$log" 2>/dev/null | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
+    [ -z "$m" ] || { echo "HALT on: $m"; kill "$pid"; break; }
     sleep 5
   done
   wait "$pid" || true
