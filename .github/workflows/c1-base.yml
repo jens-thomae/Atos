@@ -12,10 +12,11 @@ on:
 permissions:
   contents: read
 
-# PRs: a new push cancels the older run. main: one group per commit, so no merge's run is
-# dropped from the queue and every merge gets a signed image.
+# PRs: a new push cancels the older run. main: one group, never cancelled (a run that is pushing
+# finishes), so publishes run one at a time. GitHub keeps only the newest waiting run: a merge
+# superseded while queued gets no image of its own. `latest` is also guarded below (#109).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'main-publish' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -154,12 +155,21 @@ jobs:
 
       # `latest` moves only after the signature verifies, and points at that exact manifest:
       # a registry-to-registry copy keeps the manifest bytes, so the digest (and signature) match.
+      # It also moves only if this commit is still the head of main, so an older commit never takes it
+      # back from a newer one (the newer run tags it itself).
       - name: Verify, then tag latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
             "$IMAGE@$DIGEST" > /dev/null
           cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
             "$IMAGE@$SRC_DIGEST" > /dev/null
+          HEAD_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$HEAD_SHA" != "$GITHUB_SHA" ]; then
+            echo "Pushed and signed \`$IMAGE@$DIGEST\` (tag \`$GITHUB_SHA\`); \`latest\` not moved: main is now at $HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           skopeo copy "docker://$IMAGE@$DIGEST" "docker://$IMAGE:latest"
           [ "$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:latest")" = "$DIGEST" ]
           echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`); source \`$IMAGE@$SRC_DIGEST\` (tag \`$GITHUB_SHA-source\`)" >> "$GITHUB_STEP_SUMMARY"
