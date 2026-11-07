@@ -1,0 +1,9 @@
+#!/bin/sh
+# Boot counting (#56): runs before the emergency shell, in the initrd and in the booted system.
+# On a counted boot (systemd-boot set LoaderBootCountPath), it reboots instead, so systemd-boot
+# counts the failed try. On an uncounted boot it exits 0 and the emergency shell starts as before,
+# so a tampered or broken image that has nothing to fall back to does not reboot in a loop.
+[ -e /sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f ] || exit 0
+echo "atos: counted boot failed, rebooting to count the try"
+systemctl --no-block reboot
+exit 1

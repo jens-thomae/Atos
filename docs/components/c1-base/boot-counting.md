@@ -8,9 +8,15 @@ The §7 Stability budget asks for an automatic rollback to the previous image af
 2. On each boot of a counted entry, systemd-boot renames it first (`+3` → `+2-1` → `+1-2` → `+0-3`) and tells the OS through the `LoaderBootCountPath` EFI variable ([automatic boot assessment](https://systemd.io/AUTOMATIC_BOOT_ASSESSMENT/)).
 3. In the OS, `systemd-bless-boot-generator` sees the variable and pulls in `systemd-bless-boot.service`, which requires `boot-complete.target`. Our health check, `atos-session-check.service`, is `RequiredBy=boot-complete.target`.
 4. **Good boot:** the check passes, `boot-complete.target` is reached, and `systemd-bless-boot` renames the entry to `…-1.conf`. From then on, it is an ordinary entry.
-5. **Bad boot:** the check fails and reboots (`FailureAction=reboot`). A boot that hangs before the check decides is rebooted by `JobTimeoutSec=5min` / `JobTimeoutAction=reboot` on `boot-complete.target`. After three failed tries, the entry reads `+0-3`. systemd-boot sorts entries with no tries left last, so the previous image boots, with no user action.
+5. **Bad boot:** every way a counted boot can fail ends in a reboot, and each reboot uses up one try:
+   - **The session does not come up:** the check fails and reboots (`FailureAction=reboot`). This is a clean reboot, so a stop job that hangs can delay it by up to systemd's own shutdown timeouts.
+   - **The boot hangs after switch-root** before the check decides: `JobTimeoutSec=5min` / `JobTimeoutAction=reboot` on `boot-complete.target`.
+   - **The kernel panics:** the karg `panic=10` ([`kargs.d/20-atos-panic.toml`](../../../components/c1-base/usr/lib/bootc/kargs.d/20-atos-panic.toml)) reboots 10 s later. Like every karg, it is sealed into the signed UKI.
+   - **The initrd (or the booted system) enters emergency mode,** for example because the composefs digest does not match: drop-ins for `emergency.service` and `dracut-emergency.service` run [`counted-boot-failed`](../../../components/c1-base/usr/libexec/atos/counted-boot-failed) first. On a counted boot (systemd-boot set `LoaderBootCountPath`), it reboots instead of starting the shell. The image rebuilds its initramfs with Fedora's dracut config plus [`40-atos-boot-counting.conf`](../../../components/c1-base/usr/lib/dracut/dracut.conf.d/40-atos-boot-counting.conf), which adds the drop-ins and the script.
 
-None of this runs on a boot without a counter: the check and the timeout hang off `boot-complete.target`, which only `systemd-bless-boot` pulls in.
+   After three failed tries, the entry reads `+0-3`. systemd-boot sorts entries with no tries left last, so the previous image boots, with no user action.
+
+A boot without a counter runs none of the counting logic: the check and the timeout hang off `boot-complete.target`, which only `systemd-bless-boot` pulls in, and `counted-boot-failed` exits at once, so emergency mode starts its shell as before. The tamper cases in the [C1 README](README.md) still stop at the emergency shell, and an image that is broken with nothing to fall back to does not reboot in a loop. The one exception is `panic=10`. The kernel cannot tell a counted boot from an uncounted one, so a panic on an uncounted boot reboots again and again instead of hanging. Both leave the machine unusable; a loop at least retries a fault that does not happen every time. This is flagged for the owner.
 
 ## What "good" means
 
@@ -19,7 +25,7 @@ None of this runs on a boot without a counter: the check and the timeout hang of
 Why this definition:
 
 - **It is what the user needs from a boot.** Atos is a desktop OS. An image that boots but shows no desktop is unusable for someone who has no terminal (C1: *"no terminal needed"*). Reaching `multi-user.target` would pass such an image.
-- **It covers the failures an update can cause.** Kernel, initrd, root mount, systemd units, Mesa, the compositor and greetd are all on the path to a running session. If any of them breaks, the session does not come up.
+- **It covers the failures an update can cause.** Kernel, initrd, root mount, systemd units, Mesa, the compositor and greetd are all on the path to a running session. If any of them breaks, the session does not come up. The check itself runs only in the booted system. Failures before that are caught as described in step 5: by `panic=10`, by the emergency drop-ins, or by the `boot-complete.target` timeout.
 - **It is not "no failed units".** systemd ships `systemd-boot-check-no-failures.service`, but it would roll back an image because of an unrelated unit, such as a network wait. That rejects updates that work for the user.
 - **The 10 s wait** catches a compositor that crashes right after it starts. The **2-minute limit** is 12 times the 10 s boot budget (§7). Neither value is in the spec; both are flagged on the card.
 
@@ -34,6 +40,12 @@ When C3 (shell) exists, the check should also wait for the shell's first frame. 
 | Size | 2 files, 38 lines added, 6 removed (about 15 lines of logic, the rest is comments and a unit test) |
 | `boot.rs` | `write_systemd_uki_config`: when it writes the staged entries for an upgrade, the new entry gets `+3` (`BOOT_COUNT_TRIES`) before `.conf` |
 | `status.rs` | Sorting for systemd-boot puts entries with no tries left (`+0`, `+0-N`) last, as systemd-boot does. Without this, after a rollback, `bootc status` would call the failed image the default and report a queued rollback |
+
+**Same build as Fedora's.** Fedora's [`bootc.spec`](https://src.fedoraproject.org/rpms/bootc/blob/f45/f/bootc.spec) builds all binaries with `cargo build --release --bins` from the release tarball, carries no downstream patches, and on Fedora enables no extra features (`rhsm` and `rhel9` are RHEL only). We build only `--bin bootc` from the same tag with default features and the same `Cargo.lock`. Only `/usr/bin/bootc` changes. The rest of the RPM, including `/usr/lib/bootc/initramfs-setup` and the units, stays Fedora's, at the same version (the base ships `bootc-1.17.1-1.fc45`). The f45 branch already packages 1.17.4, so the next base bump needs the rebase routine below.
+
+The patch's unit test covers `boot_count_exhausted`. The `+3` naming is covered by the VM demo (`entries.staged` in `counting-stage-*.log`), because `write_systemd_uki_config` needs a real ESP.
+
+**CI cost:** the `bootc` stage roughly doubles the c1-base build on the hosted runner (34 min 27 s against 17 to 19 min before; run 42388085955). The layer cache in #124 should take most of it back, because the stage only changes when `third_party/bootc` changes.
 
 Not patched, on purpose:
 
@@ -118,6 +130,7 @@ Logs: `tools/dev-vm/out/sealed/counting-{stage-good,good,stage-bad,bad}.log`.
 
 ## Limits
 
-- **A failure in the initrd that drops to the emergency shell, or a kernel panic, hangs instead of rebooting.** The checks above run only in the booted system, so such a try is never counted. Covering it needs `panic=` and initrd emergency handling on the sealed command line. That is a follow-up, not done here.
+- **A kernel that hangs without panicking, or an initrd that hangs without reaching emergency mode, still needs a power cycle.** Each power cycle counts a try. Covering it needs a hardware watchdog or `softlockup_panic`/`hung_task_panic`. That is [#128](https://github.com/jens-thomae/Atos/issues/128).
+- **A failed bless reverts a good update without telling anyone.** If `systemd-bless-boot` fails, the entry keeps counting down on each good boot, and systemd-boot falls back after three of them. The SELinux module and the compiled policy live in `/etc/selinux`, and bootc merges `/etc` three ways on an update, as ostree does. If the machine's policy was modified locally, the local files win and an image's new module does not arrive. A full ESP is another way the bless can fail. [#127](https://github.com/jens-thomae/Atos/issues/127) tracks detecting it.
 - **The check knows only the compositor.** It should also wait for the shell (C3) once the shell exists.
 - **A failed entry stays on the ESP as `+0-3`** until the next `bootc upgrade` replaces it. systemd-boot keeps it last, and the boot menu still lists it.
