@@ -24,8 +24,9 @@ if [ "${1:-}" = inner ]; then
     weston-clickdot >/dev/null 2>&1 & sleep 2  # the newer window is focused
   fi
   python3 -I "$HERE/atspi.py" dump "$OUT/atspi-1.txt" || true
-  grim "$OUT/1-two-windows.png" 2>/dev/null || true  # atos-comp may not offer wlr-screencopy
-  python3 -I "$HERE/atspi.py" press "flower, running" >"$OUT/press.txt" 2>&1 || true
+  # atos-comp's nested window as the host sway shows it.
+  WAYLAND_DISPLAY=$HOST_WAYLAND_DISPLAY grim "$OUT/1-two-windows.png" 2>/dev/null || true
+  python3 -I "$HERE/atspi.py" press "Flower, running" >"$OUT/press.txt" 2>&1 || true
   sleep 1.5
   python3 -I "$HERE/atspi.py" dump "$OUT/atspi-2.txt" || true
   kill $SH; wait $SH 2>/dev/null || true
@@ -66,8 +67,7 @@ export WAYLAND_DISPLAY=$(cd "$XDG_RUNTIME_DIR" && ls -d wayland-? | head -1)
 busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status ScreenReaderEnabled b true
 
 # atos-comp exits when its kiosk command does.
-timeout 900 "$COMP" --no-xwayland "$0" inner "$SHELL_BIN" "$BUDGETS" "$OUT" >"$OUT/atos-comp.log" 2>&1 || true
-grim "$OUT/host.png" 2>/dev/null || true
+HOST_WAYLAND_DISPLAY=$WAYLAND_DISPLAY timeout 900 "$COMP" --no-xwayland "$0" inner "$SHELL_BIN" "$BUDGETS" "$OUT" >"$OUT/atos-comp.log" 2>&1 || true
 grep -h '^ATOS_SHELL_GL_RENDERER' "$OUT/shell.err" | sed 's/^ATOS_SHELL_GL_RENDERER: /shell renderer: /' >>"$OUT/environment.txt" \
   || echo "shell renderer: none" >>"$OUT/environment.txt"
 cat "$OUT/environment.txt"

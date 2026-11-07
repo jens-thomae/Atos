@@ -8,10 +8,10 @@ R=$1
 fail() { echo "::error::$1"; exit 1; }
 if [ "${SHELL_CHECK_TREE:-1}" != 0 ]; then
 # The dock lists both windows, the newer one focused.
-grep -q "push button 'flower, running'" "$R/atspi-1.txt" || fail "dock does not list flower (atspi-1.txt)"
+grep -q "push button 'Flower, running'" "$R/atspi-1.txt" || fail "dock does not list Flower (atspi-1.txt)"
 grep -q "push button 'Wayland ClickDot, focused'" "$R/atspi-1.txt" || fail "dock does not show ClickDot focused (atspi-1.txt)"
-# Pressing flower through AT-SPI activated it.
-grep -q "push button 'flower, focused'" "$R/atspi-2.txt" || fail "flower not activated (atspi-2.txt)"
+# Pressing Flower through AT-SPI activated it.
+grep -q "push button 'Flower, focused'" "$R/atspi-2.txt" || fail "Flower not activated (atspi-2.txt)"
 grep -q "push button 'Wayland ClickDot, running'" "$R/atspi-2.txt" || fail "ClickDot still focused (atspi-2.txt)"
 fi
 # Idle memory within the shell's share.

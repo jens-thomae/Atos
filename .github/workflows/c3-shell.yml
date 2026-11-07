@@ -137,7 +137,7 @@ jobs:
       - name: Check the dock's tree, activation and idle RSS
         run: |
           bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"
-          { echo; echo '#### AT-SPI tree after pressing flower'; echo '```'; cat results/atspi-2.txt; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+          { echo; echo '#### AT-SPI tree after pressing Flower'; echo '```'; cat results/atspi-2.txt; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:

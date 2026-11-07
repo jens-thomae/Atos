@@ -47,13 +47,16 @@ component Slot inherits Rectangle {
         clip: true;
         background: root.item.icon.width > 0 ? transparent : Palette.button-secondary;
 
+        // The slot's button carries the name; its parts stay off the accessibility tree.
         Image {
+            accessible-role: none;
             width: parent.width;
             height: parent.height;
             source: root.item.icon;
         }
 
         if root.item.icon.width == 0: Text {
+            accessible-role: none;
             text: root.item.initial;
             color: Palette.text;
             font-size: Type.headline.size;
