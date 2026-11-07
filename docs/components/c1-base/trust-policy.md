@@ -16,7 +16,7 @@ All of them are in `/usr`, so they are inside the sealed composefs digest. Fedor
 
 The lookup order is `containers-policy.json(5)`'s: `$HOME/.config/containers/policy.json`, then `/etc/containers/policy.json`, then `/usr/share/containers/policy.json`. An administrator can still override the policy by writing `/etc/containers/policy.json` (ownership, §2 priority 6); that is a root action and outside this card's threat model.
 
-**Other images.** The default stays Fedora's `insecureAcceptAnything`, so `podman pull` and `bootc switch` to other images keep working. The policy protects the image the system tracks, which is what a compromised registry would target.
+**Other images.** The signature policy's default stays Fedora's `insecureAcceptAnything`, so `podman pull` of other images keeps working, and the signature check protects only the image the system tracks, which is what a compromised registry would target. **The version floor does not look at the repository**, though: it applies to every `bootc upgrade` and `bootc switch` target. Once an image with an Atos label (`20261107.x`) is booted, `bootc switch` to stock `fedora-bootc:45` (`45.x`) or to any image without a numeric label is refused.
 
 ## How bootc applies it
 
@@ -41,9 +41,9 @@ A system trusts only the keys in the image it booted. To rotate a key, first shi
 
 **Built in?** No. bootc 1.17.1 (the version fedora-bootc 45 ships) and bootc `main` (checked 2026-11-07) have no downgrade check for image pulls; ostree's timestamp check (`rpm-ostree --allow-downgrade`) does not apply to container images; and upstream's post-pull hook ([bootc#640](https://github.com/bootc-dev/bootc/issues/640)) is still open. So the floor is a second carried bootc patch, like boot counting (#56, D-007/D-008).
 
-**The patch** (rebased with the other carried patch on each bootc bump, using the routine in [boot-counting.md](boot-counting.md); `0002-composefs-refuse-to-stage-an-image-older-than-the-bo.patch`, about 70 lines with its test) adds one check to `do_upgrade` in `bootc_composefs/update.rs`, which both `bootc upgrade` and `bootc switch` go through, as does Fedora's enabled `bootc-fetch-apply-updates.timer`:
+**The patch** (rebased with the other carried patch on each bootc bump, using the routine in [boot-counting.md](boot-counting.md); `0002-composefs-refuse-to-stage-an-image-older-than-the-bo.patch`, about 90 lines with its test) adds one check to bootc's composefs `bootc upgrade` and `bootc switch` (which Fedora's enabled `bootc-fetch-apply-updates.timer` also runs). The check always runs before anything on disk changes. If the target is already in the local composefs repository, it runs before `validate_update`, because that step removes staged boot entries; otherwise a refused image, cached by an earlier attempt, could un-stage a pending good update. Otherwise it runs in `do_upgrade` after the pull, before staging:
 
-1. After the pull, it reads the version label of the pulled image from the local composefs repository: `org.opencontainers.image.version`, else `version` (ostree-ext's `version_for_config`, the label `bootc status` knows).
+1. It reads the target image's version label from its config (the pulled one in the local repository, or the signature-checked config of a cached one): `org.opencontainers.image.version`, else `version` (ostree-ext's `version_for_config`).
 2. It reads the booted image's label the same way.
 3. It refuses to stage if the new version is lower, comparing dot-separated integers component by component (`45.2` < `45.10`).
 
@@ -60,7 +60,7 @@ A system trusts only the keys in the image it booted. To rotate a key, first shi
 
 **Limits.**
 
-- The refusal comes after the download, before staging: an attacker serving an old image costs the client one download, and nothing is staged. A check before the download would need a second manifest fetch, which the registry could answer differently, so the authoritative check stays after the pull.
+- For an image that is not cached yet, the refusal comes after the download, before staging: an attacker serving an old image costs the client one download, and nothing changes on disk apart from the cached image. A check before the download would need a second manifest fetch, which the registry could answer differently, so the authoritative check stays after the pull.
 - A frozen registry (no new images at all) is not detected; D-014's other half, showing the age of the last update in the UI, belongs to C3/C8.
 - There is no override for a deliberate downgrade. The user can boot the previous version from the menu; a downgrade to an image older than both deployments is refused. Question for the owner on #75.
 
@@ -88,6 +88,6 @@ Results (M1 Max, aarch64 under QEMU emulation, 2026-11-07; logs in `tools/dev-vm
 | `apply` | `ATOS-BOOT image=trust-2`, with the boot counter of #56 (`bootc_fedora-45-1+2-1.conf`); `rollback:` trust-1 |
 | `previous` | boot menu, second entry: `ATOS-BOOT image=trust-1`. The older image boots; the floor does not apply to boot entries |
 
-The three refusals came from plain `bootc switch` calls, which run the same `do_upgrade` path as `bootc upgrade`.
+RESULTS2
 
 **`bootc status` shows Fedora's version.** It printed `version: 45.20261107.0` for every image: composefs status reads the **manifest annotation** `org.opencontainers.image.version`, which the images inherit from the base, not the config label the floor uses. Display only; the floor read 1.0 and 1.1 correctly. Setting the annotation as well in CI is a possible follow-up (not done here, not tested).

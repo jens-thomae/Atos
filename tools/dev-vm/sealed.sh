@@ -38,13 +38,15 @@
 #   trust    the client trust policy (#75), on its own disk ~/sealed/trust.raw. Images are the shipped
 #            Containerfile with the policy pointed at this VM's registry and a VM-only cosign key
 #            (generated in ~/sealed/trust-keys, with a second, wrong one). Steps:
-#            images    builds trust-1 (version 1.1), trust-2 (1.2, signed), trust-unsigned (1.2),
-#                      trust-wrong (1.2, signed with the wrong key), trust-old (1.0, signed)
+#            images    builds trust-1 (version 1.10), trust-2 (1.30, signed), trust-unsigned (1.30),
+#                      trust-wrong (1.30, signed with the wrong key), trust-old (1.0, signed) and
+#                      trust-mid (1.20, signed: newer than trust-1, older than trust-2)
 #            install   installs trust-1, tracking :latest, which points at trust-1
 #            stage     points :latest at trust-2, boots trust-1, tries `bootc switch` to the
 #                      unsigned, wrongly signed and old images (all refused), then `bootc upgrade`
-#                      stages trust-2; then the guest points :latest at trust-old and tries two
-#                      upgrades and a switch (refused; trust-2 must stay staged)
+#                      stages trust-2; then the guest points :latest at trust-mid (refused: the
+#                      floor is the staged version), then at trust-old and tries two upgrades
+#                      and a switch (refused; trust-2 must stay staged)
 #            apply     boots the default entry: trust-2
 #            previous  picks the second boot entry from the menu: trust-1 (older) still boots
 #            `trust <step>` runs one step; `trust` runs all of them in order
@@ -385,11 +387,12 @@ trust_variant() { # <name> <version> [sign key]: builds trust-<name>, pushes it,
 trust_images() {
   registry_up
   trust_keys
-  trust_variant 1 1.1 good
-  trust_variant 2 1.2 good
-  trust_variant unsigned 1.2
-  trust_variant wrong 1.2 wrong
+  trust_variant 1 1.10 good
+  trust_variant 2 1.30 good
+  trust_variant unsigned 1.30
+  trust_variant wrong 1.30 wrong
   trust_variant old 1.0 good
+  trust_variant mid 1.20 good
 }
 trust_install() {
   registry_up
@@ -412,9 +415,13 @@ for t in unsigned wrong old; do
   fi
 done
 bootc upgrade && echo "ATOS-TRUST latest staged"
-# A registry that turns bad after the update was staged: :latest now names the old image, which
-# is already in the local repository. Refusals must leave the staged trust-2 alone.
-skopeo copy -q docker://10.0.2.2:5000/atos/c1-base:trust-old docker://10.0.2.2:5000/atos/c1-base:latest || echo "ATOS-TRUST retag failed"
+# A registry that turns bad after the update was staged. First :latest names trust-mid: newer than
+# the booted trust-1, older than the staged trust-2, so refused.
+retag() { skopeo copy -q "docker://10.0.2.2:5000/atos/c1-base:$1" docker://10.0.2.2:5000/atos/c1-base:latest || echo "ATOS-TRUST retag failed"; }
+retag trust-mid
+if out=$(bootc upgrade 2>&1); then echo "ATOS-TRUST mid ACCEPTED"; else echo "ATOS-TRUST mid refused: $(printf "%s" "$out" | tail -n 1)"; fi
+# Then the old image, already in the local repository. Refusals must leave the staged trust-2 alone.
+retag trust-old
 for t in "upgrade" "upgrade" "switch 10.0.2.2:5000/atos/c1-base:trust-old"; do
   if out=$(bootc $t 2>&1); then echo "ATOS-TRUST again $t ACCEPTED"; else echo "ATOS-TRUST again $t refused: $(printf "%s" "$out" | tail -n 1)"; fi
 done
