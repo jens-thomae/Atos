@@ -61,7 +61,7 @@ jobs:
         env:
           TARGET_IMGREF: ${{ env.PAYLOAD }}
         run: |
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf swtpm swtpm-tools > /dev/null
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf swtpm swtpm-tools python3-virt-firmware > /dev/null
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
           v=components/c11-installer/vm-test.sh out=components/c11-installer/out
@@ -69,8 +69,10 @@ jobs:
           t=$($v install | tee /dev/stderr | sed -n 's/^ATOS-INSTALL-TIME qemu_start_to_poweroff=\([0-9]*\)s$/\1/p')
           echo "Install time under KVM: ${t:?no ATOS-INSTALL-TIME} s (budget 600 s)" | tee -a "$GITHUB_STEP_SUMMARY"
           [ "$t" -le 600 ] || { echo "::error::install took $t s, over the 600 s budget (spec §7)"; exit 1; }
+          # OVMF refuses systemd-boot's PK write, so the TEST keys go into the variables from outside.
+          $v enrol
           $v boot
-          grep -aq 'Secure Boot: enabled (user)' $out/boot.log # systemd-boot enrolled the TEST keys
+          grep -aq 'Secure Boot: enabled (user)' $out/boot.log
           grep -aq 'bound to the TPM with PCR 7' $out/boot.log
           $v reboot
           grep -aq ATOS-REPORT-END $out/reboot.log

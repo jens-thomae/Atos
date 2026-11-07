@@ -7,16 +7,18 @@
 #   iso      builds the installer image and the ISO with dev-1 as offline payload
 #   install  boots the ISO under QEMU (AAVMF Secure Boot firmware in setup mode, swtpm TPM 2.0)
 #            and installs to an empty 20 GB disk, unattended; prints the time it took
+#   enrol    not in `all`: enrols the TEST keys into the firmware variables (x86_64 CI, where
+#            OVMF refuses systemd-boot's own enrolment); needs virt-fw-vars
 #   boot     first boot of the installed disk: systemd-boot enrols the TEST keys and resets, the
 #            sealed UKI boots with Secure Boot on, atos-tpm-seal binds the LUKS volume to PCR7
 #   reboot   boots again: the disk unlocks through the PCR7-bound TPM slot, no prompt
 #   stage    points :latest at dev-2, boots with networking, runs `bootc upgrade`
 #   apply    boots the default entry: dev-2, still unlocked by the TPM
 #   nosb     boots the same disk and TPM with Secure Boot off: PCR7 differs, so the TPM keeps the
-#            key and the boot stops at the passphrase prompt
+#            key and the boot stops at the recovery key prompt
 # Set BASE=<image@digest> to build c1-base on another base (passed as --build-arg).
 # Disks live on the VM disk in ~/c11; logs go to components/c11-installer/out/.
-# QEMU runs without KVM (Apple M1 has no nested virtualisation): every boot takes minutes.
+# Without KVM (Apple M1 has no nested virtualisation) every boot takes minutes; CI has KVM.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -178,6 +180,26 @@ step_install() {
   echo "ATOS-INSTALL-TIME qemu_start_to_poweroff=$(( $(date +%s) - t0 ))s"
 }
 
+# x86_64 OVMF rejects systemd-boot's PK write from loader/keys/auto ("Security violation"; AAVMF
+# accepts it), so CI enrols the TEST keys into the variables from outside, as a vendor tool would.
+# Needs virt-fw-vars (python3-virt-firmware). The certificates come out of the committed .auth files.
+step_enrol() {
+  local k=$WORK/keys G=4a3d6e0b-5f2c-4b7e-9a51-7465737400a7 # owner GUID, secureboot-test/generate.sh
+  mkdir -p "$k"
+  python3 -I - "$REPO/components/c1-base/secureboot-test" "$k" <<'EOF'
+import ssl, struct, sys
+src, out = sys.argv[1:]
+for k in ("PK", "KEK", "db"):
+    b = open(f"{src}/{k}.auth", "rb").read()
+    esl = 16 + struct.unpack_from("<I", b, 16)[0]  # after EFI_TIME and WIN_CERTIFICATE
+    hsize, ssize = struct.unpack_from("<II", b, esl + 20)
+    der = b[esl + 28 + hsize + 16 : esl + 28 + hsize + ssize]  # skip header and owner GUID
+    open(f"{out}/{k}.pem", "w").write(ssl.DER_cert_to_PEM_cert(der))
+EOF
+  virt-fw-vars --input "$VARS" --output "$VARS.new" --set-pk "$G" "$k/PK.pem" \
+    --add-kek "$G" "$k/KEK.pem" --add-db "$G" "$k/db.pem" --secure-boot
+  mv "$VARS.new" "$VARS"
+}
 step_boot() { boot "$OUT/boot.log"; }
 step_reboot() { boot "$OUT/reboot.log"; }
 STAGE_ACTION='printf "[[registry]]\nlocation = \"10.0.2.2:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/50-atos-dev.conf
@@ -192,7 +214,7 @@ step_nosb() {
 }
 
 case "${1:-}" in
-  images|iso|install|boot|reboot|stage|apply|nosb) "step_$1" ;;
+  images|iso|install|enrol|boot|reboot|stage|apply|nosb) "step_$1" ;;
   all) for s in images iso install boot reboot stage apply nosb; do "step_$s"; done ;;
   *) sed -n '2,21p' "$0" >&2; exit 2 ;;
 esac
