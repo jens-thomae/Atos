@@ -12,6 +12,16 @@
 #            uki     one hex digit of the composefs digest in the UKI's command line changed
 #            `tamper <case>` runs one case
 #   all      all four steps
+#   update   the update and rollback loop (#55), on its own disk ~/sealed/update.raw. Steps:
+#            images    builds dev-1 (as shipped) and dev-2 (plus IMAGE_VERSION=dev-2 in os-release,
+#                      VM-only), pushes both to a registry in this VM (localhost:5000)
+#            install   installs dev-1, tracking <registry>/atos/c1-base:latest, which points at dev-1
+#            stage     points :latest at dev-2, boots dev-1 with networking, runs `bootc upgrade`
+#            apply     boots the default entry: dev-2
+#            previous  opens the boot menu and picks the second entry with the arrow keys: dev-1
+#            rollback  boots the default entry (dev-2) and runs `bootc rollback`
+#            back      boots the default entry: dev-1
+#            `update <step>` runs one step; `update` runs all of them in order
 # Disks live on the VM disk in ~/sealed; logs go to tools/dev-vm/out/sealed/.
 # QEMU runs without KVM (Apple M1 has no nested virtualisation): a boot takes minutes.
 set -euo pipefail
@@ -22,44 +32,59 @@ WORK=~/sealed
 OUT="$HERE/out/sealed"
 mkdir -p "$WORK" "$OUT"
 
-# Prints Secure Boot state, `bootc status` and the mounts, then powers off. Passed in as
-# systemd credentials over SMBIOS, so the image itself carries no test hook.
+# Once startup has finished: prints Secure Boot state, `bootc status`, the mounts, the image's
+# IMAGE_VERSION and boot time, runs the optional `atos.action` credential (ACTION=<script>),
+# then powers off. Passed in as systemd credentials over SMBIOS, so the image carries no test hook.
+# shellcheck disable=SC2016 # expands in the guest
 REPORT_UNIT='[Unit]
 Description=Atos sealed-boot report (dev VM only)
 ConditionPathExists=!/etc/initrd-release
 After=multi-user.target
 [Service]
-Type=oneshot
+Type=exec
+ImportCredential=atos.*
 StandardOutput=journal+console
-ExecStart=/bin/sh -c "echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | head -20; echo; bootc status; echo; cat /proc/cmdline; findmnt -no SOURCE,FSTYPE,OPTIONS /; echo ATOS-REPORT-END"
-ExecStartPost=/usr/bin/systemctl poweroff --no-block'
+ExecStart=/bin/sh -c "systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | head -20; echo; bootc status; echo; cat /proc/cmdline; findmnt -no SOURCE,FSTYPE,OPTIONS /; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; systemctl poweroff --no-block"'
 
 # One systemd credential, passed over SMBIOS: cred <name> <content>
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 
+# Env for boot(): VARS=<firmware variables file>, ACTION=<script run after the report>,
+# NET=1 for user networking (the guest reaches this VM at 10.0.2.2), MENU=1 to open the
+# systemd-boot menu and pick its second entry through the serial console.
 boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
-  local disk=$1 log=$2
-  [ "${3:-}" = fresh ] || [ ! -f "$WORK/vars.fd" ] && cp /usr/share/AAVMF/AAVMF_VARS.fd "$WORK/vars.fd"
+  local disk=$1 log=$2 vars=${VARS:-$WORK/vars.fd}
+  [ "${3:-}" = fresh ] || [ ! -f "$vars" ] && cp /usr/share/AAVMF/AAVMF_VARS.fd "$vars"
   local CREDS
   mapfile -d '' CREDS < <(
     cred systemd.extra-unit.atos-report.service "$REPORT_UNIT"
     cred systemd.unit-dropin.multi-user.target~atos-report $'[Unit]\nWants=atos-report.service'
     # Without KVM, udev in the initrd needs longer than the default 45 s to find the root partition.
-    cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min')
+    cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
+    [ -z "${ACTION:-}" ] || cred atos.action "$ACTION")
+  local nic=(-nic none) serial=(-serial file:"$log") sock=$WORK/serial.sock
+  # shellcheck disable=SC2054 # commas are QEMU option syntax; no PXE option ROM (not installed)
+  [ -z "${NET:-}" ] || nic=(-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile=)
+  # shellcheck disable=SC2054
+  [ -z "${MENU:-}" ] || serial=(-chardev socket,id=s0,path="$sock",server=on,wait=off,logfile="$log" -serial chardev:s0)
   echo "booting $disk, serial log: $log"
-  rm -f "$log"
-  timeout 45m qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none -nic none \
+  rm -f "$log" "$sock"
+  timeout 45m qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none \
+    "${nic[@]}" \
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.secboot.fd \
-    -drive if=pflash,format=raw,file="$WORK/vars.fd" \
+    -drive if=pflash,format=raw,file="$vars" \
     -drive if=virtio,format=raw,file="$disk" \
-    -serial file:"$log" "${CREDS[@]}" &
+    "${serial[@]}" "${CREDS[@]}" &
+  local pid=$!
+  [ -z "${MENU:-}" ] || pick_second_entry "$sock"
   # A good boot powers off after the report; a halted one is stopped here.
-  local pid=$! halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|Access [Dd]enied'
+  local halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|Access [Dd]enied'
   while kill -0 "$pid" 2>/dev/null; do
-    grep -aqE "$halt" "$log" 2>/dev/null && kill "$pid"
+    # The firmware tries its built-in EFI Shell first, which Secure Boot refuses: not a halt.
+    grep -av 'EFI Internal Shell' "$log" 2>/dev/null | grep -aqE "$halt" && kill "$pid"
     sleep 5
   done
-  tr -d '\r' < "$log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
+  tr -d '\r' < "$log" | grep -av 'EFI Internal Shell' | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
     | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|sh\[[0-9]+\]:|fs-verity|/sbin/init|$halt"
 }
 
@@ -131,9 +156,101 @@ step_tamper() {
   done
 }
 
+# Holds space until systemd-boot shows its menu (with timeout 0 it is hidden otherwise), then
+# picks the second entry: Down, Enter. Types on the serial console, as a user at the keyboard.
+# Keeps reading the console until QEMU exits: an unread socket fills up and blocks the guest.
+pick_second_entry() { # <serial socket>
+  python3 - "$1" <<'EOF' &
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+for _ in range(100):
+    try:
+        s.connect(sys.argv[1])
+        break
+    except OSError:
+        time.sleep(0.1)
+s.settimeout(0.5)
+seen, picked = b"", False
+while True:
+    try:
+        data = s.recv(65536)
+        if not data:
+            break
+        seen = (seen + data)[-4096:]
+    except socket.timeout:
+        pass
+    if picked:
+        continue
+    if b"Fedora Linux" in seen:  # the menu lists the entries by their title
+        time.sleep(2)
+        s.send(b"\x1b[B")
+        time.sleep(1)
+        s.send(b"\r")
+        picked = True
+    else:
+        s.send(b" ")
+EOF
+}
+
+# Update loop (#55). The registry runs in this VM; the QEMU guest reaches it at 10.0.2.2.
+REG=localhost:5000/atos/c1-base GUEST_REG=10.0.2.2:5000/atos/c1-base
+UDISK=$WORK/update.raw UVARS=$WORK/update-vars.fd
+registry_up() { # CNCF distribution (registry:2), pinned by digest; dev VM only, plain HTTP
+  sudo podman container exists atos-registry || sudo podman create --name atos-registry -p 5000:5000 \
+    docker.io/library/registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 >/dev/null
+  sudo podman start atos-registry >/dev/null
+}
+push() { sudo podman push -q --tls-verify=false "$1" "docker://$2"; } # <local image> <registry ref>
+
+# dev-2 differs from dev-1 by one line in os-release, inside the sealed digest, so the boot menu
+# and `bootc status` can tell them apart. The shipped Containerfile is not changed.
+update_images() {
+  local ctx="$HERE/../../components/c1-base"
+  registry_up
+  sudo podman build --build-context repo="$HERE/../.." \
+    -t "$IMAGE:dev-1" "$ctx"
+  sed '/^LABEL org.opencontainers.image.title/i RUN echo IMAGE_VERSION=dev-2 >> /usr/lib/os-release' \
+    "$ctx/Containerfile" > "$WORK/Containerfile.dev-2"
+  grep -q IMAGE_VERSION=dev-2 "$WORK/Containerfile.dev-2"
+  sudo podman build --build-context repo="$HERE/../.." \
+    -f "$WORK/Containerfile.dev-2" -t "$IMAGE:dev-2" "$ctx"
+  push "$IMAGE:dev-1" "$REG:dev-1"
+  push "$IMAGE:dev-2" "$REG:dev-2"
+}
+update_install() {
+  registry_up
+  push "$IMAGE:dev-1" "$REG:latest"
+  rm -f "$UDISK" && truncate -s 20G "$UDISK"
+  sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
+    -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    "$IMAGE:dev-1" bootc install to-disk --generic-image --via-loopback \
+    --target-imgref "$GUEST_REG:latest" /out/update.raw
+}
+# Runs in the guest: marks the plain-HTTP dev registry as insecure, then times `bootc upgrade`
+# and counts the bytes received on the network while it runs.
+# shellcheck disable=SC2016 # expands in the guest
+STAGE_ACTION='printf "[[registry]]\nlocation = \"10.0.2.2:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/50-atos-dev.conf
+until curl -sf http://10.0.2.2:5000/v2/ >/dev/null; do sleep 2; done
+rx() { cat /sys/class/net/[!l]*/statistics/rx_bytes | awk "{ s += \$1 } END { print s }"; }
+r0=$(rx); t0=$(date +%s)
+bootc upgrade
+t1=$(date +%s); r1=$(rx)
+echo "ATOS-STAGED seconds=$((t1 - t0)) rx_bytes=$((r1 - r0))"
+bootc status'
+update_stage() {
+  registry_up
+  push "$IMAGE:dev-2" "$REG:latest"
+  VARS=$UVARS NET=1 ACTION=$STAGE_ACTION boot "$UDISK" "$OUT/update-stage.log" fresh
+}
+update_apply() { VARS=$UVARS boot "$UDISK" "$OUT/update-apply.log"; }
+update_previous() { VARS=$UVARS MENU=1 boot "$UDISK" "$OUT/update-previous.log"; }
+update_rollback() { VARS=$UVARS ACTION='bootc rollback && bootc status' boot "$UDISK" "$OUT/update-rollback.log"; }
+update_back() { VARS=$UVARS boot "$UDISK" "$OUT/update-back.log"; }
+
 case "${1:-}" in
   build|disk|boot) "step_$1" ;;
   tamper) step_tamper "${2:-}" ;;
   all) step_build; step_disk; step_boot; step_tamper ;;
-  *) sed -n '2,12p' "$0" >&2; exit 2 ;;
+  update) for s in ${2:-images install stage apply previous rollback back}; do "update_$s"; done ;;
+  *) sed -n '2,23p' "$0" >&2; exit 2 ;;
 esac

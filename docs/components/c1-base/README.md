@@ -127,6 +127,46 @@ Entering emergency mode. Exit the shell to continue.
 
 A changed systemd-boot is refused the same way, by the firmware, before any of this runs. That case is by design and not tested separately: it is the same signature check as case 3.
 
+## Update and rollback loop (dev VM)
+
+Card #55. An installed system tracks `<registry>/atos/c1-base:latest`. `bootc upgrade` downloads and stages a newer image while the system runs, and the next boot applies it. The image it came from stays a boot entry, and `bootc rollback` makes it the default again. [`tools/dev-vm/sealed.sh update`](../../../tools/dev-vm/sealed.sh) runs the whole loop in the dev VM:
+
+```bash
+ATOS_VM=atos-c1 tools/dev-vm/vm run tools/dev-vm/sealed.sh update
+```
+
+**Images (owner decision on #55, option A).** CI publishes amd64 only, and the dev VM is aarch64, so the loop uses two aarch64 images built in the VM from the same Containerfile. **dev-1** is the image as shipped. **dev-2** adds one line, `IMAGE_VERSION=dev-2` in `/usr/lib/os-release`, inside the sealed digest. The line is added in a copy of the Containerfile in `~/sealed`, so the shipped Containerfile does not change. Both images are served from a registry in the VM (`registry:2`, pinned by digest, plain HTTP on `localhost:5000`). The QEMU guest reaches it at `10.0.2.2:5000` and marks it `insecure` in `/etc/containers/registries.conf.d/` (VM only). Real amd64 CI images get tested on the NUC in a later card. Signature policy is #75; dev-1 tracks the registry with Fedora's default policy.
+
+| Step | Does | Result (M1 Max, 2026-11-07) |
+| --- | --- | --- |
+| `images` | builds dev-1 and dev-2, pushes both | |
+| `install` | `bootc install to-disk --target-imgref 10.0.2.2:5000/atos/c1-base:latest` from dev-1, into `~/sealed/update.raw`; `:latest` points at dev-1 | 7 min 11 s with `images` (layers cached) |
+| `stage` | points `:latest` at dev-2, boots dev-1 with networking (enrols the keys first), runs `bootc upgrade` | `staged:` dev-2, `booted:` dev-1 |
+| `apply` | boots the default entry | `booted:` dev-2 (`IMAGE_VERSION=dev-2`), `rollback:` dev-1 |
+| `previous` | opens the systemd-boot menu on the serial console and picks the second entry with the arrow keys, as a user at the keyboard | `booted:` dev-1 |
+| `rollback` | boots the default entry (still dev-2), runs `bootc rollback` | *Next boot: rollback deployment* |
+| `back` | boots the default entry | `booted:` dev-1, `rollback:` dev-2 |
+
+**Measured** (dev VM, aarch64 under QEMU emulation, no KVM; not budget numbers):
+
+| | |
+| --- | --- |
+| Staging time (`bootc upgrade`, download and stage, system running) | 222 s |
+| Download size | 225.8 MB received by the guest during `bootc upgrade`. The registry lists 5 of 79 layers as new, 217.6 MB compressed: two of about 108.6 MB each (see below) and three small ones (520 B, 205 kB, 98 kB) |
+| Finalizing the staged deployment at shutdown (`bootc-finalize-staged`) | 37 s |
+| Boot to `graphical.target`, first boot of dev-2 | 6 min 58 s (firmware 5.8 s, loader 1.6 s, kernel 18.2 s, initrd 1 min 27 s, userspace 5 min 6 s) |
+| Later boots (dev-1 or dev-2) | 3 min 34 s to 3 min 37 s |
+
+The boot times only show that nothing hangs; under emulation they are not comparable to the 10 s budget (§7), which is measured on the NUC.
+
+Notes:
+
+- **What an update downloads.** A change anywhere in `base` changes the composefs digest, so the UKI (about 108.6 MB compressed) changes with every update. The other large layer is the `kernel` stage's `split-kernel-and-rootfs` output: the kernel and initramfs, which the `rootfs` stage then deletes. That layer ships in every image and every update even though nothing uses it ([#111](https://github.com/jens-thomae/Atos/issues/111)).
+- **Boot entries.** bootc writes one systemd-boot entry per deployment: `bootc_fedora-45-0.conf` (default, sort key `bootc-fedora-0`) and `bootc_fedora-45-1.conf`. Both show the same title, *Fedora Linux 45 (Forty Five) 45 (45)*; nothing marks the second one as the previous version ([#112](https://github.com/jens-thomae/Atos/issues/112)). The menu is hidden (timeout 0, since bootc 1.17.1 ignores an image `loader.conf`) and opens when a key is held during boot.
+- **Booting the previous entry from the menu does not change the default.** The next plain boot starts dev-2 again. While booted from the menu, `bootc status` reports `bootOrder: rollback` and `rollbackQueued: true`, although no rollback was asked for.
+- **Firmware boot order.** After the first boots, AAVMF tries its built-in EFI Shell before the disk. Secure Boot refuses the shell (*Security Violation*) and the firmware moves on to the disk. `sealed.sh` ignores that line.
+- **Logs:** `tools/dev-vm/out/sealed/update-{stage,apply,previous,rollback,back}.log`.
+
 ## Fallback B2: Fedora shim + MOK (spike)
 
 Card #76 tested D-014's fallback B2 in the dev VM: Fedora's Microsoft-signed shim starts our systemd-boot, which verifies the sealed UKI through the TEST cert enrolled as a MOK. It works. Fedora 45's x86_64 shim is dual-signed (UEFI CA 2011 and 2023); the aarch64 shim is 2023-only. The image does not ship shim. Findings, trust per step and open points: [`shim-mok-spike.md`](shim-mok-spike.md).
