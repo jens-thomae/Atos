@@ -63,8 +63,8 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
     [ -z "${ACTION:-}" ] || cred atos.action "$ACTION")
   local nic=(-nic none) serial=(-serial file:"$log") sock=$WORK/serial.sock
-  # shellcheck disable=SC2054 # commas are QEMU option syntax
-  [ -z "${NET:-}" ] || nic=(-nic user,model=virtio-net-pci)
+  # shellcheck disable=SC2054 # commas are QEMU option syntax; no PXE option ROM (not installed)
+  [ -z "${NET:-}" ] || nic=(-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile=)
   # shellcheck disable=SC2054
   [ -z "${MENU:-}" ] || serial=(-chardev socket,id=s0,path="$sock",server=on,wait=off,logfile="$log" -serial chardev:s0)
   echo "booting $disk, serial log: $log"
@@ -76,14 +76,15 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
     -drive if=virtio,format=raw,file="$disk" \
     "${serial[@]}" "${CREDS[@]}" &
   local pid=$!
-  [ -z "${MENU:-}" ] || pick_second_entry "$sock" "$log"
+  [ -z "${MENU:-}" ] || pick_second_entry "$sock"
   # A good boot powers off after the report; a halted one is stopped here.
   local halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|Access [Dd]enied'
   while kill -0 "$pid" 2>/dev/null; do
-    grep -aqE "$halt" "$log" 2>/dev/null && kill "$pid"
+    # The firmware tries its built-in EFI Shell first, which Secure Boot refuses: not a halt.
+    grep -av 'EFI Internal Shell' "$log" 2>/dev/null | grep -aqE "$halt" && kill "$pid"
     sleep 5
   done
-  tr -d '\r' < "$log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
+  tr -d '\r' < "$log" | grep -av 'EFI Internal Shell' | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
     | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|sh\[[0-9]+\]:|fs-verity|/sbin/init|$halt"
 }
 
@@ -156,32 +157,38 @@ step_tamper() {
 }
 
 # Holds space until systemd-boot shows its menu (with timeout 0 it is hidden otherwise), then
-# picks the second entry: Down, Enter. Writes to the serial console, as a user at the keyboard.
-pick_second_entry() { # <serial socket> <log>
-  python3 - "$1" "$2" <<'EOF' &
+# picks the second entry: Down, Enter. Types on the serial console, as a user at the keyboard.
+# Keeps reading the console until QEMU exits: an unread socket fills up and blocks the guest.
+pick_second_entry() { # <serial socket>
+  python3 - "$1" <<'EOF' &
 import socket, sys, time
-sock, log = sys.argv[1:]
 s = socket.socket(socket.AF_UNIX)
 for _ in range(100):
     try:
-        s.connect(sock)
+        s.connect(sys.argv[1])
         break
     except OSError:
         time.sleep(0.1)
-def shown():  # the menu lists the entries by their os-release PRETTY_NAME
+s.settimeout(0.5)
+seen, picked = b"", False
+while True:
     try:
-        return b"Fedora Linux" in open(log, "rb").read()
-    except FileNotFoundError:
-        return False
-end = time.time() + 900
-while time.time() < end and not shown():
-    s.send(b" ")
-    time.sleep(0.5)
-time.sleep(2)
-s.send(b"\x1b[B")
-time.sleep(1)
-s.send(b"\r")
-time.sleep(5)
+        data = s.recv(65536)
+        if not data:
+            break
+        seen = (seen + data)[-4096:]
+    except socket.timeout:
+        pass
+    if picked:
+        continue
+    if b"Fedora Linux" in seen:  # the menu lists the entries by their title
+        time.sleep(2)
+        s.send(b"\x1b[B")
+        time.sleep(1)
+        s.send(b"\r")
+        picked = True
+    else:
+        s.send(b" ")
 EOF
 }
 
