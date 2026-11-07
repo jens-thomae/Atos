@@ -1,0 +1,57 @@
+# C11 installer ISO (docs/components/c11-installer/README.md): builds the amd64 installer image and
+# the ISO with the published c1-base image as offline payload, then checks the ISO's contents.
+# Runs only when installer files change, or by hand (CI minutes, docs/ci.md). Path filtering is
+# fine here: this is not a required check. The ISO (about 2 GB) is not uploaded: private-repo
+# artifact storage on the Free plan is 500 MB.
+name: C11 installer ISO
+
+on:
+  pull_request:
+    paths:
+      - components/c11-installer/**
+      - .github/workflows/c11-installer.yml
+  push:
+    branches: [main]
+    paths:
+      - components/c11-installer/**
+      - .github/workflows/c11-installer.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read # the c1-base payload, in case its package is still private
+    env:
+      PAYLOAD: ghcr.io/jens-thomae/atos/c1-base:latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: Pull the payload
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          echo "$TOKEN" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          sudo podman pull -q "$PAYLOAD"
+          sudo podman logout ghcr.io
+      - name: Build the ISO
+        run: PAYLOAD="$PAYLOAD" OUTDIR="$RUNNER_TEMP" components/c11-installer/build-iso.sh
+      - name: Check the ISO
+        run: |
+          sudo apt-get install -y -q --no-install-recommends xorriso > /dev/null
+          ls=$(xorriso -indev "$RUNNER_TEMP/install.iso" -find / -type f 2>/dev/null)
+          for f in /EFI/BOOT/BOOTX64.EFI /EFI/BOOT/grubx64.efi /images/pxeboot/vmlinuz /LiveOS/squashfs.img; do
+            grep -qx "'$f'" <<< "$ls" || { echo "missing $f"; exit 1; }
+          done
+          du -h "$RUNNER_TEMP/install.iso"
