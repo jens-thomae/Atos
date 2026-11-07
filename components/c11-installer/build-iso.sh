@@ -13,6 +13,11 @@ build_arg=()
 
 sudo podman build "${build_arg[@]}" --build-context repo="$HERE/../.." -t localhost/atos-installer "$HERE"
 mkdir -p "$OUTDIR/ib"
+# image-builder's podman 5 rewrites the shared storage's default network backend to netavark,
+# which breaks the host's podman 4 (Ubuntu 24.04: CNI). Put it back afterwards.
+nb=/var/lib/containers/storage/defaultNetworkBackend
+old=$(sudo cat "$nb" 2>/dev/null || true)
+trap 'if [ -n "$old" ]; then echo -n "$old" | sudo tee "$nb" >/dev/null; else sudo rm -f "$nb"; fi' EXIT
 sudo podman run --rm --privileged --security-opt label=type:unconfined_t \
   -v /var/lib/containers/storage:/var/lib/containers/storage -v "$OUTDIR/ib:/output" \
   "$IB" build --bootc-ref localhost/atos-installer --bootc-installer-payload-ref "$PAYLOAD" \

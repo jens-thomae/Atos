@@ -1,0 +1,51 @@
+UEFI firmware (version 2024.02-2ubuntu0.10 built at 15:40:28 on Sep 23 2026)
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU QEMU CD-ROM " from PciRoot(0x0)/Pci(0x1,0x0)/Scsi(0x0,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU QEMU CD-ROM " from PciRoot(0x0)/Pci(0x1,0x0)/Scsi(0x0,0x0)
+error: ../../grub-core/fs/fshelp.c:find_file:257:file
+`/EFI/BOOT/arm64-efi/efi_uga.mod' not found.
+error: ../../grub-core/fs/fshelp.c:find_file:257:file
+`/EFI/BOOT/arm64-efi/video_bochs.mod' not found.
+error: ../../grub-core/fs/fshelp.c:find_file:257:file
+`/EFI/BOOT/arm64-efi/video_cirrus.mod' not found.
+[0m[30m[40m[2J[01;01H[0m[37m[40m[02;32HGRUB version 2.12
+
+[04;02H/----------------------------------------------------------------------------\[05;02H|[05;79H|[06;02H|[06;79H|[07;02H|[07;79H|[08;02H|[08;79H|[09;02H|[09;79H|[10;02H|[10;79H|[11;02H|[11;79H|[12;02H|[12;79H|[13;02H|[13;79H|[14;02H|[14;79H|[15;02H|[15;79H|[16;02H|[16;79H|[17;02H|[17;79H|[18;02H|[18;79H|[19;02H|[19;79H|[20;02H|[20;79H|[21;02H|[21;79H|[22;02H|[22;79H|[23;02H|[23;79H|[24;02H|[24;79H|[25;02H|[25;79H|[26;02H|[26;79H|[27;02H|[27;79H|[28;02H|[28;79H|[29;02H|[29;79H|[30;02H|[30;79H|[31;02H|[31;79H|[32;02H|[32;79H|[33;02H|[33;79H|[34;02H|[34;79H|[35;02H|[35;79H|[36;02H|[36;79H|[37;02H|[37;79H|[38;02H|[38;79H|[39;02H|[39;79H|[40;02H|[40;79H|[41;02H|[41;79H|[42;02H|[42;79H|[43;02H\----------------------------------------------------------------------------/[44;02H[45;02H     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [05;80H [0m[30m[47m[05;03H*Install Atos                                                               [0m[37m[40m[05;78H[06;03H                                                                            [06;78H[07;03H                                                                            [07;78H[08;03H                                                                            [08;78H[09;03H                                                                            [09;78H[10;03H                                                                            [10;78H[11;03H                                                                            [11;78H[12;03H                                                                            [12;78H[13;03H                                                                            [13;78H[14;03H                                                                            [14;78H[15;03H                                                                            [15;78H[16;03H                                                                            [16;78H[17;03H                                                                            [17;78H[18;03H                                                                            [18;78H[19;03H                                                                            [19;78H[20;03H                                                                            [20;78H[21;03H                                                                            [21;78H[22;03H                                                                            [22;78H[23;03H                                                                            [23;78H[24;03H                                                                            [24;78H[25;03H                                                                            [25;78H[26;03H                                                                            [26;78H[27;03H                                                                            [27;78H[28;03H                                                                            [28;78H[29;03H                                                                            [29;78H[30;03H                                                                            [30;78H[31;03H                                                                            [31;78H[32;03H                                                                            [32;78H[33;03H                                                                            [33;78H[34;03H                                                                            [34;78H[35;03H                                                                            [35;78H[36;03H                                                                            [36;78H[37;03H                                                                            [37;78H[38;03H                                                                            [38;78H[39;03H                                                                            [39;78H[40;03H                                                                            [40;78H[41;03H                                                                            [41;78H[42;03H                                                                            [42;78H[42;80H [05;78H[48;01H   The highlighted entry will be executed automatically in 3s.                 [05;78H[48;01H   The highlighted entry will be executed automatically in 2s.                 [05;78H[48;01H   The highlighted entry will be executed automatically in 1s.                 [05;78H[48;01H   The highlighted entry will be executed automatically in 0s.                 [05;78H[0m[30m[40m[2J[01;01H[0m[37m[40m[0m[30m[40m[2J[01;01H[0m[37m[40m  Booting `Install Atos'
+
+P+q6E616D65\Partitioning /dev/vda
+Encrypting the root partition (LUKS2)
+
+Your recovery key follows. Write it down and keep it away from this computer.
+You need it if the firmware, Secure Boot keys or the TPM change.
+
+A secret recovery key has been generated for this volume:
+
+    🔐 [0;1;39mfviitbkn-rbevergn-jjlnutiv-nlhgjnlc-cnrdghen-bkndujce-fnvjkbut-eglhvdjt[0m
+
+Please save this secret recovery key at a secure location. It may be used to
+regain access to the volume if the other configured access credentials have
+been lost or forgotten. The recovery key may be entered in place of a password
+whenever authentication is requested.
+New recovery key enrolled as key slot 1.
+New TPM2 token enrolled as key slot 2.
+Key slot 2 unlocked.
+Command successful.
+Creating file systems
+mkfs.fat 4.2 (2021-01-31)
+Installing 10.0.2.2:5000/atos/c1-base:latest
+Installing image: docker://10.0.2.2:5000/atos/c1-base:latest
+Digest: sha256:82cdf440249e3d421d6f0a4e62b482b32cbff2ecc90cc95856a18e7d06f87376
+Bootloader: systemd
+Installing bootloader via systemd-boot
+Wrote Secure Boot key: /tmp/.tmpdsCnW3/boot/loader/keys/auto/KEK.auth
+Wrote Secure Boot key: /tmp/.tmpdsCnW3/boot/loader/keys/auto/PK.auth
+Wrote Secure Boot key: /tmp/.tmpdsCnW3/boot/loader/keys/auto/db.auth
+Trimming root
+Finalizing filesystem root
+Trimming boot
+boot: 917.9 MiB (962441216 bytes) trimmed
+Finalizing filesystem boot
+Installation complete!
+atos-install: Read-only file system (os error 30)
+ATOS-INSTALL-FAILED

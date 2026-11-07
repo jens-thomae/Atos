@@ -19,6 +19,14 @@ const SEAL_UNIT: &str = include_str!("../../firstboot/atos-tpm-seal.service");
 const MAPPER: &str = "atos-root";
 const TARGET: &str = "/run/atos-install/target";
 const KEYFILE: &str = "/run/atos-install/install.key";
+const STORAGE_CONF: &str = "/run/atos-install/storage.conf";
+const STORAGE_CONF_TOML: &str = r#"[storage]
+driver = "overlay"
+graphroot = "/run/atos-install/storage"
+runroot = "/run/atos-install/runroot"
+[storage.options]
+additionalimagestores = ["/var/lib/containers/storage"]
+"#;
 
 struct Args {
     disk: Option<String>,
@@ -224,7 +232,12 @@ fn install(a: &Args) -> Result<(), String> {
     sh(&["mount", &esp, &boot])?;
 
     println!("Installing {}", a.target_imgref);
+    // The live root is an overlay, which cannot hold the container's upper layer: put podman's
+    // own storage in tmpfs and read the ISO's payload as an additional (read-only) image store.
+    write_private(STORAGE_CONF, STORAGE_CONF_TOML.as_bytes())?;
     sh(&[
+        "env",
+        &format!("CONTAINERS_STORAGE_CONF={STORAGE_CONF}"),
         "podman",
         "run",
         "--rm",
@@ -249,6 +262,8 @@ fn install(a: &Args) -> Result<(), String> {
         "--root-mount-spec=",
         "/target",
     ])?;
+    // bootc leaves the root mounted read-only when it is done.
+    sh(&["mount", "-o", "remount,rw", TARGET])?;
     install_seal_unit(Path::new(TARGET))?;
 
     sh(&["umount", &boot])?;
@@ -289,11 +304,19 @@ fn install_seal_unit(target: &Path) -> Result<(), String> {
     fs::create_dir_all(etc.join("atos")).map_err(|e| e.to_string())?;
     fs::write(etc.join("atos/atos-tpm-seal.sh"), SEAL_SCRIPT).map_err(|e| e.to_string())?;
     fs::write(unit_dir.join("atos-tpm-seal.service"), SEAL_UNIT).map_err(|e| e.to_string())?;
-    std::os::unix::fs::symlink(
-        "/etc/systemd/system/atos-tpm-seal.service",
-        wants.join("atos-tpm-seal.service"),
-    )
-    .map_err(|e| e.to_string())
+    let link = wants.join("atos-tpm-seal.service");
+    std::os::unix::fs::symlink("/etc/systemd/system/atos-tpm-seal.service", &link)
+        .map_err(|e| e.to_string())?;
+    // bootc has already labelled the tree; give the new files their neighbours' SELinux labels.
+    let label = |reference: &Path, file: &Path| {
+        let (r, f) = (reference.to_string_lossy(), file.to_string_lossy());
+        sh(&["chcon", "-h", &format!("--reference={r}"), &f])
+    };
+    label(&etc, &etc.join("atos"))?;
+    label(&etc.join("DIR_COLORS"), &etc.join("atos/atos-tpm-seal.sh"))?;
+    label(&unit_dir, &wants)?;
+    label(&unit_dir, &unit_dir.join("atos-tpm-seal.service"))?;
+    label(&unit_dir, &link)
 }
 
 /// The composefs backend keeps each deployment's /etc in `state/deploy/<id>/etc`.

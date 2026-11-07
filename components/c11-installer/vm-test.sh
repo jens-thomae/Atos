@@ -53,8 +53,10 @@ Description=Atos unattended install (dev VM only)
 After=multi-user.target
 [Service]
 Type=exec
-StandardOutput=journal+console
-StandardError=journal+console
+# The kernel console is tty1 (last console= in iso.yaml); the serial port is the test's log.
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/ttyAMA0
 ExecStart=/bin/sh -c 'atos-install --disk /dev/vda --yes --target-imgref $GUEST_REG:latest && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
 
 swtpm_up() {
