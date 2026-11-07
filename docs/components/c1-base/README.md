@@ -167,15 +167,34 @@ Notes:
 - **Firmware boot order.** After the first boots, AAVMF tries its built-in EFI Shell before the disk. Secure Boot refuses the shell (*Security Violation*) and the firmware moves on to the disk. `sealed.sh` ignores that line.
 - **Logs:** `tools/dev-vm/out/sealed/update-{stage,apply,previous,rollback,back}.log`.
 
+## Fallback B2: Fedora shim + MOK (spike)
+
+Card #76 tested D-014's fallback B2 in the dev VM: Fedora's Microsoft-signed shim starts our systemd-boot, which verifies the sealed UKI through the TEST cert enrolled as a MOK. It works. Fedora 45's x86_64 shim is dual-signed (UEFI CA 2011 and 2023); the aarch64 shim is 2023-only. The image does not ship shim. Findings, trust per step and open points: [`shim-mok-spike.md`](shim-mok-spike.md).
+
 ## Where it goes
 
 | Event | Result |
 | --- | --- |
 | Pull request (not docs-only) | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`. No registry token, no cosign key. |
-| Merge to `main` (not docs-only) | Build, countme check, `check-seal.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Each merge has its own concurrency group, so none is dropped. |
+| Merge to `main` (not docs-only) | Build, countme check, `check-seal.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Publishes run one at a time (job-level concurrency group, never cancelled; GitHub keeps only the newest waiting one, which contains the replaced code). `:latest` moves only if the commit is ahead of the one it currently names in its `org.atos.source` label, so it never goes backwards and docs-only merges don't stall it. |
 | Docs-only change (`tools/ci/is-docs-only.sh`) | Skipped. |
 
 **Public pulls (owner step, once).** A package pushed from a private repository starts private. After the first push to `main`, set the package to public: GitHub → Packages → `atos/c1-base` → Package settings → Change visibility → Public. **This cannot be undone:** a public package cannot be made private again. Then pulls need no account (D-005). The REST API cannot change package visibility.
+
+## Corresponding source (GPL, D-013, #85)
+
+The package `ghcr.io/jens-thomae/atos/c1-base` is public while the repository is private, so every image built on `main` has its source published next to it as `ghcr.io/jens-thomae/atos/c1-base:<sha>-source`, signed with the same cosign key as the image. Order in the job: key guard, build and check the image, build the source image, push the source, push the image, sign both. A failure before the push leaves nothing behind; no image is ever public without its source.
+
+- **Format.** A plain `FROM scratch` image, not an oras artifact: the runner has no oras, and podman, skopeo and cosign handle it like the image. Contents: `atos-<sha>.tar.gz` (`git archive` of the commit), `fedora-packages.txt` (`rpm -qa` NVRs; Fedora's sources are at src.fedoraproject.org and koji) and a `README.md`.
+- **Pointer.** The image carries the label `org.atos.source=<image>:<sha>-source` (set with `--label` on the publish build, so the Containerfile is untouched). The source image carries `org.atos.source-of` and `org.atos.source-of-image-id` (the image's config digest, known before the push; the tag alone is mutable).
+- **Excluded.** `git archive` ships tracked files only: no `.git` history, no untracked files, no CI credentials (the checkout does not persist its token, and signing secrets never touch the tree). The publish job fails, right after checkout and before any build, if `tools/ci/check-no-private-keys.sh` (a content check; test: `tools/ci/test-check-no-private-keys.sh`) finds a private key block in the tree other than the TEST db key (D-014: public). The tree itself, `docs/` included, is published as it stands.
+- **Fetch it anonymously** (once the package is public):
+
+```sh
+skopeo copy docker://ghcr.io/jens-thomae/atos/c1-base:<sha>-source dir:./source
+cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
+  ghcr.io/jens-thomae/atos/c1-base:<sha>-source
+```
 
 ## Image signing: CI-held test key
 
@@ -249,3 +268,7 @@ GitHub bills each job rounded up to a whole minute.
 With the compositor (card #58), the `build` job takes 15 min 26 s on the hosted runner ([run 42255610424](https://github.com/jens-thomae/Atos/actions/runs/42255610424)): freeing disk 1 min 54 s, `podman build` 13 min 24 s (mostly the Rust build of `atos-comp`). That is about 16 billed minutes for every push to a pull request and every merge to `main` that touches C1 or C2, with no build cache: about 125 such runs a month fill the Free plan's 2,000 minutes. A cache is tracked in [#86](https://github.com/jens-thomae/Atos/issues/86).
 
 ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded. The base pull from quay.io (about 1 GB) happens on every run.
+
+## Developer mode
+
+Design write-up, not built: [developer-mode.md](developer-mode.md) (card #68, every choice *Proposed*).

@@ -1,0 +1,23 @@
+import { AccentName, Palette, Type, Space, Radius, Size, Elevation, Motion } from "../../../ui/tokens.slint";
+
+// Touches one token of every global, so a generated file Slint cannot compile fails the build.
+export component TokensProbe inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    in property <AccentName> accent-name <=> Palette.accent-name;
+    out property <color> window-colour: Palette.window;
+    out property <color> accent-colour: Palette.accent;
+    out property <color> select-colour: Palette.select;
+    out property <length> body-size: Type.body.size;
+    out property <length> space-4: Space.s4;
+    out property <length> window-radius: Radius.window;
+    out property <length> control-height: Size.control;
+    out property <length> shadow-blur: Elevation.elevation-2-far.blur;
+    out property <duration> snappy-response: Motion.snappy.response;
+    background: Palette.window;
+    Rectangle {
+        width: Size.control;
+        height: Size.control;
+        border-radius: Radius.control;
+        background: Palette.accent;
+    }
+}
