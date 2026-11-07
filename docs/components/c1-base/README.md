@@ -141,6 +141,21 @@ Card #76 tested D-014's fallback B2 in the dev VM: Fedora's Microsoft-signed shi
 
 **Public pulls (owner step, once).** A package pushed from a private repository starts private. After the first push to `main`, set the package to public: GitHub → Packages → `atos/c1-base` → Package settings → Change visibility → Public. **This cannot be undone:** a public package cannot be made private again. Then pulls need no account (D-005). The REST API cannot change package visibility.
 
+## Corresponding source (GPL, D-013, #85)
+
+The package `ghcr.io/jens-thomae/atos/c1-base` is public while the repository is private, so every image built on `main` has its source published next to it as `ghcr.io/jens-thomae/atos/c1-base:<sha>-source`, signed with the same cosign key as the image. Order in the job: key guard, build and check the image, build the source image, push the source, push the image, sign both. A failure before the push leaves nothing behind; no image is ever public without its source.
+
+- **Format.** A plain `FROM scratch` image, not an oras artifact: the runner has no oras, and podman, skopeo and cosign handle it like the image. Contents: `atos-<sha>.tar.gz` (`git archive` of the commit), `fedora-packages.txt` (`rpm -qa` NVRs; Fedora's sources are at src.fedoraproject.org and koji) and a `README.md`.
+- **Pointer.** The image carries the label `org.atos.source=<image>:<sha>-source` (set with `--label` on the publish build, so the Containerfile is untouched). The source image carries `org.atos.source-of` and `org.atos.source-of-image-id` (the image's config digest, known before the push; the tag alone is mutable).
+- **Excluded.** `git archive` ships tracked files only: no `.git` history, no untracked files, no CI credentials (the checkout does not persist its token, and signing secrets never touch the tree). The publish job fails, right after checkout and before any build, if `tools/ci/check-no-private-keys.sh` (a content check; test: `tools/ci/test-check-no-private-keys.sh`) finds a private key block in the tree other than the TEST db key (D-014: public). The tree itself, `docs/` included, is published as it stands.
+- **Fetch it anonymously** (once the package is public):
+
+```sh
+skopeo copy docker://ghcr.io/jens-thomae/atos/c1-base:<sha>-source dir:./source
+cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
+  ghcr.io/jens-thomae/atos/c1-base:<sha>-source
+```
+
 ## Image signing: CI-held test key
 
 The image is signed with a **test key** held as repository secrets, in cosign's legacy `.sig` format, without a Rekor upload. It is not the release key; that strategy is card #53.

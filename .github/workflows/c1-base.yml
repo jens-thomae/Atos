@@ -84,17 +84,44 @@ jobs:
         run: |
           [ "$HAS_KEY" = true ] || { echo "::error::COSIGN_PRIVATE_KEY secret missing, see docs/components/c1-base/README.md"; exit 1; }
           [ -f components/c1-base/cosign.pub ] || { echo "::error::components/c1-base/cosign.pub missing"; exit 1; }
+          # Content check, not names; the TEST db key is the only private key allowed (D-014: public).
+          bash tools/ci/check-no-private-keys.sh
 
       # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - run: podman build --pull=missing --build-context repo=. -t c1-base components/c1-base
+      # The label tells users where the corresponding source is (GPL, D-013); the tag is built below.
+      - run: podman build --pull=missing --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source" -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
       - name: UKI and systemd-boot are signed and seal the image (#54)
         run: |
           sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
           components/c1-base/check-seal.sh c1-base
+
+      # Corresponding source (GPL, D-013, #85): the package is public, the repository is not. Built and checked
+      # before anything is pushed, and pushed before the image, so no image is ever public without its source. A FROM-scratch
+      # image under the sibling tag `<sha>-source`: no extra tooling, and podman/skopeo/cosign treat it like the
+      # image (an oras artifact would need a tool the runner lacks). `git archive` ships tracked files only:
+      # no .git, no CI credentials (checkout uses persist-credentials: false), nothing untracked.
+      - name: Build source bundle
+        run: |
+          mkdir src
+          ID=$(podman image inspect --format '{{.Id}}' c1-base)  # config digest, known before the push
+          git archive --prefix="atos-$GITHUB_SHA/" -o "src/atos-$GITHUB_SHA.tar.gz" HEAD
+          podman run --rm c1-base rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > src/fedora-packages.txt
+          [ -s src/fedora-packages.txt ]
+          cat > src/README.md <<EOF
+          # Corresponding source of $IMAGE:$GITHUB_SHA (image ID $ID)
+
+          - atos-$GITHUB_SHA.tar.gz: the Atos repository at commit $GITHUB_SHA (atos-comp, Slint-linked code, image recipe).
+            Rust dependencies are pinned in the Cargo.lock files and come from crates.io and the git revisions named there.
+          - fedora-packages.txt: every Fedora package (NVR) in the image. Their sources are at
+            https://src.fedoraproject.org (git, per package and release) and https://koji.fedoraproject.org (source RPMs).
+          - Licence: D-013, our own source is MIT OR Apache-2.0; binaries carry the licence of what they link (atos-comp and Slint-linked code: GPL-3.0-only).
+          EOF
+          printf 'FROM scratch\nLABEL org.atos.source-of="%s:%s" org.atos.source-of-image-id="sha256:%s"\nCOPY . /\n' "$IMAGE" "$GITHUB_SHA" "$ID" > src/Containerfile
+          podman build -t c1-base-source src
 
       - name: Push
         env:
@@ -105,6 +132,8 @@ jobs:
           printf 'DOCKER_CONFIG=%s\nREGISTRY_AUTH_FILE=%s\n' "$DOCKER_CONFIG" "$REGISTRY_AUTH_FILE" >> "$GITHUB_ENV"
           mkdir -p "$DOCKER_CONFIG"
           echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman push --digestfile source-digest c1-base-source "docker://$IMAGE:$GITHUB_SHA-source"
+          echo "SRC_DIGEST=$(cat source-digest)" >> "$GITHUB_ENV"
           podman push --digestfile digest c1-base "docker://$IMAGE:$GITHUB_SHA"
           echo "DIGEST=$(cat digest)" >> "$GITHUB_ENV"
 
@@ -121,7 +150,7 @@ jobs:
         run: |
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
             --new-bundle-format=false --use-signing-config=false --tlog-upload=false \
-            "$IMAGE@$DIGEST"
+            "$IMAGE@$DIGEST" "$IMAGE@$SRC_DIGEST"
 
       # `latest` moves only after the signature verifies, and points at that exact manifest:
       # a registry-to-registry copy keeps the manifest bytes, so the digest (and signature) match.
@@ -129,6 +158,8 @@ jobs:
         run: |
           cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
             "$IMAGE@$DIGEST" > /dev/null
+          cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-bundle-format=false \
+            "$IMAGE@$SRC_DIGEST" > /dev/null
           skopeo copy "docker://$IMAGE@$DIGEST" "docker://$IMAGE:latest"
           [ "$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:latest")" = "$DIGEST" ]
-          echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed and signed \`$IMAGE@$DIGEST\` (tags \`latest\`, \`$GITHUB_SHA\`); source \`$IMAGE@$SRC_DIGEST\` (tag \`$GITHUB_SHA-source\`)" >> "$GITHUB_STEP_SUMMARY"
