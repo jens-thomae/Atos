@@ -161,7 +161,9 @@ step_install() {
     cred systemd.extra-unit.atos-install-test.service "$INSTALL_UNIT"
     cred systemd.unit-dropin.multi-user.target~atos-install-test $'[Unit]\nWants=atos-install-test.service'
     # The interactive installer on tty1 stays off in the unattended run.
-    cred systemd.unit-dropin.atos-installer.service~test $'[Unit]\nConditionPathExists=/nonexistent')
+    cred systemd.unit-dropin.atos-installer.service~test $'[Unit]\nConditionPathExists=/nonexistent'
+    # Nor the serial getty: it hangs up the serial tty this unit writes to, killing the installer.
+    cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent')
   t0=$(date +%s)
   # shellcheck disable=SC2054
   qemu_run "$OUT/install.log" -nic none \
