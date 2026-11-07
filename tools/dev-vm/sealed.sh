@@ -43,6 +43,8 @@
 #            install   installs trust-1, tracking :latest, which points at trust-1
 #            stage     points :latest at trust-2, boots trust-1, tries `bootc switch` to the
 #                      unsigned, wrongly signed and old images (all refused), then `bootc upgrade`
+#                      stages trust-2; then the guest points :latest at trust-old and tries two
+#                      upgrades and a switch (refused; trust-2 must stay staged)
 #            apply     boots the default entry: trust-2
 #            previous  picks the second boot entry from the menu: trust-1 (older) still boots
 #            `trust <step>` runs one step; `trust` runs all of them in order
@@ -410,6 +412,13 @@ for t in unsigned wrong old; do
   fi
 done
 bootc upgrade && echo "ATOS-TRUST latest staged"
+# A registry that turns bad after the update was staged: :latest now names the old image, which
+# is already in the local repository. Refusals must leave the staged trust-2 alone.
+skopeo copy -q docker://10.0.2.2:5000/atos/c1-base:trust-old docker://10.0.2.2:5000/atos/c1-base:latest || echo "ATOS-TRUST retag failed"
+for t in "upgrade" "upgrade" "switch 10.0.2.2:5000/atos/c1-base:trust-old"; do
+  if out=$(bootc $t 2>&1); then echo "ATOS-TRUST again $t ACCEPTED"; else echo "ATOS-TRUST again $t refused: $(printf "%s" "$out" | tail -n 1)"; fi
+done
+echo "ATOS-TRUST staged entries: $(ls /boot/loader/entries.staged 2>/dev/null | tr "\n" " ")"
 bootc status'
 trust_stage() {
   registry_up
