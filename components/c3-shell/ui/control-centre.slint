@@ -26,6 +26,8 @@ export struct OutputItem {
 export struct PowerAction {
     id: string,
     name: string,
+    // True for actions that lose unsaved work (restart, shut down): the panel asks first.
+    confirm: bool,
 }
 
 component Glyph inherits Path {
@@ -319,6 +321,56 @@ component OutputRow inherits Rectangle {
     }
 }
 
+// Cancel / confirm button of the power confirmation.
+component DialogButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary;
+    in property <bool> autofocus;
+    callback clicked();
+
+    height: Size.control;
+    border-radius: Radius.control;
+    background: root.primary ? (touch.pressed ? Palette.destructive-pressed : touch.has-hover ? Palette.destructive-hover : Palette.destructive) : (touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : Palette.button-secondary);
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        init => {
+            if root.autofocus {
+                self.focus();
+            }
+        }
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Text {
+        accessible-role: none;
+        text: root.label;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: Type.label.size;
+        font-weight: Type.label.weight;
+        color: root.primary ? Palette.destructive-ink : Palette.text;
+    }
+    Rectangle {
+        border-radius: parent.border-radius;
+        border-width: focus.has-focus ? Size.focus-ring-width : 0px;
+        border-color: Palette.accent;
+    }
+}
+
+// The panel sits in the bottom right corner of a window that covers the whole output, so a click
+// anywhere else lands on the window and dismisses it.
 export component ControlCentre inherits Window {
     in property <[Tile]> tiles;
     // The privacy chip's text ("Microphone · Meetings"); the chip is hidden while it is empty.
@@ -331,6 +383,9 @@ export component ControlCentre inherits Window {
     in-out property <float> volume;
     in-out property <bool> outputs-open;
     in-out property <bool> power-open;
+    // The action waiting for confirmation ("" for none) and its name.
+    in-out property <string> confirm;
+    in-out property <string> confirm-name;
 
     callback tile-clicked(string);
     callback open-settings();
@@ -349,26 +404,56 @@ export component ControlCentre inherits Window {
     title: "Control centre";
     background: transparent;
     default-font-family: root.font-family;
-    preferred-width: Size.touch * 8 + Space.s3;
 
     forward-focus: root-focus;
+
+    // The focused Cancel button goes away with the confirmation: keep the keyboard on the panel.
+    changed confirm => {
+        if root.confirm == "" {
+            root-focus.focus();
+        }
+    }
+
+    function choose(a: PowerAction) {
+        if a.confirm {
+            root.confirm = a.id;
+            root.confirm-name = a.name;
+        } else {
+            root.power-action(a.id);
+        }
+    }
 
     root-focus := FocusScope {
         key-pressed(e) => {
             if e.text == Key.Escape {
-                root.dismiss();
+                if root.confirm != "" {
+                    root.confirm = "";
+                } else {
+                    root.dismiss();
+                }
                 return accept;
             }
             reject
         }
 
+        TouchArea {
+            clicked => { root.dismiss(); }
+        }
+
         Rectangle {
+            x: parent.width - self.width - root.edge-gap;
+            y: parent.height - self.height - root.dock-clearance - root.edge-gap;
+            width: Size.touch * 8 + Space.s3;
+            height: content.preferred-height;
             background: Palette.panel;
             border-radius: Radius.overlay;
             border-width: Size.hairline;
             border-color: Palette.panel-line;
 
-            VerticalLayout {
+            // Clicks on the panel's own padding are not outside clicks.
+            TouchArea { }
+
+            content := VerticalLayout {
                 padding: Space.s3;
                 spacing: Space.s3 - Space.s1 / 2;
 
@@ -403,11 +488,39 @@ export component ControlCentre inherits Window {
                         expandable: true;
                         expanded: root.power-open;
                         glyph: "M12 4v8M7.5 6.8a7 7 0 1 0 9 0";
-                        clicked => { root.power-open = !root.power-open; }
+                        clicked => {
+                            root.power-open = !root.power-open;
+                            root.confirm = "";
+                        }
                     }
                 }
 
-                if root.power-open: VerticalLayout {
+                if root.power-open && root.confirm != "": VerticalLayout {
+                    spacing: Space.s2;
+                    Text {
+                        accessible-role: text;
+                        accessible-label: root.confirm-name + " now?";
+                        text: root.confirm-name + " now?";
+                        font-size: Type.label.size;
+                        font-weight: Type.label.weight;
+                        color: Palette.text;
+                    }
+                    HorizontalLayout {
+                        spacing: Space.s2;
+                        DialogButton {
+                            label: "Cancel";
+                            autofocus: true;
+                            clicked => { root.confirm = ""; }
+                        }
+                        DialogButton {
+                            label: root.confirm-name;
+                            primary: true;
+                            clicked => { root.power-action(root.confirm); }
+                        }
+                    }
+                }
+
+                if root.power-open && root.confirm == "": VerticalLayout {
                     spacing: Space.s1 / 2;
                     for a in root.power-actions: Rectangle {
                         height: Size.control + Space.s1;
@@ -415,19 +528,19 @@ export component ControlCentre inherits Window {
                         background: pa-touch.has-hover ? Palette.hover : Palette.group;
                         accessible-role: button;
                         accessible-label: a.name;
-                        accessible-action-default => { root.power-action(a.id); }
+                        accessible-action-default => { root.choose(a); }
                         forward-focus: pa-focus;
                         pa-focus := FocusScope {
                             key-pressed(e) => {
                                 if e.text == Key.Return || e.text == Key.Space {
-                                    root.power-action(a.id);
+                                    root.choose(a);
                                     return accept;
                                 }
                                 reject
                             }
                         }
                         pa-touch := TouchArea {
-                            clicked => { root.power-action(a.id); }
+                            clicked => { root.choose(a); }
                         }
                         Text {
                             accessible-role: none;

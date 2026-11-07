@@ -10,8 +10,8 @@ use atos_shell::{ControlCentre, OutputItem, PowerAction};
 use atos_ui_test::{
     AccessibleRole, accessibility_tree, assert_accessible, assert_screenshot, find_by_label, init,
 };
-use slint::platform::{Key, WindowEvent};
-use slint::{ComponentHandle, LogicalSize, ModelRc, VecModel};
+use slint::platform::{Key, PointerEventButton, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, LogicalSize, ModelRc, VecModel};
 
 mod test_font {
     include!(concat!(env!("OUT_DIR"), "/cc_test_font.rs"));
@@ -25,7 +25,7 @@ fn panel() -> (ControlCentre, Log) {
     let _font = test_font::FontLoader::new().unwrap();
     let ui = ControlCentre::new().unwrap();
     ui.set_font_family("Noto Sans".into());
-    ui.window().set_size(LogicalSize::new(364., 520.));
+    ui.window().set_size(LogicalSize::new(388., 640.));
     let q = Quick {
         wifi: Some(Radio {
             on: true,
@@ -70,14 +70,17 @@ fn panel() -> (ControlCentre, Log) {
         PowerAction {
             id: "suspend".into(),
             name: "Suspend".into(),
+            confirm: false,
         },
         PowerAction {
             id: "reboot".into(),
             name: "Restart".into(),
+            confirm: true,
         },
         PowerAction {
             id: "poweroff".into(),
             name: "Shut down".into(),
+            confirm: true,
         },
     ])));
     let log: Log = Rc::default();
@@ -103,14 +106,20 @@ fn renders_the_agreed_contents() {
 }
 
 #[test]
-fn renders_with_the_power_menu_and_dark_mode() {
+fn renders_the_power_confirmation_in_dark_mode() {
     let (ui, _) = panel();
     ui.global::<atos_shell::Palette>().set_dark(true);
     ui.set_privacy("".into());
     ui.set_outputs_open(false);
     ui.set_power_open(true);
-    ui.window().set_size(LogicalSize::new(364., 400.));
-    assert_screenshot(&ui, env!("CARGO_MANIFEST_DIR"), "control-centre-dark-power");
+    ui.set_confirm("poweroff".into());
+    ui.set_confirm_name("Shut down".into());
+    ui.window().set_size(LogicalSize::new(388., 580.));
+    assert_screenshot(
+        &ui,
+        env!("CARGO_MANIFEST_DIR"),
+        "control-centre-dark-confirm",
+    );
 }
 
 #[test]
@@ -179,20 +188,97 @@ fn accessible_actions_report_to_the_shell() {
     assert!((ui.get_volume() - 0.3).abs() < 1e-6);
 }
 
+fn click(ui: &ControlCentre, x: f32, y: f32) {
+    let w = ui.window();
+    let position = LogicalPosition::new(x, y);
+    w.dispatch_event(WindowEvent::PointerMoved { position });
+    w.dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    w.dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
+}
+
 #[test]
-fn power_options_open_a_menu_of_three_actions() {
+fn suspend_acts_at_once_restart_and_shut_down_ask_first() {
     let (ui, log) = panel();
     assert!(find_by_label(&ui, "Shut down").is_none());
     find_by_label(&ui, "Power options")
         .unwrap()
         .invoke_accessible_default_action();
     assert!(ui.get_power_open());
-    assert_accessible(&ui, AccessibleRole::Button, "Suspend");
     assert_accessible(&ui, AccessibleRole::Button, "Restart");
+    find_by_label(&ui, "Suspend")
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert_eq!(*log.borrow(), ["power suspend"]);
+
+    // Shut down: a confirmation first, nothing happens until it is confirmed.
+    log.borrow_mut().clear();
     find_by_label(&ui, "Shut down")
         .unwrap()
         .invoke_accessible_default_action();
-    assert_eq!(*log.borrow(), ["power poweroff"]);
+    assert!(log.borrow().is_empty());
+    assert_accessible(&ui, AccessibleRole::Text, "Shut down now?");
+    assert!(find_by_label(&ui, "Suspend").is_none());
+    // Cancel goes back to the menu.
+    find_by_label(&ui, "Cancel")
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert!(log.borrow().is_empty());
+    assert_accessible(&ui, AccessibleRole::Button, "Suspend");
+    // Confirming acts.
+    find_by_label(&ui, "Restart")
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert!(log.borrow().is_empty());
+    assert_accessible(&ui, AccessibleRole::Text, "Restart now?");
+    find_by_label(&ui, "Restart")
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert_eq!(*log.borrow(), ["power reboot"]);
+}
+
+#[test]
+fn escape_cancels_a_confirmation_before_it_closes_the_panel() {
+    let (ui, log) = panel();
+    ui.show().unwrap();
+    ui.set_power_open(true);
+    find_by_label(&ui, "Shut down")
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert_eq!(ui.get_confirm(), "poweroff");
+    let w = ui.window();
+    let press = |k: Key| {
+        let t: slint::SharedString = k.into();
+        w.dispatch_event(WindowEvent::KeyPressed { text: t.clone() });
+        w.dispatch_event(WindowEvent::KeyReleased { text: t });
+    };
+    press(Key::Escape);
+    assert_eq!(ui.get_confirm(), "");
+    assert!(log.borrow().is_empty());
+    press(Key::Escape);
+    assert_eq!(*log.borrow(), ["dismiss"]);
+}
+
+#[test]
+fn a_click_outside_the_panel_closes_it_a_click_on_it_does_not() {
+    let (ui, log) = panel();
+    ui.show().unwrap();
+    // Top left of the output: nothing of the panel is there.
+    click(&ui, 5., 5.);
+    assert_eq!(*log.borrow(), ["dismiss"]);
+    log.borrow_mut().clear();
+    // Inside the panel's border at its bottom right corner (right gap 12, above the dock 76 + 12).
+    click(&ui, 388. - 12. - 3., 640. - 88. - 3.);
+    // On a tile.
+    let t = find_by_label(&ui, "Dark mode, Off").unwrap();
+    let (pos, size) = (t.absolute_position(), t.size());
+    click(&ui, pos.x + size.width / 2., pos.y + size.height / 2.);
+    assert_eq!(*log.borrow(), ["tile dark"]);
 }
 
 #[test]

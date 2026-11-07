@@ -126,14 +126,17 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
         PowerAction {
             id: "suspend".into(),
             name: "Suspend".into(),
+            confirm: false,
         },
         PowerAction {
             id: "reboot".into(),
             name: "Restart".into(),
+            confirm: true,
         },
         PowerAction {
             id: "poweroff".into(),
             name: "Shut down".into(),
+            confirm: true,
         },
     ])));
     ui.global::<Palette>()
@@ -146,12 +149,10 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
     });
     sync();
 
-    // Above the dock's right end: the dock's height and gap, plus the panel's own gap.
-    let gap = ui.get_edge_gap() as i32;
-    let dock = ui.get_dock_clearance() as i32;
+    // The window covers the output; the panel sits above the dock's right end inside it.
     let placement = platform::Placement {
-        anchor: Anchor::BOTTOM | Anchor::RIGHT,
-        margin: [0, gap, dock + gap, 0],
+        anchor: Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+        margin: [0; 4],
         overlay: true,
     };
     platform::with_placement(placement, || ui.show())?;

@@ -30,7 +30,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 
 ## Control centre behaviour (#65)
 
-Contents agreed with the owner on the card. Opened by the dock's rightmost button (accessible name "Control centre"); the same button, Escape, Settings or a power action close it. It is an overlay-layer surface at the bottom right, above the dock, taking the keyboard while open.
+Contents agreed with the owner on the card. Opened by the dock's rightmost button (accessible name "Control centre"); Escape, a click anywhere outside the panel (the same button when pressed through AT-SPI too), Settings or a power action close it. The window is an overlay-layer surface covering the output, with the panel in its bottom right corner above the dock; that is how an outside click is seen. It takes the keyboard while open.
 
 | Item | Source |
 | --- | --- |
@@ -43,7 +43,7 @@ Contents agreed with the owner on the card. Opened by the dock's rightmost butto
 | Volume, sound outputs | PipeWire native protocol (`pipewire` crate): the default sink's `channelVolumes` on the perceptual (cube-root) scale and `default.configured.audio.sink` in the `default` metadata |
 | Privacy chip | `control::PrivacySource` (one method, the chip text or `None`); no implementation exists, so the chip is hidden until a source is handed to the control centre |
 | Settings button | Runs the `Exec=` of `org.atos.Settings.desktop`; nothing if it is not installed |
-| Power options | logind `Suspend`, `Reboot`, `PowerOff` (interactive, so polkit may ask) |
+| Power options | logind `Suspend`, `Reboot`, `PowerOff` (interactive, so polkit may ask). Suspend acts at once; Restart and Shut down first show "<action> now?" with Cancel (focused) and the action; Escape cancels the question |
 
 `CONTROL_CENTRE_OPEN_MS` in the shell's output is the time from the open request to the first frame shown; `e2e/` opens the panel five times and `check.sh` fails above `SHELL_OPEN_MS` (100 ms on the NUC, §7).
 
