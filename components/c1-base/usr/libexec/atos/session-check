@@ -1,0 +1,13 @@
+#!/bin/sh
+# Boot health check (#56): a boot is good once the desktop session runs. Passes when atos-comp runs
+# as `atos`, has its Wayland socket and is still running 10 s later; fails as soon as greetd fell
+# back to its text login (the session ended). The unit's TimeoutStartSec= bounds the wait.
+uid=$(id -u atos) || exit 1
+while :; do
+  if pgrep -u atos -x atos-comp >/dev/null && ls /run/user/"$uid"/wayland-[0-9] >/dev/null 2>&1; then
+    sleep 10
+    pgrep -u atos -x atos-comp >/dev/null && { echo "session up: boot is good"; exit 0; }
+  fi
+  pgrep -x agreety >/dev/null && { echo "session ended: boot is bad"; exit 1; }
+  sleep 1
+done

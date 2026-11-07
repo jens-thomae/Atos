@@ -21,6 +21,8 @@ sudo apt-get install -y --no-install-recommends curl ca-certificates libicu74 li
 | `curl`, `ca-certificates` | Download the runner over HTTPS (step 3) |
 | `libicu74`, `libkrb5-3`, `liblttng-ust1t64`, `libssl3t64`, `zlib1g` | Libraries the runner (.NET) needs. The same list the runner's own `bin/installdependencies.sh` installs on Ubuntu 24.04, so that script never has to run as root |
 
+The C3 shell (`c3-shell.yml`, #65) also links PipeWire, so the runner needs its runtime library too: `sudo apt-get install -y --no-install-recommends libpipewire-0.3-0t64`. The job's check step fails without it (the shell does not start).
+
 Binaries are built on GitHub-hosted runners, and the budget harness is a Rust program that needs only glibc and `/proc`. The measurements run inside a compositor on the GPU, which needs the packages in step 7 and the GPU access in [GPU access](#gpu-access-permanent-option-a).
 
 ## 2. Create the runner user

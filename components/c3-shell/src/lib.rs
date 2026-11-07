@@ -3,6 +3,8 @@
 //! accessibility tests (`tests/`) can use them. The Wayland side is in the binary (`main.rs`).
 
 pub mod apps;
+pub mod config;
+pub mod control;
 pub mod icons;
 
 slint::include_modules!();

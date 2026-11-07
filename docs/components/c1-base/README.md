@@ -18,6 +18,7 @@ The digest changes only through a reviewed change to the `FROM` line. CI builds 
 The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstream's recipe, [bootc-sealed-images(7)](https://bootc.dev/bootc/building/bootc-sealed-images.7.html), in stages:
 
 0. **`comp`** (not shipped): builds `atos-comp` (C2) from `components/c2-compositor/` on the same Fedora base with the pinned toolchain (`rust-toolchain.toml`, rustup-init pinned by version). Only the stripped binary is copied into `base`; the toolchain and `target/` are deleted in the same step, because they do not fit the runner's disk as a layer.
+0. **`bootc`** (not shipped): builds `bootc` from the upstream tag in `third_party/bootc/UPSTREAM` with our boot-counting patch, and runs the patch's unit test. Only the stripped binary goes into `base`, where it replaces `/usr/bin/bootc`. See [boot-counting.md](boot-counting.md).
 1. **`base`**
    - `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
    - Installs `systemd-boot-unsigned` and removes `bootupd`, `shim-*` and `grub2-efi-*`. Sealed images boot systemd-boot signed with our key, not Fedora's shim and GRUB (D-014). Without bootupd, `bootc install` picks systemd-boot.
@@ -25,6 +26,7 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
    - [`usr/lib/bootc/kargs.d/10-atos-rw.toml`](../../../components/c1-base/usr/lib/bootc/kargs.d/10-atos-rw.toml): `rw`, as bootc's own sealed test images use. composefs keeps `/usr` read-only.
    - The test keys' `PK.auth`, `KEK.auth` and `db.auth` in `/usr/lib/bootc/install/secureboot-keys/auto/`. `bootc install` copies them to the ESP as `loader/keys/auto/`.
    - The session (below): `greetd`, Xwayland, Mesa, `xterm`, `session/` (greetd config, `atos` user) and `atos-comp` copied from the `comp` stage.
+   - Boot counting (#56): the patched `bootc`, the health check `atos-session-check.service` (enabled), a timeout drop-in for `boot-complete.target`, one SELinux rule for `systemd-bless-boot`, the karg `panic=10` (`kargs.d/20-atos-panic.toml`), and emergency drop-ins that reboot on a counted boot. The initramfs is rebuilt with dracut so that it carries those drop-ins ([boot-counting.md](boot-counting.md)).
    - Label `org.opencontainers.image.title=Atos base`.
 2. **`tools`** (not shipped): `systemd-ukify` and `sbsigntools`, plus the test db key.
 3. **`sdboot`**: signs `systemd-boot*.efi` as `*.efi.signed`. `bootctl install` prefers the `.signed` file.
@@ -166,6 +168,10 @@ Notes:
 - **Booting the previous entry from the menu does not change the default.** The next plain boot starts dev-2 again. While booted from the menu, `bootc status` reports `bootOrder: rollback` and `rollbackQueued: true`, although no rollback was asked for.
 - **Firmware boot order.** After the first boots, AAVMF tries its built-in EFI Shell before the disk. Secure Boot refuses the shell (*Security Violation*) and the firmware moves on to the disk. `sealed.sh` ignores that line.
 - **Logs:** `tools/dev-vm/out/sealed/update-{stage,apply,previous,rollback,back}.log`.
+
+## Automatic rollback (boot counting)
+
+Card #56. A staged update boots with a systemd-boot counter (`+3`). If the desktop session doesn't come up, the boot is retried; after three failures the previous image boots, with no user action. This covers a kernel panic and an initrd that enters emergency mode, which reboot on a counted boot. It does not cover a kernel that hangs without panicking (see Limits in boot-counting.md). On a boot without a counter, emergency mode stays as it is, so the tamper cases above still stop at the emergency shell. Patch, health check, VM demo (`sealed.sh counting`), patch size and rebase routine: [boot-counting.md](boot-counting.md).
 
 ## Fallback B2: Fedora shim + MOK (spike)
 

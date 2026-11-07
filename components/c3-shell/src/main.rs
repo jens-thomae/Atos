@@ -4,15 +4,19 @@
 //! `atos-shell --launcher` opens or closes the launcher of the running shell.
 
 mod accesskit;
+mod audio;
+mod control_centre;
 mod launcher;
 mod platform;
+mod portal;
+mod services;
 mod toplevels;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use atos_shell::{Dock, DockItem, dock_item};
+use atos_shell::{Dock, DockItem, Palette, dock_item};
 use sctk::reexports::client::Proxy;
 use sctk::shell::wlr_layer::Anchor;
 use slint::{ComponentHandle, Model, VecModel};
@@ -60,6 +64,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(why.unwrap_or_else(|| "no output".into()));
     }
     launcher::init();
+    {
+        let docks = docks.clone();
+        control_centre::init(move |dark| {
+            for dock in docks.borrow().values() {
+                dock.global::<Palette>().set_dark(dark);
+            }
+        });
+    }
     slint::run_event_loop_until_quit()?;
     Ok(())
 }
@@ -72,6 +84,7 @@ fn new_dock(
     dock.set_items(items.clone().into());
     dock.on_activate(|id| toplevels::activate(id as u32));
     dock.on_open_launcher(launcher::toggle);
+    dock.on_open_control_centre(control_centre::toggle);
     // Bottom of the output, floating: the gap to the screen edges comes from the tokens.
     let gap = dock.get_edge_gap() as i32;
     let placement = platform::Placement {
