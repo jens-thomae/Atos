@@ -26,3 +26,4 @@ podman run --rm -v "$d:/w" "$1" sh -euc '
   grep -qa "composefs.digest=v1-sha512-12:$id " /boot/EFI/Linux/*.efi \
     || { echo "UKI does not seal this image (composefs digest $id)" >&2; exit 1; }
   echo "UKI seals composefs image $id"'
+# measurement
