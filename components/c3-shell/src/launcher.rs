@@ -30,6 +30,8 @@ struct State {
     icons: HashMap<String, slint::Image>,
     ui: Option<Launcher>,
     shown: bool,
+    started: bool,
+    warm: bool,
     /// What the launcher lists, in its order.
     results: Vec<App>,
     opened_at: Option<Instant>,
@@ -51,16 +53,26 @@ pub fn init() {
         }
         Err(e) => eprintln!("launcher: {e}"),
     }
-    rescan();
     platform::on_frame_done(|w| {
         let opened = STATE.with(|s| {
             let mut s = s.borrow_mut();
+            // After the shell's first frame, so start-up (§7 cold start) does not wait for it:
+            // read the apps, then render the hidden launcher once (`warm_up`).
+            if !std::mem::replace(&mut s.started, true) {
+                rescan();
+            }
             let mine = s.ui.as_ref().is_some_and(|l| std::ptr::eq(l.window(), w));
             if mine { s.opened_at.take() } else { None }
         });
         // The first frame after opening is on screen: §7 "popover fully visible".
+        // `_SHOWN_NS` is wall-clock time, so the e2e can time from before it runs
+        // `atos-shell --launcher` (the shortcut's path, process start included).
         if let Some(t) = opened {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
             println!("LAUNCHER_OPEN_MS {:.1}", t.elapsed().as_secs_f64() * 1000.);
+            println!("LAUNCHER_SHOWN_NS {}", now.as_nanos());
             std::io::stdout().flush().ok();
         }
     });
@@ -162,14 +174,21 @@ fn rescan() {
     std::thread::spawn(|| {
         let found = apps::installed();
         slint::invoke_from_event_loop(move || {
-            let query = STATE.with(|s| {
+            let (query, warm) = STATE.with(|s| {
                 let mut s = s.borrow_mut();
                 let changed = s.apps != found;
                 s.apps = found;
-                changed.then(|| s.ui.as_ref().map(|u| u.get_query()).unwrap_or_default())
+                let query =
+                    changed.then(|| s.ui.as_ref().map(|u| u.get_query()).unwrap_or_default());
+                (query, std::mem::replace(&mut s.warm, true))
             });
             if let Some(q) = query {
                 search(&q);
+            }
+            if let (false, Some(ui)) = (warm, ui()) {
+                // Any output at least this high shows the same panel, so the cached shadows,
+                // glyphs and icons are the ones the first opening draws.
+                platform::warm_up(ui.window(), slint::LogicalSize::new(1920., 1080.));
             }
         })
         .ok();

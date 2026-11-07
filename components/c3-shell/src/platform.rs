@@ -24,10 +24,12 @@ use glutin::api::egl::config::Config;
 use glutin::api::egl::context::PossiblyCurrentContext;
 use glutin::api::egl::display::Display;
 use glutin::api::egl::surface::Surface;
-use glutin::config::ConfigTemplateBuilder;
+use glutin::config::{ConfigSurfaceTypes, ConfigTemplateBuilder};
 use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentGlContext};
 use glutin::display::GlDisplay;
-use glutin::surface::{GlSurface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
+use glutin::surface::{
+    GlSurface, PbufferSurface, SurfaceAttributesBuilder, SwapInterval, WindowSurface,
+};
 use i_slint_core::window::WindowAdapterInternal;
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
@@ -195,11 +197,24 @@ impl WaylandPlatform {
                 NonNull::new(conn.backend().display_ptr() as *mut c_void).ok_or("no wl_display")?;
             Display::new(RawDisplayHandle::Wayland(WaylandDisplayHandle::new(ptr)))?
         };
+        // With pbuffers if the driver has such a config (`warm_up`), else windows only.
+        let template = |types| {
+            ConfigTemplateBuilder::new()
+                .with_alpha_size(8)
+                .with_surface_type(types)
+                .build()
+        };
         // SAFETY: no window handle is needed to pick a config.
-        let egl_config =
-            unsafe { egl.find_configs(ConfigTemplateBuilder::new().with_alpha_size(8).build())? }
-                .next()
-                .ok_or("no EGL config")?;
+        let egl_config = unsafe {
+            egl.find_configs(template(
+                ConfigSurfaceTypes::WINDOW | ConfigSurfaceTypes::PBUFFER,
+            ))?
+            .next()
+            .or(egl
+                .find_configs(template(ConfigSurfaceTypes::WINDOW))?
+                .next())
+        }
+        .ok_or("no EGL config")?;
 
         let (tx, rx) = channel::channel::<Task>();
         let mut state = State::new(&global_list, &qh);
@@ -376,6 +391,50 @@ unsafe impl OpenGLInterface for GlRef {
     }
     fn get_proc_address(&self, name: &std::ffi::CStr) -> *const c_void {
         globals().egl.get_proc_address(name)
+    }
+}
+
+/// Renders a window that is not shown once at `size`, so its first real frame finds the
+/// renderer's caches warm: glyph atlas, image textures, the blurred shadow textures, shader
+/// programs and the driver's draw-time shader variants (#64: the launcher's cold opening). It
+/// draws into a throw-away EGL pbuffer of that size. Without a pbuffer config it renders
+/// surfaceless: draws to the default framebuffer are dropped, the offscreen work stays cached.
+pub fn warm_up(window: &slint::Window, size: LogicalSize) {
+    let Some(w) = windows()
+        .into_iter()
+        .find(|w| std::ptr::eq(&w.window, window))
+    else {
+        return;
+    };
+    if w.configured.get() {
+        return;
+    }
+    w.size.set(size.to_physical(1.0));
+    w.window
+        .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+    w.window.dispatch_event(WindowEvent::Resized { size });
+    let g = globals();
+    let px = size.to_physical(1.0);
+    let attrs = SurfaceAttributesBuilder::<PbufferSurface>::new().build(
+        NonZeroU32::new(px.width).unwrap_or(NonZeroU32::MIN),
+        NonZeroU32::new(px.height).unwrap_or(NonZeroU32::MIN),
+    );
+    // SAFETY: a pbuffer needs no native window; it is dropped below, after the context has
+    // been made surfaceless again.
+    let pbuffer = unsafe { g.egl.create_pbuffer_surface(&g.egl_config, &attrs) };
+    let how = match pbuffer.and_then(|p| w.gl.ctx.make_current(&p).map(|()| p)) {
+        Ok(pbuffer) => {
+            let r = w.renderer.render();
+            w.gl.ctx.make_current_surfaceless().ok();
+            drop(pbuffer);
+            r.map(|()| "pbuffer")
+        }
+        Err(_) => w.renderer.render().map(|()| "surfaceless"),
+    };
+    // Which warm-up ran, for the e2e results.
+    match how {
+        Ok(how) => eprintln!("ATOS_SHELL_WARM_UP: {how}"),
+        Err(e) => eprintln!("ATOS_SHELL_WARM_UP: failed: {e}"),
     }
 }
 

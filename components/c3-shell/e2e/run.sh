@@ -31,14 +31,20 @@ if [ "${1:-}" = inner ]; then
   python3 -I "$HERE/atspi.py" press "Flower, running" >"$OUT/press.txt" 2>&1 || true
   sleep 1.5
   python3 -I "$HERE/atspi.py" dump "$OUT/atspi-2.txt" || true
-  # Launcher: five openings, each timed by the shell (LAUNCHER_OPEN_MS, trigger to frame shown).
+  # Launcher: five openings, the first one cold. Each is timed from just before the command
+  # starts (the shortcut's path: process start, socket, opening) to the frame callback of the
+  # launcher's first frame, which the shell logs as LAUNCHER_SHOWN_NS (wall clock, like `date`).
+  # The shell's own share (request received to frame shown) is LAUNCHER_OPEN_MS.
   for i in 1 2 3 4 5; do
+    date +%s%N >>"$OUT/launcher-start-ns.txt"
     "$SHELL_BIN" --launcher; sleep 1
     [ $i = 1 ] && { python3 -I "$HERE/atspi.py" dump "$OUT/atspi-launcher.txt" || true
                     WAYLAND_DISPLAY=$HOST_WAYLAND_DISPLAY grim "$OUT/2-launcher.png" 2>/dev/null || true; }
     "$SHELL_BIN" --launcher; sleep 0.5
   done
-  grep '^LAUNCHER_OPEN_MS' "$OUT/shell.log" | cut -d' ' -f2 >"$OUT/launcher-open-ms.txt" || true
+  grep '^LAUNCHER_OPEN_MS' "$OUT/shell.log" | cut -d' ' -f2 >"$OUT/launcher-shell-ms.txt" || true
+  grep '^LAUNCHER_SHOWN_NS' "$OUT/shell.log" | cut -d' ' -f2 \
+    | paste "$OUT/launcher-start-ns.txt" - | awk 'NF == 2 { printf "%.1f\n", ($2 - $1) / 1e6 }' >"$OUT/launcher-open-ms.txt" || true
   # Start the fixture app (weston-simple-shm) from the launcher through AT-SPI.
   if command -v weston-simple-shm >/dev/null; then
     "$SHELL_BIN" --launcher; sleep 1
@@ -91,5 +97,6 @@ busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status ScreenRead
 HOST_WAYLAND_DISPLAY=$WAYLAND_DISPLAY timeout 900 "$COMP" --no-xwayland "$0" inner "$SHELL_BIN" "$BUDGETS" "$OUT" >"$OUT/atos-comp.log" 2>&1 || true
 grep -h '^ATOS_SHELL_GL_RENDERER' "$OUT/shell.err" | sed 's/^ATOS_SHELL_GL_RENDERER: /shell renderer: /' >>"$OUT/environment.txt" \
   || echo "shell renderer: none" >>"$OUT/environment.txt"
+grep -h '^ATOS_SHELL_WARM_UP' "$OUT/shell.err" | head -1 | sed 's/^ATOS_SHELL_WARM_UP: /launcher warm-up: /' >>"$OUT/environment.txt" || true
 cat "$OUT/environment.txt"
 [ -f "$OUT/inner-done" ] || { echo "::error::inner run did not finish: $(cat "$OUT/inner-error" 2>/dev/null)"; tail -30 "$OUT/atos-comp.log"; exit 1; }

@@ -3,7 +3,8 @@
 # Acceptance checks of #63 and #64 on one run.sh result dir. Usage: check.sh <out dir>
 #   SHELL_RSS_MB      the shell's share of idle memory (D-006: 300 MB)
 #   SHELL_CHECK_TREE  0 skips the checks that need client windows (weston's demo clients)
-#   SHELL_OPEN_MS     if set, every launcher opening must be at most this (§7 popover: 100 ms)
+#   SHELL_OPEN_MS     if set, every launcher opening, the cold first one included, must be at most
+#                     this (§7 popover: 100 ms), timed from the start of `atos-shell --launcher`
 set -euo pipefail
 R=$1
 fail() { echo "::error::$1"; exit 1; }
@@ -22,9 +23,10 @@ fi
 grep -q "'Search apps'" "$R/atspi-launcher.txt" || fail "launcher search field not on the bus (atspi-launcher.txt)"
 grep -q "push button 'Smoke Test'" "$R/atspi-launcher.txt" || fail "launcher does not list the fixture app (atspi-launcher.txt)"
 grep -q "push button 'Open launcher'" "$R/atspi-launcher.txt" || fail "dock has no launcher button (atspi-launcher.txt)"
-# Opening times, trigger to first frame shown.
+# Opening times: command start to first frame shown, and the shell's own share.
 [ "$(wc -l <"$R/launcher-open-ms.txt")" -eq 5 ] || fail "expected 5 launcher openings, got $(wc -l <"$R/launcher-open-ms.txt") (shell.log)"
-echo "launcher opening (ms, five times): $(paste -sd' ' "$R/launcher-open-ms.txt")"
+echo "launcher opening, command start to frame shown (ms; first is cold): $(paste -sd' ' "$R/launcher-open-ms.txt")"
+echo "of which in the shell, request to frame shown (ms): $(paste -sd' ' "$R/launcher-shell-ms.txt")"
 if [ -n "${SHELL_OPEN_MS:-}" ]; then
   max=$(sort -n "$R/launcher-open-ms.txt" | tail -1)
   python3 -c "import sys; sys.exit(0 if $max <= $SHELL_OPEN_MS else 1)" || fail "launcher opened in $max ms, over $SHELL_OPEN_MS ms"
