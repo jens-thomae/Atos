@@ -10,6 +10,7 @@ on:
       - tools/slint-fork/**
       - spikes/d006-slint/**
       - components/c4-toolkit/test-harness/**
+      - components/c4-toolkit/ui/**
       - .github/workflows/slint-fork.yml
   push:
     branches: [main]
@@ -18,6 +19,7 @@ on:
       - tools/slint-fork/**
       - spikes/d006-slint/**
       - components/c4-toolkit/test-harness/**
+      - components/c4-toolkit/ui/**
       - .github/workflows/slint-fork.yml
   workflow_dispatch:
     inputs:

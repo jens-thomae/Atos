@@ -7,6 +7,9 @@ check true  'docs/a.md\nREADME.md\nLICENSE-MIT\n'
 check false 'docs/a.md\ncomponents/x/src/lib.rs\n'
 check false '.github/workflows/ci.yml\n'
 check false 'tools/ci/x.sh\n'
+# The design tokens feed generated code, so a tokens-only change must run the build.
+check false 'docs/design/tokens.json\n'
+check true  'docs/design/README.md\n'
 # Rename src/a.rs -> docs/a.md: with --no-renames git lists both paths, so the old one counts as code.
 check false 'docs/a.md\nsrc/a.rs\n'
 # End-to-end: a real git rename must be caught by the diff flags ci.yml uses.
