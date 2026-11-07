@@ -134,7 +134,9 @@ jobs:
             libseat1 libinput10 libdisplay-info1 libgbm1
       - name: Run
         run: bundle/run.sh bundle/atos-shell bundle/atos-comp bundle/budgets results
+      # `shell: bash` adds pipefail: check.sh's exit code, not tee's, decides the step.
       - name: Check the dock's tree, activation and idle RSS
+        shell: bash
         run: |
           bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"
           { echo; echo '#### AT-SPI tree after pressing Flower'; echo '```'; cat results/atspi-2.txt; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
@@ -177,8 +179,12 @@ jobs:
           SHELL_RENDERER: gles2
           SHELL_CPU_WINDOW: full
         run: bundle/run.sh bundle/atos-shell bundle/atos-comp bundle/budgets results
-      # Without weston's demo clients (not in step 7) the dock is empty: only memory is checked.
+      # Without weston's demo clients (not in step 7) the dock is empty: only memory and the
+      # launcher are checked. §7: a popover is fully visible within 100 ms.
       - name: Check
+        shell: bash
+        env:
+          SHELL_OPEN_MS: 100
         run: |
           if command -v weston-flower >/dev/null; then
             bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"
@@ -189,7 +195,7 @@ jobs:
       # Same rule as perf.yml: a software renderer is not a GPU measurement.
       - name: Check the renderer is the GPU
         run: |
-          grep -E '^(egl|shell renderer):' results/environment.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -E '^(egl|shell renderer|launcher warm-up):' results/environment.txt | tee -a "$GITHUB_STEP_SUMMARY"
           for k in 'egl' 'shell renderer'; do
             grep -q "^$k: " results/environment.txt && ! grep -Eiq "^$k:.*(llvmpipe|softpipe|none)" results/environment.txt \
               || { echo "::error::$k is not the GPU renderer"; exit 1; }

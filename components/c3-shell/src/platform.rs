@@ -24,10 +24,12 @@ use glutin::api::egl::config::Config;
 use glutin::api::egl::context::PossiblyCurrentContext;
 use glutin::api::egl::display::Display;
 use glutin::api::egl::surface::Surface;
-use glutin::config::ConfigTemplateBuilder;
+use glutin::config::{ConfigSurfaceTypes, ConfigTemplateBuilder};
 use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentGlContext};
 use glutin::display::GlDisplay;
-use glutin::surface::{GlSurface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
+use glutin::surface::{
+    GlSurface, PbufferSurface, SurfaceAttributesBuilder, SwapInterval, WindowSurface,
+};
 use i_slint_core::window::WindowAdapterInternal;
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
@@ -61,6 +63,7 @@ use crate::toplevels;
 type Task = Box<dyn FnOnce() + Send>;
 type WindowTask = Box<dyn FnOnce(&Rc<LayerWindow>) + Send>;
 type OutputHook = Box<dyn FnMut(&wl_output::WlOutput, bool)>;
+type FrameHook = Box<dyn Fn(&slint::Window)>;
 
 /// How a layer surface sits on its output: the edges it is anchored to and its margin
 /// (top, right, bottom, left) in logical pixels. The exclusive zone is its height.
@@ -68,6 +71,9 @@ type OutputHook = Box<dyn FnMut(&wl_output::WlOutput, bool)>;
 pub struct Placement {
     pub anchor: Anchor,
     pub margin: [i32; 4],
+    /// The launcher (#64): overlay layer above everything, the keyboard while shown, no exclusive
+    /// zone and drawn over other surfaces' zones.
+    pub overlay: bool,
 }
 
 /// Wayland objects every window needs. Shared, read-only after start-up.
@@ -92,6 +98,13 @@ thread_local! {
     static NEXT_PLACEMENT: Cell<Option<Placement>> = const { Cell::new(None) };
     static OUTPUTS: RefCell<Vec<wl_output::WlOutput>> = const { RefCell::new(Vec::new()) };
     static OUTPUT_HOOK: RefCell<Option<OutputHook>> = const { RefCell::new(None) };
+    static FRAME_HOOK: RefCell<Option<FrameHook>> = const { RefCell::new(None) };
+}
+
+/// Calls `hook` with the window whenever the compositor reports a frame of it as shown
+/// (wl_surface frame callback). The launcher times its opening with it.
+pub fn on_frame_done(hook: impl Fn(&slint::Window) + 'static) {
+    FRAME_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
 }
 
 fn globals() -> Rc<Globals> {
@@ -107,7 +120,7 @@ fn windows() -> Vec<Rc<LayerWindow>> {
 }
 
 fn window_for_surface(s: &wl_surface::WlSurface) -> Option<Rc<LayerWindow>> {
-    windows().into_iter().find(|w| &w.surface == s)
+    windows().into_iter().find(|w| &*w.surface.borrow() == s)
 }
 
 fn window_by_id(id: u32) -> Option<Rc<LayerWindow>> {
@@ -119,7 +132,8 @@ pub fn seat() -> Option<wl_seat::WlSeat> {
     SEAT.with(|s| s.borrow().clone())
 }
 
-/// Windows created inside `f` become layer surfaces on `output`.
+/// Windows created inside `f` become layer surfaces on `output`. Windows created outside it go on
+/// the output the compositor picks (the focused one).
 pub fn with_output<R>(output: &wl_output::WlOutput, f: impl FnOnce() -> R) -> R {
     NEXT_OUTPUT.with(|n| *n.borrow_mut() = Some(output.clone()));
     let r = f();
@@ -183,11 +197,24 @@ impl WaylandPlatform {
                 NonNull::new(conn.backend().display_ptr() as *mut c_void).ok_or("no wl_display")?;
             Display::new(RawDisplayHandle::Wayland(WaylandDisplayHandle::new(ptr)))?
         };
+        // With pbuffers if the driver has such a config (`warm_up`), else windows only.
+        let template = |types| {
+            ConfigTemplateBuilder::new()
+                .with_alpha_size(8)
+                .with_surface_type(types)
+                .build()
+        };
         // SAFETY: no window handle is needed to pick a config.
-        let egl_config =
-            unsafe { egl.find_configs(ConfigTemplateBuilder::new().with_alpha_size(8).build())? }
-                .next()
-                .ok_or("no EGL config")?;
+        let egl_config = unsafe {
+            egl.find_configs(template(
+                ConfigSurfaceTypes::WINDOW | ConfigSurfaceTypes::PBUFFER,
+            ))?
+            .next()
+            .or(egl
+                .find_configs(template(ConfigSurfaceTypes::WINDOW))?
+                .next())
+        }
+        .ok_or("no EGL config")?;
 
         let (tx, rx) = channel::channel::<Task>();
         let mut state = State::new(&global_list, &qh);
@@ -367,6 +394,50 @@ unsafe impl OpenGLInterface for GlRef {
     }
 }
 
+/// Renders a window that is not shown once at `size`, so its first real frame finds the
+/// renderer's caches warm: glyph atlas, image textures, the blurred shadow textures, shader
+/// programs and the driver's draw-time shader variants (#64: the launcher's cold opening). It
+/// draws into a throw-away EGL pbuffer of that size. Without a pbuffer config it renders
+/// surfaceless: draws to the default framebuffer are dropped, the offscreen work stays cached.
+pub fn warm_up(window: &slint::Window, size: LogicalSize) {
+    let Some(w) = windows()
+        .into_iter()
+        .find(|w| std::ptr::eq(&w.window, window))
+    else {
+        return;
+    };
+    if w.configured.get() {
+        return;
+    }
+    w.size.set(size.to_physical(1.0));
+    w.window
+        .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+    w.window.dispatch_event(WindowEvent::Resized { size });
+    let g = globals();
+    let px = size.to_physical(1.0);
+    let attrs = SurfaceAttributesBuilder::<PbufferSurface>::new().build(
+        NonZeroU32::new(px.width).unwrap_or(NonZeroU32::MIN),
+        NonZeroU32::new(px.height).unwrap_or(NonZeroU32::MIN),
+    );
+    // SAFETY: a pbuffer needs no native window; it is dropped below, after the context has
+    // been made surfaceless again.
+    let pbuffer = unsafe { g.egl.create_pbuffer_surface(&g.egl_config, &attrs) };
+    let how = match pbuffer.and_then(|p| w.gl.ctx.make_current(&p).map(|()| p)) {
+        Ok(pbuffer) => {
+            let r = w.renderer.render();
+            w.gl.ctx.make_current_surfaceless().ok();
+            drop(pbuffer);
+            r.map(|()| "pbuffer")
+        }
+        Err(_) => w.renderer.render().map(|()| "surfaceless"),
+    };
+    // Which warm-up ran, for the e2e results.
+    match how {
+        Ok(how) => eprintln!("ATOS_SHELL_WARM_UP: {how}"),
+        Err(e) => eprintln!("ATOS_SHELL_WARM_UP: failed: {e}"),
+    }
+}
+
 /// The GL renderer this process actually got, on stderr: proof that a measurement ran on the GPU.
 fn log_gl_renderer(egl: &Display) {
     const GL_RENDERER: u32 = 0x1F01;
@@ -393,9 +464,12 @@ pub struct LayerWindow {
     id: u32,
     window: slint::Window,
     output: Option<wl_output::WlOutput>,
-    surface: wl_surface::WlSurface,
-    /// `Some` while shown. sctk destroys the wl_surface when this is dropped, so a hidden
-    /// window cannot be shown again (the shell drops it instead).
+    /// Replaced on every showing after the first: sctk destroys the wl_surface with its
+    /// LayerSurface on hide. The EGL context and renderer stay, with their caches (the launcher
+    /// shows and hides one window all session, #64).
+    surface: RefCell<wl_surface::WlSurface>,
+    shown_before: Cell<bool>,
+    /// `Some` while shown.
     layer: RefCell<Option<LayerSurface>>,
     renderer: FemtoVGRenderer,
     gl: Rc<Gl>,
@@ -440,7 +514,8 @@ impl LayerWindow {
             id,
             window: slint::Window::new(self_weak.clone() as Weak<dyn WindowAdapter>),
             output: NEXT_OUTPUT.with(|n| n.borrow().clone()),
-            surface,
+            surface: RefCell::new(surface),
+            shown_before: Cell::new(false),
             layer: RefCell::new(None),
             renderer,
             gl,
@@ -493,25 +568,32 @@ impl LayerWindow {
         if layer.is_some() {
             return Ok(());
         }
-        let output = self
-            .output
-            .as_ref()
-            .ok_or("a shell window needs an output (platform::with_output)")?;
         let placement = NEXT_PLACEMENT
             .with(Cell::get)
             .ok_or("a shell window needs a placement (platform::with_placement)")?;
         self.accesskit
             .borrow_mut()
             .set_platform_adapter(Some(self.platform_accesskit_adapter()));
+        if self.shown_before.replace(true) {
+            *self.surface.borrow_mut() = g.compositor.create_surface(&g.qh);
+        }
         let surface = g.layer_shell.create_layer_surface(
             &g.qh,
-            self.surface.clone(),
-            Layer::Top,
+            self.surface.borrow().clone(),
+            if placement.overlay {
+                Layer::Overlay
+            } else {
+                Layer::Top
+            },
             Some("atos-shell"),
-            Some(output),
+            self.output.as_ref(),
         );
         let preferred = self.preferred.get();
-        let height = preferred.height.max(1.) as u32;
+        let height = if placement.anchor.contains(Anchor::TOP | Anchor::BOTTOM) {
+            0
+        } else {
+            preferred.height.max(1.) as u32
+        };
         let width = if placement.anchor.contains(Anchor::LEFT | Anchor::RIGHT) {
             0 // stretched between the margins
         } else {
@@ -521,8 +603,13 @@ impl LayerWindow {
         surface.set_anchor(placement.anchor);
         surface.set_margin(top, right, bottom, left);
         surface.set_size(width, height);
-        surface.set_exclusive_zone(height as i32);
-        surface.set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
+        if placement.overlay {
+            surface.set_exclusive_zone(-1);
+            surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+        } else {
+            surface.set_exclusive_zone(height as i32);
+            surface.set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
+        }
         surface.commit();
         *layer = Some(surface);
         Ok(())
@@ -541,7 +628,10 @@ impl LayerWindow {
     fn configure(&self, width: u32, height: u32) {
         let size = PhysicalSize::new(width.max(1), height.max(1));
         self.size.set(size);
-        if let Err(e) = self.gl.attach(&self.surface, size.width, size.height) {
+        if let Err(e) = self
+            .gl
+            .attach(&self.surface.borrow(), size.width, size.height)
+        {
             eprintln!("EGL surface: {e}");
             return;
         }
@@ -568,7 +658,8 @@ impl LayerWindow {
         }
         self.dirty.set(false);
         let g = globals();
-        self.surface.frame(&g.qh, self.surface.clone());
+        let surface = self.surface.borrow().clone();
+        surface.frame(&g.qh, surface.clone());
         self.frame_pending.set(true);
         if let Err(e) = self.renderer.render() {
             eprintln!("render: {e}");
@@ -597,7 +688,7 @@ impl Drop for LayerWindow {
         self.gl.detach();
         // Dropping the LayerSurface destroys the wl_surface; otherwise destroy it here.
         if self.layer.get_mut().take().is_none() {
-            self.surface.destroy();
+            self.surface.get_mut().destroy();
         }
     }
 }
@@ -763,6 +854,11 @@ impl CompositorHandler for State {
             if w.window.has_active_animations() {
                 w.dirty.set(true);
             }
+            FRAME_HOOK.with(|h| {
+                if let Some(h) = &*h.borrow() {
+                    h(&w.window)
+                }
+            });
         }
     }
     fn surface_enter(
