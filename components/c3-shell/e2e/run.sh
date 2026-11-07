@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
-# End-to-end check of the shell (#63, #64) on our compositor: headless sway hosts atos-comp (nested,
+# End-to-end check of the shell (#63, #64, #65) on our compositor: headless sway hosts atos-comp (nested,
 # winit backend); inside it the shell and two client windows run. Checks that the dock lists both
 # windows on the AT-SPI bus, that pressing the unfocused one through AT-SPI activates it, opens
 # and closes the launcher five times with `atos-shell --launcher` (the command atos-comp's launcher
@@ -52,6 +52,22 @@ if [ "${1:-}" = inner ]; then
     sleep 2
     python3 -I "$HERE/atspi.py" dump "$OUT/atspi-3.txt" || true
   fi
+  # Control centre (#65): open it with the dock's button through AT-SPI, dump the tree, close it,
+  # then four more openings, each timed by the shell (CONTROL_CENTRE_OPEN_MS, press to frame shown).
+  python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true
+  sleep 1
+  python3 -I "$HERE/atspi.py" dump "$OUT/atspi-cc.txt" || true
+  python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true
+  sleep 0.5
+  python3 -I "$HERE/atspi.py" dump "$OUT/atspi-cc-closed.txt" || true
+  for i in 1 2 3 4; do
+    python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true; sleep 1
+    python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true; sleep 0.5
+  done
+  grep '^CONTROL_CENTRE_OPEN_MS' "$OUT/shell.log" | cut -d' ' -f2 >"$OUT/control-centre-open-ms.txt" || true
+  # Dark mode reaches apps through the portal backend (owner decision on #65): read it back.
+  busctl --user call org.freedesktop.impl.portal.desktop.atos /org/freedesktop/portal/desktop \
+    org.freedesktop.impl.portal.Settings Read ss org.freedesktop.appearance color-scheme >"$OUT/portal-color-scheme.txt" 2>&1 || true
   kill $SH; wait $SH 2>/dev/null || true
   # Idle RSS and CPU of a fresh shell process with the two windows in its dock.
   "$BUDGETS" "$SHELL_BIN" --cpu-window "$WINDOW" --json "$OUT/budgets.json" >"$OUT/budgets.md" 2>"$OUT/budgets.err" \

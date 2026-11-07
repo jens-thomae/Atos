@@ -69,7 +69,8 @@ fn names_every_window_and_the_focused_one() {
             "Open launcher",
             "Report.txt, running",
             "Notes.txt, running",
-            "Downloads, focused"
+            "Downloads, focused",
+            "Control centre"
         ]
     );
 }

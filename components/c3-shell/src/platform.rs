@@ -98,13 +98,14 @@ thread_local! {
     static NEXT_PLACEMENT: Cell<Option<Placement>> = const { Cell::new(None) };
     static OUTPUTS: RefCell<Vec<wl_output::WlOutput>> = const { RefCell::new(Vec::new()) };
     static OUTPUT_HOOK: RefCell<Option<OutputHook>> = const { RefCell::new(None) };
-    static FRAME_HOOK: RefCell<Option<FrameHook>> = const { RefCell::new(None) };
+    static FRAME_HOOKS: RefCell<Vec<FrameHook>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Calls `hook` with the window whenever the compositor reports a frame of it as shown
-/// (wl_surface frame callback). The launcher times its opening with it.
+/// (wl_surface frame callback). Any number of hooks; the launcher and the control centre time
+/// their openings with it.
 pub fn on_frame_done(hook: impl Fn(&slint::Window) + 'static) {
-    FRAME_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
+    FRAME_HOOKS.with(|h| h.borrow_mut().push(Box::new(hook)));
 }
 
 fn globals() -> Rc<Globals> {
@@ -854,11 +855,7 @@ impl CompositorHandler for State {
             if w.window.has_active_animations() {
                 w.dirty.set(true);
             }
-            FRAME_HOOK.with(|h| {
-                if let Some(h) = &*h.borrow() {
-                    h(&w.window)
-                }
-            });
+            FRAME_HOOKS.with(|h| h.borrow().iter().for_each(|f| f(&w.window)));
         }
     }
     fn surface_enter(
