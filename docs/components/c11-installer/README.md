@@ -11,7 +11,7 @@ The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted 
 | [`firstboot/`](../../../components/c11-installer/firstboot/) | `atos-tpm-seal`, the first-boot unit that binds the disk to Secure Boot (below) |
 | [`build-iso.sh`](../../../components/c11-installer/build-iso.sh) | Builds the installer image, then the ISO with image-builder's `generic-iso` type (pinned by digest), with the c1-base image as offline payload |
 | [`vm-test.sh`](../../../components/c11-installer/vm-test.sh) | The end-to-end test in the dev VM (below) |
-| [`.github/workflows/c11-installer.yml`](../../../.github/workflows/c11-installer.yml) | CI: builds the amd64 ISO and checks its contents |
+| [`.github/workflows/c11-installer.yml`](../../../.github/workflows/c11-installer.yml) | CI: builds the amd64 ISO, checks its contents, then installs it under KVM and boots it twice |
 
 ## Why this approach
 
@@ -73,6 +73,22 @@ limactl restart atos-c11
 ATOS_VM=atos-c11 tools/dev-vm/vm run components/c11-installer/vm-test.sh all
 ```
 
-The HWE kernel is needed because `bootc install` mounts EROFS from a file (Linux 6.12 or newer; see the C1 README). QEMU runs aarch64 without KVM, with AAVMF Secure Boot firmware and an `swtpm` TPM 2.0. The unattended run and the report are passed in as systemd credentials over SMBIOS, so the ISO and the image carry no test hook.
+The HWE kernel is needed because `bootc install` mounts EROFS from a file (Linux 6.12 or newer; see the C1 README). On the M1 dev VM, QEMU runs aarch64 without KVM (x86_64 with KVM where `/dev/kvm` exists, as in CI), with AAVMF Secure Boot firmware and an `swtpm` TPM 2.0. The unattended run and the report are passed in as systemd credentials over SMBIOS, so the ISO and the image carry no test hook.
 
-RESULTS_PLACEHOLDER
+### Results
+
+Dev VM (`atos-c11`, aarch64, QEMU **without KVM**, AAVMF Secure Boot, swtpm), 7 November 2026:
+
+| Step | Result |
+| --- | --- |
+| `install` | Installed to an empty 20 GB disk. The installer reported 1,797 s (2,187 s from QEMU start to power-off). TCG emulation is several times slower than hardware, so this says nothing about the §7 budget of 10 minutes; the KVM run in CI measures it |
+| `boot` (first) | Secure Boot enabled (user mode, keys enrolled by systemd-boot from `loader/keys/auto`). `atos-tpm-seal`: `/dev/vda2 bound to the TPM with PCR 7`. Keyslots afterwards: `0 tpm2`, `1 recovery`; the unit has removed itself |
+| `reboot` | Unlocked by the TPM with no prompt; booted to the report |
+| `stage`, `apply` | `bootc upgrade` staged dev-2; the next boot unlocked with no prompt and runs `IMAGE_VERSION=dev-2` (same signing key, so PCR7 is unchanged) |
+| `nosb` | Same disk with Secure Boot off: PCR7 differs, the TPM refuses, and the initrd asks for the recovery key |
+
+Repeated after main gained boot counting (#126: `panic=10`, emergency drop-ins, rebuilt initramfs): images rebuilt, `install` (installer 2,311 s under TCG), first `boot` (`bound to the TPM with PCR 7`) and `reboot` (TPM unlock, no prompt) all pass.
+
+No step asks for an account or a network (D-005); the VM has no network during the install.
+
+Not yet measured: install time on hardware or under KVM (CI job `c11-installer.yml`), and x86_64 hardware with shim+MOK (PCR 7+14).
