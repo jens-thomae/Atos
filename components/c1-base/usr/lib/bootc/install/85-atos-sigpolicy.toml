@@ -1,0 +1,4 @@
+# Trust policy (#75): bootc install refuses a containers policy whose default is insecureAcceptAnything
+# where the backend checks it. Signature checks themselves come from /usr/share/containers/policy.json.
+[install]
+enforce-container-sigpolicy = true

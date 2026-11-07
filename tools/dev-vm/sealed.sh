@@ -35,6 +35,17 @@
 #                        image's 2 min check timeout
 #            hang-target as hang, with the image's 5 min boot-complete.target timeout as well
 #            `counting <step>` runs one step; `counting` runs all of them in order
+#   trust    the client trust policy (#75), on its own disk ~/sealed/trust.raw. Images are the shipped
+#            Containerfile with the policy pointed at this VM's registry and a VM-only cosign key
+#            (generated in ~/sealed/trust-keys, with a second, wrong one). Steps:
+#            images    builds trust-1 (version 1.1), trust-2 (1.2, signed), trust-unsigned (1.2),
+#                      trust-wrong (1.2, signed with the wrong key), trust-old (1.0, signed)
+#            install   installs trust-1, tracking :latest, which points at trust-1
+#            stage     points :latest at trust-2, boots trust-1, tries `bootc switch` to the
+#                      unsigned, wrongly signed and old images (all refused), then `bootc upgrade`
+#            apply     boots the default entry: trust-2
+#            previous  picks the second boot entry from the menu: trust-1 (older) still boots
+#            `trust <step>` runs one step; `trust` runs all of them in order
 # Disks live on the VM disk in ~/sealed; logs go to tools/dev-vm/out/sealed/.
 # QEMU runs without KVM (Apple M1 has no nested virtualisation): a boot takes minutes.
 set -euo pipefail
@@ -339,11 +350,81 @@ counting_hang() { SHIPPED_CHECK=1 counting_fail hang; }
 # is already deployed (dev-hang stays the rollback entry after the hang step).
 counting_hang-target() { SHIPPED_CHECK=1 SHIPPED_TARGET=1 counting_fail hang-target; }
 
+# Trust policy (#75). cosign as in CI (v3.1.4, legacy signature format, no transparency log).
+TDISK=$WORK/trust.raw TVARS=$WORK/trust-vars.fd TKEYS=$WORK/trust-keys
+COSIGN_VERSION=v3.1.4 COSIGN_SHA256=ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2
+cosign() {
+  local bin=$WORK/cosign-$COSIGN_VERSION
+  [ -x "$bin" ] || {
+    curl -fsSL -o "$bin.tmp" "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-arm64"
+    echo "$COSIGN_SHA256  $bin.tmp" | sha256sum --check --quiet && chmod +x "$bin.tmp" && mv "$bin.tmp" "$bin"; }
+  COSIGN_PASSWORD='' "$bin" "$@"
+}
+trust_keys() { # VM-only test keys, never committed: good (the image trusts it) and wrong
+  mkdir -p "$TKEYS"
+  local k
+  for k in good wrong; do
+    [ -f "$TKEYS/$k.key" ] || (cd "$TKEYS" && cosign generate-key-pair --output-key-prefix "$k" >/dev/null)
+  done
+}
+trust_variant() { # <name> <version> [sign key]: builds trust-<name>, pushes it, signs it for the guest's name
+  local name=$1 f=$WORK/Containerfile.trust-$1 digest=$WORK/trust-$1.digest
+  # The guest pulls from 10.0.2.2:5000, so the policy scope, registries.d and the key follow it.
+  sed -e "/^LABEL org.opencontainers.image.title/i RUN echo IMAGE_VERSION=trust-$name >> /usr/lib/os-release" \
+      -e "/^LABEL org.opencontainers.image.title/i RUN sed -i s#ghcr.io/jens-thomae/atos/c1-base#${GUEST_REG}# /usr/share/containers/policy.json /usr/share/containers/registries.d/atos.yaml \&\& echo $(base64 -w0 "$TKEYS/good.pub") | base64 -d > /usr/share/pki/containers/atos-c1-base-test.pub" \
+      "$HERE/../../components/c1-base/Containerfile" > "$f"
+  grep -q "IMAGE_VERSION=trust-$name" "$f"
+  sudo podman build --build-context repo="$HERE/../.." -f "$f" --label "org.opencontainers.image.version=$2" \
+    -t "$IMAGE:trust-$name" "$HERE/../../components/c1-base"
+  sudo podman push -q --tls-verify=false --digestfile "$digest" "$IMAGE:trust-$name" "docker://$REG:trust-$name"
+  [ -z "${3:-}" ] || cosign sign -y --key "$TKEYS/$3.key" --tlog-upload=false --new-bundle-format=false \
+    --use-signing-config=false --allow-http-registry --sign-container-identity "$GUEST_REG" "$REG@$(cat "$digest")"
+}
+trust_images() {
+  registry_up
+  trust_keys
+  trust_variant 1 1.1 good
+  trust_variant 2 1.2 good
+  trust_variant unsigned 1.2
+  trust_variant wrong 1.2 wrong
+  trust_variant old 1.0 good
+}
+trust_install() {
+  registry_up
+  sudo podman push -q --tls-verify=false "$IMAGE:trust-1" "docker://$REG:latest"
+  rm -f "$TDISK" && truncate -s 20G "$TDISK"
+  sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
+    -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    "$IMAGE:trust-1" bootc install to-disk --generic-image --via-loopback \
+    --target-imgref "$GUEST_REG:latest" "/out/$(basename "$TDISK")"
+}
+# Runs in the guest: each refused switch prints bootc's last error line.
+# shellcheck disable=SC2016 # expands in the guest
+TRUST_ACTION='printf "[[registry]]\nlocation = \"10.0.2.2:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/50-atos-dev.conf
+until curl -sf http://10.0.2.2:5000/v2/ >/dev/null; do sleep 2; done
+for t in unsigned wrong old; do
+  if out=$(bootc switch --enforce-container-sigpolicy 10.0.2.2:5000/atos/c1-base:trust-$t 2>&1); then
+    echo "ATOS-TRUST $t ACCEPTED"
+  else
+    echo "ATOS-TRUST $t refused: $(printf "%s" "$out" | tail -n 3 | tr "\n" " ")"
+  fi
+done
+bootc upgrade && echo "ATOS-TRUST latest staged"
+bootc status'
+trust_stage() {
+  registry_up
+  sudo podman push -q --tls-verify=false "$IMAGE:trust-2" "docker://$REG:latest"
+  VARS=$TVARS NET=1 ACTION=$TRUST_ACTION boot "$TDISK" "$OUT/trust-stage.log" fresh
+}
+trust_apply() { VARS=$TVARS boot "$TDISK" "$OUT/trust-apply.log"; }
+trust_previous() { VARS=$TVARS MENU=1 boot "$TDISK" "$OUT/trust-previous.log"; }
+
 case "${1:-}" in
   build|disk|boot) "step_$1" ;;
   tamper) step_tamper "${2:-}" ;;
   all) step_build; step_disk; step_boot; step_tamper ;;
   update) for s in ${2:-images install stage apply previous rollback back}; do "update_$s"; done ;;
   counting) for s in ${2:-images install stage-good good bad hang hang-target panic emerg}; do "counting_$s"; done ;;
-  *) sed -n '2,37p' "$0" >&2; exit 2 ;;
+  trust) for s in ${2:-images install stage apply previous}; do "trust_$s"; done ;;
+  *) sed -n '2,49p' "$0" >&2; exit 2 ;;
 esac
