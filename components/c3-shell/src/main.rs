@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The Atos shell: one process (D-006) drawing the shell's layer surfaces on every output.
-//! Today that is the dock-taskbar with the running windows (#63).
+//! Today that is the dock-taskbar with the running windows (#63) and the launcher (#64).
+//! `atos-shell --launcher` opens or closes the launcher of the running shell.
 
 mod accesskit;
 mod audio;
 mod control_centre;
+mod launcher;
 mod platform;
 mod portal;
 mod services;
@@ -20,6 +22,9 @@ use sctk::shell::wlr_layer::Anchor;
 use slint::{ComponentHandle, Model, VecModel};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--launcher") {
+        return launcher::request();
+    }
     slint::platform::set_platform(Box::new(platform::WaylandPlatform::new()?))
         .map_err(|e| format!("{e:?}"))?;
 
@@ -58,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let why = first_error.borrow_mut().take();
         return Err(why.unwrap_or_else(|| "no output".into()));
     }
+    launcher::init();
     {
         let docks = docks.clone();
         control_centre::init(move |dark| {
@@ -77,6 +83,7 @@ fn new_dock(
     let dock = platform::with_output(output, Dock::new)?;
     dock.set_items(items.clone().into());
     dock.on_activate(|id| toplevels::activate(id as u32));
+    dock.on_open_launcher(launcher::toggle);
     dock.on_open_control_centre(control_centre::toggle);
     // Bottom of the output, floating: the gap to the screen edges comes from the tokens.
     let gap = dock.get_edge_gap() as i32;

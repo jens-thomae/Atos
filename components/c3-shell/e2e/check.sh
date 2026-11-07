@@ -1,9 +1,10 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
-# Acceptance checks of #63, #65 on one run.sh result dir. Usage: check.sh <out dir>
+# Acceptance checks of #63, #64 and #65 on one run.sh result dir. Usage: check.sh <out dir>
 #   SHELL_RSS_MB      the shell's share of idle memory (D-006: 300 MB)
-#   SHELL_OPEN_MS     if set, every control centre opening must be at most this (§7 popover: 100 ms)
-#   SHELL_CHECK_TREE  0 skips the dock checks (no client windows ran)
+#   SHELL_CHECK_TREE  0 skips the checks that need client windows (weston's demo clients)
+#   SHELL_OPEN_MS     if set, every launcher opening, the cold first one included, must be at most
+#                     this (§7 popover: 100 ms), timed from the start of `atos-shell --launcher`
 set -euo pipefail
 R=$1
 fail() { echo "::error::$1"; exit 1; }
@@ -14,6 +15,21 @@ grep -q "push button 'Wayland ClickDot, focused'" "$R/atspi-1.txt" || fail "dock
 # Pressing Flower through AT-SPI activated it.
 grep -q "push button 'Flower, focused'" "$R/atspi-2.txt" || fail "Flower not activated (atspi-2.txt)"
 grep -q "push button 'Wayland ClickDot, running'" "$R/atspi-2.txt" || fail "ClickDot still focused (atspi-2.txt)"
+# The app started from the launcher runs and has the focus; the launcher closed.
+grep -q "push button 'simple-shm, focused'" "$R/atspi-3.txt" || fail "app from the launcher not running (atspi-3.txt)"
+! grep -q "'Search apps'" "$R/atspi-3.txt" || fail "launcher still open after starting an app (atspi-3.txt)"
+fi
+# The launcher opened with its search field, the fixture app and the dock's button.
+grep -q "'Search apps'" "$R/atspi-launcher.txt" || fail "launcher search field not on the bus (atspi-launcher.txt)"
+grep -q "push button 'Smoke Test'" "$R/atspi-launcher.txt" || fail "launcher does not list the fixture app (atspi-launcher.txt)"
+grep -q "push button 'Open launcher'" "$R/atspi-launcher.txt" || fail "dock has no launcher button (atspi-launcher.txt)"
+# Opening times: command start to first frame shown, and the shell's own share.
+[ "$(wc -l <"$R/launcher-open-ms.txt")" -eq 5 ] || fail "expected 5 launcher openings, got $(wc -l <"$R/launcher-open-ms.txt") (shell.log)"
+echo "launcher opening, command start to frame shown (ms; first is cold): $(paste -sd' ' "$R/launcher-open-ms.txt")"
+echo "of which in the shell, request to frame shown (ms): $(paste -sd' ' "$R/launcher-shell-ms.txt")"
+if [ -n "${SHELL_OPEN_MS:-}" ]; then
+  max=$(sort -n "$R/launcher-open-ms.txt" | tail -1)
+  python3 -c "import sys; sys.exit(0 if $max <= $SHELL_OPEN_MS else 1)" || fail "launcher opened in $max ms, over $SHELL_OPEN_MS ms"
 fi
 # The control centre opened from the dock with its agreed contents (no Brightness: the runner has
 # no backlight and the slider is hidden then), and closed again.
@@ -21,9 +37,10 @@ for n in "Dark mode, " "Do not disturb, " "Record screen, Not available yet" "'V
   grep -q "$n" "$R/atspi-cc.txt" || fail "control centre lacks $n (atspi-cc.txt)"
 done
 ! grep -q "'Power options'" "$R/atspi-cc-closed.txt" || fail "control centre still open after the second press (atspi-cc-closed.txt)"
-# Opening times, press to first frame shown (the §7 popover budget).
+# Opening times, request to first frame shown (the §7 popover budget); every opening, the cold
+# first one included, must be within SHELL_OPEN_MS.
 [ "$(wc -l <"$R/control-centre-open-ms.txt")" -eq 5 ] || fail "expected 5 control centre openings, got $(wc -l <"$R/control-centre-open-ms.txt") (shell.log)"
-echo "control centre opening (ms, five times): $(paste -sd' ' "$R/control-centre-open-ms.txt")"
+echo "control centre opening, request to frame shown (ms; first is cold): $(paste -sd' ' "$R/control-centre-open-ms.txt")"
 if [ -n "${SHELL_OPEN_MS:-}" ]; then
   max=$(sort -n "$R/control-centre-open-ms.txt" | tail -1)
   python3 -c "import sys; sys.exit(0 if $max <= $SHELL_OPEN_MS else 1)" || fail "control centre opened in $max ms, over $SHELL_OPEN_MS ms"

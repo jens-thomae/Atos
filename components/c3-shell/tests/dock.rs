@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The dock-taskbar renders from the tokens, names every running window on the accessibility
-//! tree and reports the clicked window (#63). Fixture icons are in tests/icons/.
+//! tree and reports the clicked window (#63); its first button opens the launcher (#64). Fixture icons are in tests/icons/.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -23,7 +23,7 @@ fn icon(name: &str) -> Image {
 /// screenshot does not depend on the machine's fonts.
 fn dock() -> (Dock, Rc<Cell<i32>>) {
     let ui = Dock::new().unwrap();
-    ui.window().set_size(LogicalSize::new(480., 64.));
+    ui.window().set_size(LogicalSize::new(560., 64.));
     ui.set_items(ModelRc::new(VecModel::from(vec![
         dock_item(
             7,
@@ -66,6 +66,7 @@ fn names_every_window_and_the_focused_one() {
     assert_eq!(
         buttons,
         [
+            "Open launcher",
             "Report.txt, running",
             "Notes.txt, running",
             "Downloads, focused",
@@ -82,6 +83,19 @@ fn accessible_action_activates_the_window() {
         .unwrap()
         .invoke_accessible_default_action();
     assert_eq!(clicked.get(), 8);
+}
+
+#[test]
+fn launcher_button_opens_the_launcher() {
+    init();
+    let (ui, _) = dock();
+    let opened = Rc::new(Cell::new(false));
+    let o = opened.clone();
+    ui.on_open_launcher(move || o.set(true));
+    find_by_label(&ui, "Open launcher")
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert!(opened.get());
 }
 
 #[test]

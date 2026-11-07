@@ -73,7 +73,7 @@ pub fn init(apply_theme: impl Fn(bool) + 'static) {
         s.theme = Some(Rc::new(apply_theme));
     });
     theme(dark);
-    platform::on_shown(|w| {
+    platform::on_frame_done(|w| {
         let opened = SESSION.with(|s| {
             let mut s = s.borrow_mut();
             let mine = s

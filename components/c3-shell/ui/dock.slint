@@ -3,6 +3,7 @@
 // running window. Values come only from the design tokens (docs/design/tokens.json); the layout
 // follows the owner's Dock mockup on the design canvas (docs/design/README.md).
 import { Fonts, Palette, Radius, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
+export { Launcher, AppItem } from "launcher.slint";
 
 export struct DockItem {
     id: int,
@@ -93,6 +94,39 @@ component Slot inherits Rectangle {
     }
 }
 
+// Opens the launcher (#64): the Dock mockup's button with its four-square glyph.
+component LauncherButton inherits Rectangle {
+    callback clicked();
+
+    width: Size.touch;
+    height: Size.touch;
+    border-radius: Radius.tile;
+    background: touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : Palette.button-secondary;
+    accessible-role: button;
+    accessible-label: "Open launcher";
+    accessible-action-default => { root.clicked(); }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    GridLayout {
+        width: 2 * Space.s2 + Space.s1;
+        height: self.width;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        spacing: Space.s1;
+        Row {
+            Rectangle { border-width: 2 * Size.hairline; border-color: Palette.text; border-radius: self.width / 4; }
+            Rectangle { border-width: 2 * Size.hairline; border-color: Palette.text; border-radius: self.width / 4; }
+        }
+        Row {
+            Rectangle { border-width: 2 * Size.hairline; border-color: Palette.text; border-radius: self.width / 4; }
+            Rectangle { border-width: 2 * Size.hairline; border-color: Palette.text; border-radius: self.width / 4; }
+        }
+    }
+}
+
 // Opens the control centre (#65): two sliders, the quick-settings glyph.
 component ControlCentreButton inherits Rectangle {
     callback clicked();
@@ -142,6 +176,7 @@ component ControlCentreButton inherits Rectangle {
 export component Dock inherits Window {
     in property <[DockItem]> items;
     callback activate(int);
+    callback open-launcher();
     callback open-control-centre();
     // Gap between the dock and the screen edges; the shell sets it as the layer surface's margin.
     out property <length> edge-gap: Space.s3;
@@ -162,6 +197,24 @@ export component Dock inherits Window {
             padding-left: Space.s3;
             padding-right: Space.s3;
             spacing: Space.s2;
+
+            VerticalLayout {
+                alignment: center;
+                LauncherButton {
+                    clicked => { root.open-launcher(); }
+                }
+            }
+            // Divider between the launcher and the windows.
+            VerticalLayout {
+                alignment: center;
+                padding-left: Space.s1;
+                padding-right: Space.s1;
+                Rectangle {
+                    width: Size.hairline;
+                    height: Size.control-sm;
+                    background: Palette.line;
+                }
+            }
 
             for item in root.items: VerticalLayout {
                 alignment: center;
