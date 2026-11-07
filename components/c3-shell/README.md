@@ -63,7 +63,7 @@ Contents agreed with the owner on the card. Opened by the dock's rightmost butto
 
 `CONTROL_CENTRE_OPEN_MS` in the shell's output is the time from the open request to the first frame shown; `e2e/` opens the panel five times and `check.sh` fails above `SHELL_OPEN_MS` (100 ms on the NUC, §7).
 
-A tile whose service is missing is shown disabled ("Unavailable"). While the panel is open the services are read again every 3 s; closed, nothing polls. The window is created on each opening and dropped on closing.
+A tile whose service is missing is shown disabled ("Unavailable"). While the panel is open the services are read again every 3 s; closed, nothing polls. The window is made at start-up, rendered once while hidden (after the shell's first frame, like the launcher's warm-up) and shown and hidden on each use.
 
 ## Build and test
 

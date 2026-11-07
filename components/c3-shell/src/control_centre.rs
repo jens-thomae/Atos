@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The control centre (#65): a panel above the dock's right end with the quick settings agreed on
-//! the card. The window exists only while it is open; the settings read from the system and the
+//! the card. The window is made at start-up, rendered once while hidden (warm-up, as the launcher's) and shown
+//! and hidden on each use; the settings read from the system and the
 //! audio state live here for the whole session so the panel opens with values already in it.
 //!
 //! Blocking D-Bus calls run on short worker threads (`services.rs`) and hand their result to the
@@ -34,8 +35,12 @@ struct Session {
     audio_handle: Option<audio::Handle>,
     /// When the panel was asked for; taken by the first frame shown (`CONTROL_CENTRE_OPEN_MS`).
     opened_at: Option<Instant>,
-    /// Open panel, if any.
-    open: Option<Rc<ControlCentre>>,
+    /// The panel's window: made at start-up and kept all session, so that opening shows it again
+    /// on a new surface with the renderer's caches (glyphs, shadows, shaders) warm.
+    ui: Option<Rc<ControlCentre>>,
+    shown: bool,
+    /// The hidden window has been rendered once (`warm_up`).
+    warmed: bool,
     /// Re-reads the services while the panel is open.
     poll: Timer,
     /// Source of the privacy chip; none is wired up yet, so the chip stays hidden.
@@ -72,16 +77,22 @@ pub fn init(apply_theme: impl Fn(bool) + 'static) {
         s.portal = Portal::start(dark);
         s.theme = Some(Rc::new(apply_theme));
     });
+    match create() {
+        Ok(ui) => SESSION.with(|s| s.borrow_mut().ui = Some(ui)),
+        Err(e) => eprintln!("control centre: {e}"),
+    }
     theme(dark);
     platform::on_frame_done(|w| {
-        let opened = SESSION.with(|s| {
+        let (opened, warm) = SESSION.with(|s| {
             let mut s = s.borrow_mut();
-            let mine = s
-                .open
-                .as_ref()
-                .is_some_and(|ui| std::ptr::eq(ui.window(), w));
-            if mine { s.opened_at.take() } else { None }
+            let mine = s.ui.as_ref().is_some_and(|ui| std::ptr::eq(ui.window(), w));
+            // After the shell's first frame, so start-up (§7 cold start) does not wait for it.
+            let warm = !std::mem::replace(&mut s.warmed, true);
+            (if mine { s.opened_at.take() } else { None }, warm)
         });
+        if warm {
+            slint::invoke_from_event_loop(warm_up).ok();
+        }
         // The first frame after opening is on screen: §7 "popover fully visible".
         if let Some(t) = opened {
             println!(
@@ -94,15 +105,27 @@ pub fn init(apply_theme: impl Fn(bool) + 'static) {
 }
 
 fn theme(dark: bool) {
-    let apply = SESSION.with(|s| s.borrow().theme.clone());
+    let (apply, ui) = SESSION.with(|s| (s.borrow().theme.clone(), s.borrow().ui.clone()));
+    if let Some(ui) = ui {
+        ui.global::<Palette>().set_dark(dark);
+    }
     if let Some(f) = apply {
         f(dark);
     }
 }
 
+/// Renders the hidden panel once so its first opening is not the cold one. Any output at least
+/// this big shows the same panel, so the cached glyphs and shadows are the ones opening draws.
+fn warm_up() {
+    sync();
+    if let Some(ui) = SESSION.with(|s| s.borrow().ui.clone()) {
+        platform::warm_up(ui.window(), slint::LogicalSize::new(1920., 1080.));
+    }
+}
+
 /// The dock's button: open the panel, or close it if it is open.
 pub fn toggle() {
-    if SESSION.with(|s| s.borrow().open.is_some()) {
+    if SESSION.with(|s| s.borrow().shown) {
         close();
     } else if let Err(e) = open() {
         eprintln!("control centre: {e}");
@@ -111,16 +134,26 @@ pub fn toggle() {
 
 fn close() {
     let ui = SESSION.with(|s| {
-        s.borrow().poll.stop();
-        s.borrow_mut().open.take()
+        let mut s = s.borrow_mut();
+        s.poll.stop();
+        s.opened_at = None;
+        if std::mem::take(&mut s.shown) {
+            s.ui.clone()
+        } else {
+            None
+        }
     });
     if let Some(ui) = ui {
         ui.hide().ok();
+        // The next opening starts from the plain panel.
+        ui.set_power_open(false);
+        ui.set_confirm("".into());
+        ui.set_outputs_open(false);
     }
 }
 
-fn open() -> Result<(), Box<dyn std::error::Error>> {
-    let started = Instant::now();
+/// The panel's window with its fixed contents and callbacks, hidden.
+fn create() -> Result<Rc<ControlCentre>, Box<dyn std::error::Error>> {
     let ui = Rc::new(ControlCentre::new()?);
     ui.set_power_actions(ModelRc::new(VecModel::from(vec![
         PowerAction {
@@ -139,12 +172,18 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
             confirm: true,
         },
     ])));
-    ui.global::<Palette>()
-        .set_dark(SESSION.with(|s| s.borrow().quick.dark_mode));
     wire(&ui);
+    Ok(ui)
+}
+
+fn open() -> Result<(), Box<dyn std::error::Error>> {
+    let started = Instant::now();
+    let ui = SESSION
+        .with(|s| s.borrow().ui.clone())
+        .ok_or("the panel could not be created")?;
     SESSION.with(|s| {
         let mut s = s.borrow_mut();
-        s.open = Some(ui.clone());
+        s.shown = true;
         s.opened_at = Some(started);
     });
     sync();
@@ -155,7 +194,10 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
         margin: [0; 4],
         overlay: true,
     };
-    platform::with_placement(placement, || ui.show())?;
+    if let Err(e) = platform::with_placement(placement, || ui.show()) {
+        close();
+        return Err(e.into());
+    }
 
     refresh();
     SESSION.with(|s| {
@@ -168,15 +210,16 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn wire(ui: &Rc<ControlCentre>) {
-    ui.on_dismiss(close);
+    // Deferred: hiding the window inside its own event handler is not safe.
+    ui.on_dismiss(|| drop(slint::invoke_from_event_loop(close)));
     ui.on_tile_clicked(tile_clicked);
     ui.on_open_settings(|| {
         launch(SETTINGS_ID);
-        close();
+        slint::invoke_from_event_loop(close).ok();
     });
     ui.on_power_action(|id| {
         let id = id.to_string();
-        close();
+        slint::invoke_from_event_loop(close).ok();
         std::thread::spawn(move || {
             if let Err(e) = services::power(&id) {
                 eprintln!("control centre: {id}: {e}");
@@ -307,7 +350,7 @@ fn sync() {
         let s = s.borrow();
         let chip = control::chip_text(s.privacy.as_deref());
         Some((
-            s.open.clone()?,
+            s.ui.clone()?,
             s.quick.clone(),
             s.brightness,
             s.audio.clone(),
