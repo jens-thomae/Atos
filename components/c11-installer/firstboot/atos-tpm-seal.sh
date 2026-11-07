@@ -21,8 +21,9 @@ warn() {
 }
 mkdir -p /run/issue.d
 
-[ "$(efi_byte SecureBoot)" = 1 ] || warn "Secure Boot is off. The disk unlocks with this machine's TPM only."
-[ "$(efi_byte SetupMode)" = 0 ] || warn "the firmware is in setup mode."
+# ponytail: console and /run/issue.d only; greetd autologin hides both (README, Known gaps).
+[ "$(efi_byte SecureBoot)" = 1 ] || warn "Secure Boot is off. Anyone who can boot this machine, from any OS or USB stick, can read the disk without a password."
+[ "$(efi_byte SetupMode)" = 0 ] || warn "the firmware is in setup mode. Anyone who can boot this machine, from any OS or USB stick, can read the disk without a password."
 
 dev=$(readlink -f /dev/disk/by-designator/root-luks)
 pcrs=7

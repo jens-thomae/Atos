@@ -46,7 +46,7 @@ The sealed UKI's kernel command line is fixed and has no `root=`. In the initrd,
 
 A oneshot unit in the deployment's `/etc` (outside the sealed `/usr`, so the image stays unchanged). It:
 
-1. **Fails closed.** It goes on only if `SecureBoot` = 1 and `SetupMode` = 0. Otherwise it keeps the no-PCR slot, writes a warning to the console and `/run/issue.d/`, and tries again on the next boot.
+1. **Fails closed.** It goes on only if `SecureBoot` = 1 and `SetupMode` = 0. Otherwise it keeps the no-PCR slot, writes a warning to the console and `/run/issue.d/` ("anyone who can boot this machine … can read the disk without a password"), and tries again on the next boot. **On a machine that never boots with Secure Boot on, it never seals, and the no-PCR slot stays** (Known gaps).
 2. Picks PCR7, or PCR7+14 when shim's MOK variables are present (D-016).
 3. Runs `systemd-cryptenroll --unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7[+14] --wipe-slot=tpm2`. The new slot is never wiped; the install-time TPM2 slot is.
 4. Deletes itself.
@@ -58,7 +58,8 @@ A oneshot unit in the deployment's `/etc` (outside the sealed `/usr`, so the ima
 ## Known gaps, accepted for Phase 1
 
 - **Silent unlock plus autologin** (owner answer Q4 on #66). The disk unlocks silently through the TPM (D-015), and the image logs the passwordless `atos` user straight into a session (C1, greetd). **A stolen laptop therefore boots into a session; the encryption protects only a disk taken out of the machine,** or one moved to another machine or booted another way. User accounts and login come with the first-run flow (Phase 3).
-- **The window before first boot** (owner answer Q2). Between the end of the install and the first boot, the disk unlocks with this machine's TPM and no PCR check. Anyone with the machine in that window can boot something else and read or change `/etc` and `/var`, which are outside the seal. The window ends with the first boot, which normally follows the install directly.
+- **The window before the seal** (owner answer Q2). Until `atos-tpm-seal` has run, the disk unlocks with this machine's TPM and no PCR check. Anyone with the machine in that window can boot something else (a live USB with `systemd-cryptsetup … tpm2-device=auto` is enough) and read or change `/etc` and `/var`, which are outside the seal. With Secure Boot on, the window ends with the first boot, which normally follows the install directly.
+- **Without Secure Boot the window never ends** (review of #135; owner decision pending on #66). The seal needs Secure Boot on and the firmware out of setup mode. Until key enrolment at install (#123) lands, Atos keys are on no real machine: stock firmware with Microsoft keys won't start the Atos-signed UKI, so Secure Boot has to be off. **Every install on real hardware therefore stays in this state: the disk opens without a prompt for any OS booted on that machine, and is protected only when taken out of it.** The warning goes only to the boot console and `/run/issue.d/`; greetd's autologin means nobody sees it. The dev VM (systemd-boot enrols the TEST keys in setup mode) and CI do seal.
 - **No TPM.** The installer needs a TPM 2.0 (`systemd-cryptenroll --tpm2-device=auto` fails without one). A passphrase path is not part of this card.
 - **The installer media trusts Fedora's shim and Microsoft's UEFI CA** while it runs. That does not carry over to the installed system.
 

@@ -380,5 +380,6 @@ mod tests {
         assert!(SEAL_SCRIPT.contains("--tpm2-pcrs=\"$pcrs\""));
         assert!(SEAL_SCRIPT.contains("pcrs=7"));
         assert!(SEAL_SCRIPT.contains("efi_byte SecureBoot)\" = 1 ] || warn"));
+        assert!(SEAL_SCRIPT.contains("can read the disk without a password"));
     }
 }
