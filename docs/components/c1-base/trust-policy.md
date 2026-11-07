@@ -1,6 +1,6 @@
 # Client trust policy
 
-Card #75 (D-014, threat model rows *Compromised registry* and *Stolen CI secret*). An installed Atos system pulls only images of `ghcr.io/jens-thomae/atos/c1-base` that are signed with the key its image pins, and never stages an image whose signed version is lower than the booted one. The "Previous version" boot entry is not affected.
+Card #75 (D-014, threat model rows *Compromised registry* and *Stolen CI secret*). An installed Atos system pulls only images of `ghcr.io/jens-thomae/atos/c1-base` that are signed with the key its image pins, and never stages an image whose signed version is lower than the booted one or the one already staged. The "Previous version" boot entry is not affected.
 
 ## Files in the image
 
@@ -44,10 +44,12 @@ A system trusts only the keys in the image it booted. To rotate a key, first shi
 **The patch** (rebased with the other carried patch on each bootc bump, using the routine in [boot-counting.md](boot-counting.md); `0002-composefs-refuse-to-stage-an-image-older-than-the-bo.patch`, about 90 lines with its test) adds one check to bootc's composefs `bootc upgrade` and `bootc switch` (which Fedora's enabled `bootc-fetch-apply-updates.timer` also runs). The check always runs before anything on disk changes. If the target is already in the local composefs repository, it runs before `validate_update`, because that step removes staged boot entries; otherwise a refused image, cached by an earlier attempt, could un-stage a pending good update. Otherwise it runs in `do_upgrade` after the pull, before staging:
 
 1. It reads the target image's version label from its config (the pulled one in the local repository, or the signature-checked config of a cached one): `org.opencontainers.image.version`, else `version` (ostree-ext's `version_for_config`).
-2. It reads the booted image's label the same way.
-3. It refuses to stage if the new version is lower, comparing dot-separated integers component by component (`45.2` < `45.10`).
+2. It reads the labels of the booted image and, if an update is staged, of the staged image. **The floor is the higher of the two** (owner decision on #133): with v3 booted and v5 staged, a signed v4 would otherwise replace the update the client already accepted.
+3. It refuses to stage if the new version is lower than either, comparing dot-separated integers component by component (`45.2` < `45.10`, and `1.20` > `1.3`).
 
-| Booted label | New label | Result |
+The table applies to each of the booted and staged labels:
+
+| Floor label (booted or staged) | New label | Result |
 | --- | --- | --- |
 | numeric | numeric, equal or higher | staged |
 | numeric | numeric, lower | **refused** |
@@ -62,7 +64,7 @@ A system trusts only the keys in the image it booted. To rotate a key, first shi
 
 - For an image that is not cached yet, the refusal comes after the download, before staging: an attacker serving an old image costs the client one download, and nothing changes on disk apart from the cached image. A check before the download would need a second manifest fetch, which the registry could answer differently, so the authoritative check stays after the pull.
 - A frozen registry (no new images at all) is not detected; D-014's other half, showing the age of the last update in the UI, belongs to C3/C8.
-- There is no override for a deliberate downgrade. The user can boot the previous version from the menu; a downgrade to an image older than both deployments is refused. Question for the owner on #75.
+- There is no override for a deliberate downgrade. The user can boot the previous version from the menu; a downgrade below the booted or staged version is refused. Question for the owner on #75.
 
 **The version label.** The `publish` job of [`c1-base.yml`](../../../.github/workflows/c1-base.yml) sets `org.opencontainers.image.version` to the commit time in UTC, `YYYYMMDD.HHMMSS` (for example `20261107.203512`). It is set with `--label` on the build, like `org.atos.source`, so the Containerfile is unchanged. Without it, every image would carry Fedora's base label (`45.20261107.0`), which only changes with a base bump. Commit time grows with each merge to `main`, and `:latest` only moves forward along `main` already (README, *Where it goes*). `20261107.x` compares higher than Fedora's `45.x`, so systems installed from older images take the first labelled update. Release images must use labels that compare higher than every CI image a release machine could have booted; the release procedure card decides the format.
 
@@ -76,18 +78,21 @@ ATOS_VM=atos-c75 tools/dev-vm/vm run tools/dev-vm/sealed.sh trust
 
 The images are the shipped Containerfile plus two VM-only lines, from a copy in `~/sealed`: the policy scope and registries.d entry point at the VM registry (`10.0.2.2:5000/atos/c1-base`), and the pinned key is a cosign key generated in the VM (`~/sealed/trust-keys/good.pub`, never committed, like every key here a test key). A second key, `wrong`, signs one image. Signing uses cosign v3.1.4 with CI's flags (legacy format, no transparency log), and `--sign-container-identity` so the signature names the registry as the guest sees it.
 
-Results (M1 Max, aarch64 under QEMU emulation, 2026-11-07; logs in `tools/dev-vm/out/sealed/trust-*.log`, filtered):
+Results (M1 Max, aarch64 under QEMU emulation, 2026-11-08, after the review fixes; logs in `tools/dev-vm/out/sealed/trust-*.log`, filtered):
 
 | Step | Result |
 | --- | --- |
 | `install` | `bootc install to-disk` from trust-1 works with the install config; it prints *Installing image: ostree-image-signed:docker://10.0.2.2:5000/atos/c1-base:latest* |
 | `stage`: unsigned | refused before any layer download: *OpenImage: A signature was required, but no signature exists* |
 | `stage`: wrong key | refused before any layer download: *cryptographic signature verification failed: invalid signature when validating ASN.1 encoded signature* |
-| `stage`: old (1.0, signed with the right key) | refused after the download, nothing staged: *Refusing image version 1.0: lower than the booted version 1.1 (signed version floor)* |
-| `stage`: `bootc upgrade` to `:latest` = trust-2 (1.2, signed) | staged (`ATOS-TRUST latest staged`) |
-| `apply` | `ATOS-BOOT image=trust-2`, with the boot counter of #56 (`bootc_fedora-45-1+2-1.conf`); `rollback:` trust-1 |
+| `stage`: old (1.0, signed with the right key), `bootc switch` | refused after the download, nothing staged: *Refusing image version 1.0: lower than the booted version 1.10 (signed version floor)* |
+| `stage`: `bootc upgrade` to `:latest` = trust-2 (1.30, signed) | staged (`ATOS-TRUST latest staged`) |
+| `stage`: `:latest` → trust-mid (1.20: above booted 1.10, below staged 1.30), `bootc upgrade` | refused: *Refusing image version 1.20: lower than the staged version 1.30* |
+| `stage`: `:latest` → trust-old, `bootc upgrade` twice, then `bootc switch` to it | all three refused. The first went through the pull (the earlier copy had been garbage-collected when trust-2 was staged); the second and the switch found it cached and were refused before `validate_update` (no *Performing Upgrade Operation* in their messages) |
+| `stage`: staged entries afterwards | `entries.staged`: `bootc_fedora-45-0.conf bootc_fedora-45-1+3.conf`; trust-2 is still staged |
+| `apply` | `ATOS-BOOT image=trust-2`, with the boot counter of #56 (`bootc_fedora-45-1+2-1.conf`); `rollback:` trust-1. The refusals left the staged update intact |
 | `previous` | boot menu, second entry: `ATOS-BOOT image=trust-1`. The older image boots; the floor does not apply to boot entries |
 
-RESULTS2
+The patch's unit tests (`version_floor`, `version_floor_booted_and_staged`) ran in the image build: 3 passed, with boot counting's.
 
-**`bootc status` shows Fedora's version.** It printed `version: 45.20261107.0` for every image: composefs status reads the **manifest annotation** `org.opencontainers.image.version`, which the images inherit from the base, not the config label the floor uses. Display only; the floor read 1.0 and 1.1 correctly. Setting the annotation as well in CI is a possible follow-up (not done here, not tested).
+**`bootc status` shows Fedora's version.** It printed `version: 45.20261107.0` for every image: composefs status reads the **manifest annotation** `org.opencontainers.image.version`, which the images inherit from the base, not the config label the floor uses. Display only; the floor reads the config labels correctly (see the refusal messages). Setting the annotation as well in CI is a possible follow-up (not done here, not tested).
