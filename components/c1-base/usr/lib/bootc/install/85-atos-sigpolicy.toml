@@ -1,4 +1,5 @@
-# Trust policy (#75): bootc install refuses a containers policy whose default is insecureAcceptAnything
-# where the backend checks it. Signature checks themselves come from /usr/share/containers/policy.json.
+# Trust policy (#75): install as if `--enforce-container-sigpolicy` were passed. On the composefs
+# backend bootc 1.17.1 records nothing for it; the signature check comes from
+# /usr/share/containers/policy.json on every pull (docs/components/c1-base/trust-policy.md).
 [install]
 enforce-container-sigpolicy = true
