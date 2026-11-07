@@ -1,0 +1,203 @@
+# C3 shell (components/c3-shell/, card #63): lint, screenshot and accessibility tests, then an
+# end-to-end run on our compositor (atos-comp nested in headless sway): the dock lists running
+# windows, AT-SPI activates one, and the shell's idle RSS and CPU are measured.
+# Reference NUC on the GPU (spec §7 numbers): only with the label `c3-nuc` (or
+# `gh workflow run c3-shell.yml -f nuc=true` once this file is on main). Like the #59 spike's
+# workflow, the NUC job runs only on the `labeled` event: remove and re-add the label to measure
+# a new commit. Docs: components/c3-shell/README.md.
+name: C3 shell
+
+on:
+  workflow_dispatch:
+    inputs:
+      nuc:
+        description: Also measure on the reference NUC (GPU, about 8 min)
+        type: boolean
+        default: true
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - components/c3-shell/**
+      - components/c4-toolkit/**
+      - third_party/slint/**
+      - .github/workflows/c3-shell.yml
+  push:
+    branches: [main]
+    paths:
+      - components/c3-shell/**
+      - components/c4-toolkit/**
+      - third_party/slint/**
+      - .github/workflows/c3-shell.yml
+
+permissions: {}
+
+# The label is part of the group, so an unrelated label cannot cancel a running NUC job.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.label.name || github.event.action || github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Nothing compiles on the NUC: build here, measure there.
+  build:
+    # Never for pull requests from forks: their code must not reach the self-hosted runner.
+    # A labeled event runs only for this workflow's own label.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       (github.event.action != 'labeled' || github.event.label.name == 'c3-nuc'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # Shell (Slint, Wayland, EGL) and atos-comp (the list in c2-compositor.yml).
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfontconfig-dev libxkbcommon-dev libwayland-dev libegl-dev \
+            libudev-dev libgbm-dev libegl1-mesa-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev \
+            libdisplay-info-dev libpixman-1-dev pkg-config clang
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            .
+            components/c3-shell
+            components/c2-compositor
+      - name: Fetch the pinned Slint and apply the patch queue
+        run: tools/slint-fork/slint-fork.sh setup
+      # Same nextest pin as ci.yml and slint-fork.yml.
+      - name: Install cargo-nextest
+        env:
+          NEXTEST_VERSION: 0.9.150
+          NEXTEST_SHA256: b0959bc64232974224cf9fb22c915845398c0e8668fa7831eb5b43fb1eef781f
+        run: |
+          curl -fsSL -o nextest.tar.gz "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${NEXTEST_SHA256}  nextest.tar.gz" | sha256sum --check
+          tar -xzf nextest.tar.gz -C ~/.cargo/bin
+          rm nextest.tar.gz
+      # Not --locked: the fork's path sources replace the crates.io entries (see slint-fork.yml).
+      - name: Lint and tests (screenshot and accessibility tree)
+        working-directory: components/c3-shell
+        env:
+          SCREENSHOT_DIFF_DIR: ${{ github.workspace }}/screenshot-diffs
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --config ../../third_party/slint/patch.toml -- -D warnings
+          cargo nextest run --config ../../third_party/slint/patch.toml
+          cargo tree -p slint --config ../../third_party/slint/patch.toml 2>/dev/null | head -1 | grep -F third_party/slint/src
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: screenshot-diffs
+          path: screenshot-diffs
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Build the shell, atos-comp and the budgets harness (release)
+        run: |
+          cargo build --release --locked -p budgets
+          (cd components/c3-shell && cargo build --release --config ../../third_party/slint/patch.toml)
+          (cd components/c2-compositor && cargo build --release --locked)
+      - name: Stage the bundle
+        run: |
+          mkdir -p bundle
+          cp target/release/budgets components/c3-shell/target/release/atos-shell \
+            components/c2-compositor/target/release/atos-comp components/c3-shell/e2e/* bundle/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: c3-bundle
+          path: bundle
+          if-no-files-found: error
+          retention-days: 14
+
+  # Hosted x86_64, pixman and llvmpipe: the dock, its tree and activation; numbers indicative only.
+  e2e-hosted:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: c3-bundle
+          path: bundle
+      - run: chmod +x bundle/*
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sway grim weston at-spi2-core gir1.2-atspi-2.0 \
+            python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core mesa-utils \
+            libseat1 libinput10 libdisplay-info1 libgbm1
+      - name: Run
+        run: bundle/run.sh bundle/atos-shell bundle/atos-comp bundle/budgets results
+      - name: Check the dock's tree, activation and idle RSS
+        run: |
+          bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"
+          { echo; echo '#### AT-SPI tree after pressing flower'; echo '```'; cat results/atspi-2.txt; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: c3-results-hosted
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Reference hardware on the GPU. Runs only if `build` succeeded, so the fork rule above covers it.
+  e2e-nuc:
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.nuc ||
+      github.event_name == 'pull_request' && github.event.label.name == 'c3-nuc'
+    runs-on: [self-hosted, nuc]
+    timeout-minutes: 25
+    permissions: {}
+    steps:
+      - name: Clean the workspace
+        run: rm -rf bundle results
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: c3-bundle
+          path: bundle
+      - run: chmod +x bundle/*
+      - name: Check the packages and GPU access (docs/reference-runner.md)
+        run: |
+          for c in sway grim dbus-run-session busctl python3 eglinfo; do
+            command -v "$c" >/dev/null || { echo "::error::$c is missing on the NUC (docs/reference-runner.md step 7)"; exit 1; }
+          done
+          python3 -c 'import gi; gi.require_version("Atspi","2.0")'
+          if ldd bundle/atos-comp | grep 'not found'; then echo "::error::atos-comp needs the libraries above on the NUC"; exit 1; fi
+          [ -r /dev/dri/renderD128 ] && [ -w /dev/dri/renderD128 ] || { echo "::error::runner cannot open /dev/dri/renderD128 (docs/reference-runner.md, GPU access)"; exit 1; }
+      # §7 idle CPU window (5 minutes).
+      - name: Run (GPU)
+        env:
+          SHELL_RENDERER: gles2
+          SHELL_CPU_WINDOW: full
+        run: bundle/run.sh bundle/atos-shell bundle/atos-comp bundle/budgets results
+      # Without weston's demo clients (not in step 7) the dock is empty: only memory is checked.
+      - name: Check
+        run: |
+          if command -v weston-flower >/dev/null; then
+            bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "weston is not installed on the NUC: measured with an empty dock, tree checks skipped" | tee -a "$GITHUB_STEP_SUMMARY"
+            SHELL_CHECK_TREE=0 bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+      # Same rule as perf.yml: a software renderer is not a GPU measurement.
+      - name: Check the renderer is the GPU
+        run: |
+          grep -E '^(egl|shell renderer):' results/environment.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          for k in 'egl' 'shell renderer'; do
+            grep -q "^$k: " results/environment.txt && ! grep -Eiq "^$k:.*(llvmpipe|softpipe|none)" results/environment.txt \
+              || { echo "::error::$k is not the GPU renderer"; exit 1; }
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: c3-results-nuc
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
