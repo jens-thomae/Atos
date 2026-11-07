@@ -285,7 +285,8 @@ update_back() { VARS=$UVARS boot "$UDISK" "$OUT/update-back.log"; }
 # session never comes up, so the health check fails.
 CDISK=$WORK/counting.raw CVARS=$WORK/counting-vars.fd
 # Printed after the report: the boot entries, with their counters.
-ENTRIES_ACTION='bootctl list --no-pager 2>&1 | grep -E "title|id:|tries" || true'
+ENTRIES_ACTION='bootctl list --no-pager 2>&1 | grep -E "title|id:|tries" || true
+ls /boot/loader/entries.staged 2>/dev/null || true'
 counting_images() {
   update_images
   sed -e '/^LABEL org.opencontainers.image.title/i RUN echo IMAGE_VERSION=dev-bad >> /usr/lib/os-release' \
