@@ -3,8 +3,9 @@
 //! atos-comp runs for its rebindable `System(Launcher)` shortcut. It lists the installed apps
 //! (`atos_shell::apps`) and starts the chosen one.
 //!
-//! A hidden layer surface cannot be shown again (platform.rs), so every opening uses a new
-//! window. One is always built ahead, EGL context and renderer included, so opening only maps it.
+//! One launcher window lives all session: opening maps it again on a new surface with its
+//! renderer's caches (glyphs, icon textures, shadows) still warm, and closing clears the search
+//! while it is hidden.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -27,10 +28,10 @@ const REQUEST: &[u8] = b"launcher";
 struct State {
     apps: Vec<App>,
     icons: HashMap<String, slint::Image>,
-    shown: Option<Launcher>,
-    /// What the shown launcher lists, in its order.
+    ui: Option<Launcher>,
+    shown: bool,
+    /// What the launcher lists, in its order.
     results: Vec<App>,
-    next: Option<Launcher>,
     opened_at: Option<Instant>,
 }
 
@@ -38,20 +39,26 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::default();
 }
 
-/// Builds the first launcher, reads the installed apps and listens for `--launcher`.
+/// Builds the launcher (hidden), reads the installed apps and listens for `--launcher`.
 pub fn init() {
-    STATE.with(|s| s.borrow_mut().next = build().ok());
+    match Launcher::new() {
+        Ok(ui) => {
+            ui.on_search(|query| search(&query));
+            // Deferred: hiding the window inside its own event handler is not safe.
+            ui.on_launch(|i| drop(slint::invoke_from_event_loop(move || launch(i as usize))));
+            ui.on_dismiss(|| drop(slint::invoke_from_event_loop(close)));
+            STATE.with(|s| s.borrow_mut().ui = Some(ui));
+        }
+        Err(e) => eprintln!("launcher: {e}"),
+    }
     rescan();
     platform::on_frame_done(|w| {
         let opened = STATE.with(|s| {
             let mut s = s.borrow_mut();
-            let mine = s
-                .shown
-                .as_ref()
-                .is_some_and(|l| std::ptr::eq(l.window(), w));
+            let mine = s.ui.as_ref().is_some_and(|l| std::ptr::eq(l.window(), w));
             if mine { s.opened_at.take() } else { None }
         });
-        // The first frame of a new launcher is on screen: §7 "popover fully visible".
+        // The first frame after opening is on screen: §7 "popover fully visible".
         if let Some(t) = opened {
             println!("LAUNCHER_OPEN_MS {:.1}", t.elapsed().as_secs_f64() * 1000.);
             std::io::stdout().flush().ok();
@@ -63,18 +70,17 @@ pub fn init() {
 }
 
 pub fn toggle() {
-    let shown = STATE.with(|s| s.borrow().shown.is_some());
+    let shown = STATE.with(|s| s.borrow().shown);
     if shown { close() } else { open() }
+}
+
+fn ui() -> Option<Launcher> {
+    STATE.with(|s| s.borrow().ui.as_ref().map(|u| u.clone_strong()))
 }
 
 fn open() {
     let started = Instant::now();
-    let Some(ui) = STATE
-        .with(|s| s.borrow_mut().next.take())
-        .or_else(|| build().ok())
-    else {
-        return;
-    };
+    let Some(ui) = ui() else { return };
     let placement = platform::Placement {
         anchor: Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
         margin: [0; 4],
@@ -86,37 +92,25 @@ fn open() {
     }
     STATE.with(|s| {
         let mut s = s.borrow_mut();
-        s.results = s.apps.clone();
-        s.shown = Some(ui);
+        s.shown = true;
         s.opened_at = Some(started);
     });
     // Apps installed since the last opening show up once the scan is done.
     rescan();
 }
 
+/// Hides the launcher; while hidden, clears the search for the next opening.
 fn close() {
-    let Some(ui) = STATE.with(|s| s.borrow_mut().shown.take()) else {
+    let was_shown = STATE.with(|s| std::mem::take(&mut s.borrow_mut().shown));
+    let Some(ui) = ui().filter(|_| was_shown) else {
         return;
     };
     ui.hide().ok();
-    drop(ui);
-    let next = build().ok();
-    STATE.with(|s| s.borrow_mut().next = next);
-}
-
-/// A hidden launcher listing every app.
-fn build() -> Result<Launcher, slint::PlatformError> {
-    let ui = Launcher::new()?;
-    ui.on_search(|query| search(&query));
-    // Deferred: closing drops the launcher, which must not happen inside its own callback.
-    ui.on_launch(|i| drop(slint::invoke_from_event_loop(move || launch(i as usize))));
-    ui.on_dismiss(|| drop(slint::invoke_from_event_loop(close)));
-    STATE.with(|s| {
-        let s = &mut *s.borrow_mut();
-        let all = s.apps.clone();
-        ui.set_apps(items(s, &all));
-    });
-    Ok(ui)
+    let searched = !ui.get_query().is_empty();
+    ui.invoke_reset();
+    if searched {
+        search("");
+    }
 }
 
 fn items(s: &mut State, apps: &[App]) -> slint::ModelRc<AppItem> {
@@ -140,7 +134,7 @@ fn search(query: &str) {
         s.results = apps::search(&s.apps, query).into_iter().cloned().collect();
         let results = s.results.clone();
         let model = items(s, &results);
-        if let Some(ui) = &s.shown {
+        if let Some(ui) = &s.ui {
             ui.set_apps(model);
         }
     });
@@ -168,28 +162,14 @@ fn rescan() {
     std::thread::spawn(|| {
         let found = apps::installed();
         slint::invoke_from_event_loop(move || {
-            let (changed, query) = STATE.with(|s| {
+            let query = STATE.with(|s| {
                 let mut s = s.borrow_mut();
                 let changed = s.apps != found;
-                if changed {
-                    s.apps = found;
-                }
-                (changed, s.shown.as_ref().map(|l| l.get_query()))
+                s.apps = found;
+                changed.then(|| s.ui.as_ref().map(|u| u.get_query()).unwrap_or_default())
             });
-            if !changed {
-                return;
-            }
             if let Some(q) = query {
                 search(&q);
-            }
-            let next = STATE.with(|s| s.borrow_mut().next.take());
-            if let Some(ui) = next {
-                STATE.with(|s| {
-                    let s = &mut *s.borrow_mut();
-                    let all = s.apps.clone();
-                    ui.set_apps(items(s, &all));
-                    s.next = Some(ui);
-                });
             }
         })
         .ok();

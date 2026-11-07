@@ -111,6 +111,14 @@ export component Launcher inherits Window {
     // Rows in view at once; more scroll.
     out property <int> rows: 8;
 
+    // Empties the field, focuses it and scrolls to the top; the shell calls it on closing.
+    public function reset() {
+        field.text = "";
+        root.current = -1;
+        field.focus();
+        list.content-y = 0;
+    }
+
     // -1: the search field has focus; otherwise the focused row.
     property <int> current: -1;
 

@@ -13,7 +13,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `src/launcher.rs` | Opens and closes the launcher, the `--launcher` socket, starts the chosen app |
 | `src/apps.rs` | Installed apps from desktop entries, `Exec=` parsing, search by name |
 | `data/system_actions.ron` | atos-comp's command for its `System(Launcher)` shortcut, for the image to install |
-| `src/platform.rs` | Slint platform on wlr-layer-shell: the #59 spike's backend ([layer-shell-spike.md](../../docs/components/c4-toolkit/layer-shell-spike.md)) without its popups, popup pool and timing hooks, plus one layer surface per output and output hotplug. Replaced by the C4 backend crate (spike section 6, card 1) |
+| `src/platform.rs` | Slint platform on wlr-layer-shell: the #59 spike's backend ([layer-shell-spike.md](../../docs/components/c4-toolkit/layer-shell-spike.md)) without its popups, popup pool and timing hooks, plus one layer surface per output, output hotplug, overlay placement and re-showing a hidden window (#64). Replaced by the C4 backend crate (spike section 6, card 1) |
 | `src/accesskit.rs` | The spike's AccessKit port (modified copy of a Slint file, GPL-3.0-only, D-013) |
 | `src/toplevels.rs` | Running windows: `ext-foreign-toplevel-list-v1` for the list, atos-comp's `zcosmic_toplevel_info_v1` (v2+) for the activated state, `zcosmic_toplevel_manager_v1.activate` on click |
 | `src/icons.rs` | App icon from the app ID: `Icon=` of `<app_id>.desktop`, then hicolor and `pixmaps` in the XDG data directories and Flatpak's export directories |
@@ -37,7 +37,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 - **Apps:** desktop entries in `applications/` of `$XDG_DATA_HOME`, Flatpak's user and system export directories and `$XDG_DATA_DIRS`; the first directory with a desktop file ID wins. Left out: `NoDisplay`, `Hidden`, `OnlyShowIn`/`NotShowIn` against `$XDG_CURRENT_DESKTOP`, a missing `TryExec`, `Terminal=true` (no terminal app yet). The list is read at start and again on every opening, off the event loop.
 - **Search:** case-insensitive on the name; names that start with the query first, then a word that starts with it, then anywhere.
 - **Keyboard:** the field has the focus; Down and Up move the focus through the apps and back to the field (a screen reader reads each app's name), Return or Space starts the focused app, Return in the field starts the first match. Every app is an AT-SPI button whose default action starts it.
-- **Opening time:** a new launcher window is always built ahead, so opening only maps it. The shell prints `LAUNCHER_OPEN_MS <ms>` from the trigger to the compositor's frame callback for the first frame; the e2e run checks it against §7's 100 ms on the NUC.
+- **Opening time:** one launcher window lives all session. Hiding drops its layer surface, and showing creates a new `wl_surface` for the same window (`platform.rs`), so the renderer keeps its caches (glyphs, icon textures, the panel's shadows) and only the first opening pays for them. The shell prints `LAUNCHER_OPEN_MS <ms>` from the trigger to the compositor's frame callback for the first frame; the e2e run checks it against §7's 100 ms on the NUC.
 
 ## Build and test
 

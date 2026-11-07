@@ -123,6 +123,19 @@ fn typing_searches_and_return_starts_the_best_match() {
 }
 
 #[test]
+fn reset_clears_the_search_and_focuses_the_field() {
+    init();
+    let (ui, seen) = launcher();
+    key(&ui, "x");
+    key(&ui, Key::DownArrow);
+    ui.invoke_reset();
+    assert_eq!(ui.get_query(), "");
+    key(&ui, Key::Space); // typed into the field, not a row's launch
+    assert_eq!(ui.get_query(), " ");
+    assert_eq!(seen.launched.get(), -1);
+}
+
+#[test]
 fn accessible_action_launches_the_app() {
     init();
     let (ui, seen) = launcher();

@@ -118,7 +118,7 @@ fn windows() -> Vec<Rc<LayerWindow>> {
 }
 
 fn window_for_surface(s: &wl_surface::WlSurface) -> Option<Rc<LayerWindow>> {
-    windows().into_iter().find(|w| &w.surface == s)
+    windows().into_iter().find(|w| &*w.surface.borrow() == s)
 }
 
 fn window_by_id(id: u32) -> Option<Rc<LayerWindow>> {
@@ -405,9 +405,12 @@ pub struct LayerWindow {
     id: u32,
     window: slint::Window,
     output: Option<wl_output::WlOutput>,
-    surface: wl_surface::WlSurface,
-    /// `Some` while shown. sctk destroys the wl_surface when this is dropped, so a hidden
-    /// window cannot be shown again (the shell drops it instead).
+    /// Replaced on every showing after the first: sctk destroys the wl_surface with its
+    /// LayerSurface on hide. The EGL context and renderer stay, with their caches (the launcher
+    /// shows and hides one window all session, #64).
+    surface: RefCell<wl_surface::WlSurface>,
+    shown_before: Cell<bool>,
+    /// `Some` while shown.
     layer: RefCell<Option<LayerSurface>>,
     renderer: FemtoVGRenderer,
     gl: Rc<Gl>,
@@ -452,7 +455,8 @@ impl LayerWindow {
             id,
             window: slint::Window::new(self_weak.clone() as Weak<dyn WindowAdapter>),
             output: NEXT_OUTPUT.with(|n| n.borrow().clone()),
-            surface,
+            surface: RefCell::new(surface),
+            shown_before: Cell::new(false),
             layer: RefCell::new(None),
             renderer,
             gl,
@@ -511,9 +515,12 @@ impl LayerWindow {
         self.accesskit
             .borrow_mut()
             .set_platform_adapter(Some(self.platform_accesskit_adapter()));
+        if self.shown_before.replace(true) {
+            *self.surface.borrow_mut() = g.compositor.create_surface(&g.qh);
+        }
         let surface = g.layer_shell.create_layer_surface(
             &g.qh,
-            self.surface.clone(),
+            self.surface.borrow().clone(),
             if placement.overlay {
                 Layer::Overlay
             } else {
@@ -562,7 +569,10 @@ impl LayerWindow {
     fn configure(&self, width: u32, height: u32) {
         let size = PhysicalSize::new(width.max(1), height.max(1));
         self.size.set(size);
-        if let Err(e) = self.gl.attach(&self.surface, size.width, size.height) {
+        if let Err(e) = self
+            .gl
+            .attach(&self.surface.borrow(), size.width, size.height)
+        {
             eprintln!("EGL surface: {e}");
             return;
         }
@@ -589,7 +599,8 @@ impl LayerWindow {
         }
         self.dirty.set(false);
         let g = globals();
-        self.surface.frame(&g.qh, self.surface.clone());
+        let surface = self.surface.borrow().clone();
+        surface.frame(&g.qh, surface.clone());
         self.frame_pending.set(true);
         if let Err(e) = self.renderer.render() {
             eprintln!("render: {e}");
@@ -618,7 +629,7 @@ impl Drop for LayerWindow {
         self.gl.detach();
         // Dropping the LayerSurface destroys the wl_surface; otherwise destroy it here.
         if self.layer.get_mut().take().is_none() {
-            self.surface.destroy();
+            self.surface.get_mut().destroy();
         }
     }
 }
