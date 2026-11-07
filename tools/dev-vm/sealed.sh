@@ -207,12 +207,12 @@ push() { sudo podman push -q --tls-verify=false "$1" "docker://$2"; } # <local i
 update_images() {
   local ctx="$HERE/../../components/c1-base"
   registry_up
-  sudo podman build --build-context repo="$HERE/../.." --label org.opencontainers.image.version=dev-1 \
+  sudo podman build --build-context repo="$HERE/../.." \
     -t "$IMAGE:dev-1" "$ctx"
   sed '/^LABEL org.opencontainers.image.title/i RUN echo IMAGE_VERSION=dev-2 >> /usr/lib/os-release' \
     "$ctx/Containerfile" > "$WORK/Containerfile.dev-2"
   grep -q IMAGE_VERSION=dev-2 "$WORK/Containerfile.dev-2"
-  sudo podman build --build-context repo="$HERE/../.." --label org.opencontainers.image.version=dev-2 \
+  sudo podman build --build-context repo="$HERE/../.." \
     -f "$WORK/Containerfile.dev-2" -t "$IMAGE:dev-2" "$ctx"
   push "$IMAGE:dev-1" "$REG:dev-1"
   push "$IMAGE:dev-2" "$REG:dev-2"
