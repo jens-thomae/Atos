@@ -78,4 +78,8 @@ jobs:
       # disk that exists only on this runner, so printing it publicly is harmless.
       - name: Serial logs
         if: always()
-        run: tail -n 200 components/c11-installer/out/*.log 2>/dev/null | tr -d '\r' || true
+        run: |
+          for f in components/c11-installer/out/*.log; do
+            echo "== $f: start (firmware, boot loader)"; head -c 6000 "$f" | tr -d '\r' | sed 's/\x1b\[[0-9;?=]*[a-zA-Z]//g'
+            echo; echo "== $f: end"; tail -n 200 "$f" | tr -d '\r'
+          done || true
