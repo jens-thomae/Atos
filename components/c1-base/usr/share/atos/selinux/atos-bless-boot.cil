@@ -1,0 +1,4 @@
+; Boot counting (#56): systemd-bless-boot runs as init_t and renames the boot entry on the ESP
+; (dosfs_t) to drop its counter. Fedora's policy denies that one permission:
+; avc: denied { rename } for comm="systemd-bless-b" scontext=init_t tcontext=dosfs_t tclass=file
+(allow init_t dosfs_t (file (rename)))

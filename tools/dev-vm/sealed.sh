@@ -22,6 +22,19 @@
 #            rollback  boots the default entry (dev-2) and runs `bootc rollback`
 #            back      boots the default entry: dev-1
 #            `update <step>` runs one step; `update` runs all of them in order
+#   counting automatic rollback through boot counting (#56), on its own disk ~/sealed/counting.raw:
+#            images      as for `update`, plus four images that fail on a counted boot: dev-bad
+#                        (atos-comp exits), dev-hang (atos-comp never opens its socket), dev-panic
+#                        (the kernel panics) and dev-emerg (the initrd enters emergency mode)
+#            install     installs dev-1, as `update install` does
+#            stage-good  boots dev-1, stages dev-2 (`bootc upgrade` writes its entry with `+3`)
+#            good        boots dev-2 (counted), the health check passes, the entry loses its counter
+#            bad, hang, panic, emerg
+#                        each boots dev-2 and stages the failing image, then boots it until all
+#                        three tries are used and systemd-boot boots dev-2 by itself. hang keeps the
+#                        image's 2 min check timeout
+#            hang-target as hang, with the image's 5 min boot-complete.target timeout as well
+#            `counting <step>` runs one step; `counting` runs all of them in order
 # Disks live on the VM disk in ~/sealed; logs go to tools/dev-vm/out/sealed/.
 # QEMU runs without KVM (Apple M1 has no nested virtualisation): a boot takes minutes.
 set -euo pipefail
@@ -46,6 +59,23 @@ ImportCredential=atos.*
 StandardOutput=journal+console
 ExecStart=/bin/sh -c "systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | head -20; echo; bootc status; echo; cat /proc/cmdline; findmnt -no SOURCE,FSTYPE,OPTIONS /; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; systemctl poweroff --no-block"'
 
+# Every boot, early: the image version and the boot counter systemd-boot reports (the entry file
+# after its rename, e.g. `...+2-1.conf`; none for an entry without a counter).
+# shellcheck disable=SC2016 # expands in the guest
+BOOTINFO='v=$(sed -n s/^IMAGE_VERSION=//p /usr/lib/os-release)
+e=$(tail -c +5 /sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f 2>/dev/null | tr -d "\000")
+echo "ATOS-BOOT image=${v:-dev-1} counter=${e:-none}"'
+# shellcheck disable=SC2016 # systemd expands it
+BOOTINFO_UNIT='[Unit]
+Description=Atos boot info (dev VM only)
+ConditionPathExists=!/etc/initrd-release
+After=local-fs.target
+[Service]
+Type=oneshot
+ImportCredential=atos.*
+StandardOutput=journal+console
+ExecStart=/bin/sh ${CREDENTIALS_DIRECTORY}/atos.bootinfo'
+
 # One systemd credential, passed over SMBIOS: cred <name> <content>
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 
@@ -61,6 +91,13 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
     cred systemd.unit-dropin.multi-user.target~atos-report $'[Unit]\nWants=atos-report.service'
     # Without KVM, udev in the initrd needs longer than the default 45 s to find the root partition.
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
+    # The same for the boot-counting timeouts (#56): a counted boot takes minutes here.
+    # SHIPPED_CHECK / SHIPPED_TARGET keep the image's own timeouts, to exercise them (counting hang).
+    [ -n "${SHIPPED_CHECK:-}" ] || cred systemd.unit-dropin.atos-session-check.service~vm $'[Service]\nTimeoutStartSec=20min'
+    [ -n "${SHIPPED_TARGET:-}" ] || cred systemd.unit-dropin.boot-complete.target~vm $'[Unit]\nJobTimeoutSec=40min'
+    cred systemd.extra-unit.atos-bootinfo.service "$BOOTINFO_UNIT"
+    cred systemd.unit-dropin.sysinit.target~atos-bootinfo $'[Unit]\nWants=atos-bootinfo.service'
+    cred atos.bootinfo "$BOOTINFO"
     [ -z "${ACTION:-}" ] || cred atos.action "$ACTION")
   local nic=(-nic none) serial=(-serial file:"$log") sock=$WORK/serial.sock
   # shellcheck disable=SC2054 # commas are QEMU option syntax; no PXE option ROM (not installed)
@@ -69,8 +106,9 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
   [ -z "${MENU:-}" ] || serial=(-chardev socket,id=s0,path="$sock",server=on,wait=off,logfile="$log" -serial chardev:s0)
   echo "booting $disk, serial log: $log"
   rm -f "$log" "$sock"
-  timeout 45m qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none \
-    "${nic[@]}" \
+  # virtio-gpu: atos-comp needs a DRM device for the session the health check (#56) waits for.
+  timeout "${TIMEOUT:-45m}" qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none \
+    -device virtio-gpu-pci "${nic[@]}" \
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.secboot.fd \
     -drive if=pflash,format=raw,file="$vars" \
     -drive if=virtio,format=raw,file="$disk" \
@@ -79,13 +117,15 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
   [ -z "${MENU:-}" ] || pick_second_entry "$sock"
   # A good boot powers off after the report; a halted one is stopped here.
   local halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|Access [Dd]enied'
+  # HALT=<regex> narrows what stops QEMU: boot counting expects panics and emergency mode to reboot.
+  local stop=${HALT:-$halt}
   while kill -0 "$pid" 2>/dev/null; do
     # The firmware tries its built-in EFI Shell first, which Secure Boot refuses: not a halt.
-    grep -av 'EFI Internal Shell' "$log" 2>/dev/null | grep -aqE "$halt" && kill "$pid"
+    grep -av 'EFI Internal Shell' "$log" 2>/dev/null | grep -aqE "$stop" && kill "$pid"
     sleep 5
   done
   tr -d '\r' < "$log" | grep -av 'EFI Internal Shell' | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
-    | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|sh\[[0-9]+\]:|fs-verity|/sbin/init|$halt"
+    | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|ATOS-BOOT|sh\[[0-9]+\]:|session-check|boot is (good|bad)|reboot: Restarting|counted boot failed|Timed out|timed out|fs-verity|/sbin/init|$halt"
 }
 
 step_build() { sudo podman build --build-context repo="$HERE/../.." -t "$IMAGE" "$HERE/../../components/c1-base"; }
@@ -217,14 +257,15 @@ update_images() {
   push "$IMAGE:dev-1" "$REG:dev-1"
   push "$IMAGE:dev-2" "$REG:dev-2"
 }
-update_install() {
+update_install() { # [disk]
+  local disk=${1:-$UDISK}
   registry_up
   push "$IMAGE:dev-1" "$REG:latest"
-  rm -f "$UDISK" && truncate -s 20G "$UDISK"
+  rm -f "$disk" && truncate -s 20G "$disk"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
     "$IMAGE:dev-1" bootc install to-disk --generic-image --via-loopback \
-    --target-imgref "$GUEST_REG:latest" /out/update.raw
+    --target-imgref "$GUEST_REG:latest" "/out/$(basename "$disk")"
 }
 # Runs in the guest: marks the plain-HTTP dev registry as insecure, then times `bootc upgrade`
 # and counts the bytes received on the network while it runs.
@@ -247,10 +288,62 @@ update_previous() { VARS=$UVARS MENU=1 boot "$UDISK" "$OUT/update-previous.log";
 update_rollback() { VARS=$UVARS ACTION='bootc rollback && bootc status' boot "$UDISK" "$OUT/update-rollback.log"; }
 update_back() { VARS=$UVARS boot "$UDISK" "$OUT/update-back.log"; }
 
+# Boot counting (#56). Each failing image is dev-2 plus one or two lines, from a copy of the
+# Containerfile: dev-bad's compositor exits at once (the session never comes up), dev-hang's never
+# opens its socket (the check times out), dev-panic's kernel panics (rdinit exits) and dev-emerg's
+# initrd goes to emergency mode. The last two fail before switch-root.
+CDISK=$WORK/counting.raw CVARS=$WORK/counting-vars.fd
+# Printed after the report: the boot entries, with their counters.
+ENTRIES_ACTION='bootctl list --no-pager 2>&1 | grep -E "title|id:|tries" || true
+ls /boot/loader/entries.staged 2>/dev/null || true'
+variant() { # <name> <RUN line>...: builds dev-<name> and pushes it to the registry
+  local name=$1 f=$WORK/Containerfile.dev-$1 l args=()
+  shift
+  for l in "IMAGE_VERSION=dev-$name >> /usr/lib/os-release" "$@"; do
+    [ "${l#IMAGE_VERSION}" = "$l" ] || l="echo $l"
+    args+=(-e "/^LABEL org.opencontainers.image.title/i RUN $l")
+  done
+  sed "${args[@]}" "$HERE/../../components/c1-base/Containerfile" > "$f"
+  grep -q "IMAGE_VERSION=dev-$name" "$f"
+  sudo podman build --build-context repo="$HERE/../.." -f "$f" -t "$IMAGE:dev-$name" "$HERE/../../components/c1-base"
+  push "$IMAGE:dev-$name" "$REG:dev-$name"
+}
+counting_images() {
+  update_images
+  variant bad 'ln -sf false /usr/bin/atos-comp'
+  variant hang "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > /usr/bin/atos-comp"
+  variant hang-target "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > /usr/bin/atos-comp"
+  variant panic "echo 'kargs = [\"rdinit=/usr/bin/true\"]' > /usr/lib/bootc/kargs.d/90-dev-panic.toml"
+  variant emerg "echo 'kargs = [\"rd.systemd.unit=emergency.target\"]' > /usr/lib/bootc/kargs.d/90-dev-emerg.toml"
+}
+counting_install() { update_install "$CDISK"; }
+counting_stage() { # <image> <log> [fresh]: points :latest at <image>, boots the default entry, stages it
+  registry_up
+  push "$IMAGE:$1" "$REG:latest"
+  VARS=$CVARS NET=1 ACTION="$STAGE_ACTION
+$ENTRIES_ACTION" boot "$CDISK" "$OUT/$2.log" "${3:-}"
+}
+counting_fail() { # <image>: stages it from dev-2, then boots it until systemd-boot falls back to dev-2
+  counting_stage "dev-$1" "counting-stage-$1"
+  VARS=$CVARS TIMEOUT=150m ACTION=$ENTRIES_ACTION boot "$CDISK" "$OUT/counting-$1.log"
+}
+counting_stage-good() { counting_stage dev-2 counting-stage-good fresh; }
+counting_good() { VARS=$CVARS ACTION=$ENTRIES_ACTION boot "$CDISK" "$OUT/counting-good.log"; }
+counting_bad() { counting_fail bad; }
+# Before switch-root: panics and emergency mode must reboot, so they do not stop QEMU here.
+counting_panic() { HALT='Freezing execution|[Ss]ecurity [Vv]iolation|Access [Dd]enied' counting_fail panic; }
+counting_emerg() { HALT='Freezing execution|[Ss]ecurity [Vv]iolation|Access [Dd]enied' counting_fail emerg; }
+# The image's own timeouts: the check's 2 min, then (with a slow boot here) the target's 5 min.
+counting_hang() { SHIPPED_CHECK=1 counting_fail hang; }
+# dev-hang-target is dev-hang under another name: `bootc upgrade` stages nothing for an image that
+# is already deployed (dev-hang stays the rollback entry after the hang step).
+counting_hang-target() { SHIPPED_CHECK=1 SHIPPED_TARGET=1 counting_fail hang-target; }
+
 case "${1:-}" in
   build|disk|boot) "step_$1" ;;
   tamper) step_tamper "${2:-}" ;;
   all) step_build; step_disk; step_boot; step_tamper ;;
   update) for s in ${2:-images install stage apply previous rollback back}; do "update_$s"; done ;;
-  *) sed -n '2,23p' "$0" >&2; exit 2 ;;
+  counting) for s in ${2:-images install stage-good good bad hang hang-target panic emerg}; do "counting_$s"; done ;;
+  *) sed -n '2,37p' "$0" >&2; exit 2 ;;
 esac

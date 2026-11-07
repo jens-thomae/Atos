@@ -1,0 +1,17 @@
+# Boot health check (#56, docs/components/c1-base/boot-counting.md). Only runs on boots with a boot
+# counter: systemd-bless-boot pulls in boot-complete.target, which requires this unit. Success lets
+# systemd-bless-boot mark the entry good; failure reboots, and systemd-boot counts a failed try.
+[Unit]
+Description=Atos boot health check: the desktop session runs
+After=greetd.service
+Before=boot-complete.target
+FailureAction=reboot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/atos/session-check
+TimeoutStartSec=2min
+StandardOutput=journal+console
+
+[Install]
+RequiredBy=boot-complete.target
