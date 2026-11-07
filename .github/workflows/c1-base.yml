@@ -20,7 +20,9 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/jens-thomae/atos/c1-base
-  # Layer cache (#86). Written only by the main publish job; pull requests read it and never write.
+  # Layer cache (#86), for pull request builds only. Trust boundary: a same-repo PR can raise its own token to
+  # packages: write and push to this cache, so the signed publish job never reads it (no --cache-from there).
+  # Publish still writes it, from a from-scratch build, to keep it warm for PRs.
   # --cache-ttl: cached dnf/rustup layers are reused for at most a week, so Fedora updates still arrive.
   CACHE: ghcr.io/jens-thomae/atos/c1-base-cache
   CACHE_TTL: 168h
@@ -50,7 +52,7 @@ jobs:
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    # packages: read only, to pull the layer cache (#86); a pull request can never push.
+    # packages: read, to pull the layer cache (#86). Not a boundary: a PR can edit this block. Publish never reads the cache.
     permissions:
       contents: read
       packages: read
@@ -106,13 +108,13 @@ jobs:
       # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      # Layer cache (#86): read and written here only. The login is separate from Push's, which stays as it was.
+      # Layer cache (#86): write only, never read: every signed image is built from scratch. The login is separate from Push's, which stays as it was.
       - name: Log in to the layer cache
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
       # The label tells users where the corresponding source is (GPL, D-013); the tag is built below.
-      - run: podman build --pull=missing --cache-from "$CACHE" --cache-to "$CACHE" --cache-ttl "$CACHE_TTL" --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source" -t c1-base components/c1-base
+      - run: podman build --pull=missing --cache-to "$CACHE" --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source" -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
       - name: UKI and systemd-boot are signed and seal the image (#54)
