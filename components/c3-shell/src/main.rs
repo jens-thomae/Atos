@@ -6,6 +6,7 @@ mod accesskit;
 mod audio;
 mod control_centre;
 mod platform;
+mod portal;
 mod services;
 mod toplevels;
 

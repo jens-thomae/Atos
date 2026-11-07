@@ -8,16 +8,19 @@
 //! are read again every few seconds; closed, nothing polls (idle CPU budget, §7).
 
 use std::cell::RefCell;
+use std::io::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
-use atos_shell::control::{self, Quick};
+use atos_shell::control::{self, PrivacySource, Quick};
 use atos_shell::{ControlCentre, OutputItem, Palette, PowerAction, config};
 use sctk::shell::wlr_layer::Anchor;
 use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
 use crate::audio::{self, Audio};
+use crate::portal::Portal;
 use crate::{platform, services};
 
 /// The Settings app (C8) by desktop-entry id; nothing happens if it is not installed.
@@ -29,10 +32,18 @@ struct Session {
     brightness: Option<f32>,
     audio: Audio,
     audio_handle: Option<audio::Handle>,
+    /// When the panel was asked for; taken by the first frame shown (`CONTROL_CENTRE_OPEN_MS`).
+    opened_at: Option<Instant>,
     /// Open panel, if any.
     open: Option<Rc<ControlCentre>>,
     /// Re-reads the services while the panel is open.
     poll: Timer,
+    /// Source of the privacy chip; none is wired up yet, so the chip stays hidden.
+    privacy: Option<Box<dyn PrivacySource>>,
+    /// Feeds the brightness worker (created on first use).
+    brightness_tx: Option<mpsc::Sender<f32>>,
+    /// Tells apps about dark mode (xdg-desktop-portal Settings backend).
+    portal: Option<Portal>,
     /// Applies dark mode to every shell window (set by `main`).
     theme: Option<Rc<dyn Fn(bool)>>,
 }
@@ -58,9 +69,28 @@ pub fn init(apply_theme: impl Fn(bool) + 'static) {
         s.quick.dark_mode = dark;
         s.quick.do_not_disturb = dnd;
         s.audio_handle = handle;
+        s.portal = Portal::start(dark);
         s.theme = Some(Rc::new(apply_theme));
     });
     theme(dark);
+    platform::on_shown(|w| {
+        let opened = SESSION.with(|s| {
+            let mut s = s.borrow_mut();
+            let mine = s
+                .open
+                .as_ref()
+                .is_some_and(|ui| std::ptr::eq(ui.window(), w));
+            if mine { s.opened_at.take() } else { None }
+        });
+        // The first frame after opening is on screen: §7 "popover fully visible".
+        if let Some(t) = opened {
+            println!(
+                "CONTROL_CENTRE_OPEN_MS {:.1}",
+                t.elapsed().as_secs_f64() * 1000.
+            );
+            std::io::stdout().flush().ok();
+        }
+    });
 }
 
 fn theme(dark: bool) {
@@ -90,6 +120,7 @@ fn close() {
 }
 
 fn open() -> Result<(), Box<dyn std::error::Error>> {
+    let started = Instant::now();
     let ui = Rc::new(ControlCentre::new()?);
     ui.set_power_actions(ModelRc::new(VecModel::from(vec![
         PowerAction {
@@ -108,7 +139,11 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
     ui.global::<Palette>()
         .set_dark(SESSION.with(|s| s.borrow().quick.dark_mode));
     wire(&ui);
-    SESSION.with(|s| s.borrow_mut().open = Some(ui.clone()));
+    SESSION.with(|s| {
+        let mut s = s.borrow_mut();
+        s.open = Some(ui.clone());
+        s.opened_at = Some(started);
+    });
     sync();
 
     // Above the dock's right end: the dock's height and gap, plus the panel's own gap.
@@ -148,11 +183,11 @@ fn wire(ui: &Rc<ControlCentre>) {
         });
     });
     ui.on_brightness_changed(|v| {
-        SESSION.with(|s| s.borrow_mut().brightness = Some(v));
-        std::thread::spawn(move || {
-            if let Err(e) = services::set_brightness(v) {
-                eprintln!("control centre: brightness: {e}");
-            }
+        SESSION.with(|s| {
+            let mut s = s.borrow_mut();
+            s.brightness = Some(v);
+            let tx = s.brightness_tx.get_or_insert_with(brightness_worker);
+            tx.send(v).ok();
         });
     });
     ui.on_volume_changed(|v| {
@@ -169,6 +204,23 @@ fn wire(ui: &Rc<ControlCentre>) {
             }
         });
     });
+}
+
+/// One thread applies brightness changes in order and skips the ones a newer value has replaced,
+/// so a drag cannot end on an earlier value than where the slider stopped.
+fn brightness_worker() -> mpsc::Sender<f32> {
+    let (tx, rx) = mpsc::channel::<f32>();
+    std::thread::spawn(move || {
+        while let Ok(mut v) = rx.recv() {
+            while let Ok(newer) = rx.try_recv() {
+                v = newer;
+            }
+            if let Err(e) = services::set_brightness(v) {
+                eprintln!("control centre: brightness: {e}");
+            }
+        }
+    });
+    tx
 }
 
 fn tile_clicked(id: SharedString) {
@@ -219,6 +271,11 @@ fn store(key: &str, on: bool) {
     });
     if key == "dark_mode" {
         theme(on);
+        SESSION.with(|s| {
+            if let Some(p) = &s.borrow().portal {
+                p.set_dark(on);
+            }
+        });
     }
     sync();
 }
@@ -245,17 +302,20 @@ fn refresh() {
 
 /// Puts the session's state into the open panel. A slider being dragged keeps the user's value.
 fn sync() {
-    let Some((ui, quick, brightness, audio)) = SESSION.with(|s| {
+    let Some((ui, quick, brightness, audio, chip)) = SESSION.with(|s| {
         let s = s.borrow();
+        let chip = control::chip_text(s.privacy.as_deref());
         Some((
             s.open.clone()?,
             s.quick.clone(),
             s.brightness,
             s.audio.clone(),
+            chip,
         ))
     }) else {
         return;
     };
+    ui.set_privacy(chip.into());
     ui.set_tiles(ModelRc::new(VecModel::from(control::tiles(&quick))));
     ui.set_brightness_available(brightness.is_some());
     if let Some(b) = brightness {

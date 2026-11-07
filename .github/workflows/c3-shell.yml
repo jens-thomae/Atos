@@ -178,7 +178,10 @@ jobs:
           SHELL_CPU_WINDOW: full
         run: bundle/run.sh bundle/atos-shell bundle/atos-comp bundle/budgets results
       # Without weston's demo clients (not in step 7) the dock is empty: only memory is checked.
+      # §7: a popover is fully visible within 100 ms.
       - name: Check
+        env:
+          SHELL_OPEN_MS: 100
         run: |
           if command -v weston-flower >/dev/null; then
             bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"

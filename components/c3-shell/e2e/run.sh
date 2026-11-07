@@ -36,6 +36,15 @@ if [ "${1:-}" = inner ]; then
   python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true
   sleep 0.5
   python3 -I "$HERE/atspi.py" dump "$OUT/atspi-cc-closed.txt" || true
+  # Four more openings, each timed by the shell (CONTROL_CENTRE_OPEN_MS, press to frame shown).
+  for i in 1 2 3 4; do
+    python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true; sleep 1
+    python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true; sleep 0.5
+  done
+  grep '^CONTROL_CENTRE_OPEN_MS' "$OUT/shell.log" | cut -d' ' -f2 >"$OUT/control-centre-open-ms.txt" || true
+  # Dark mode reaches apps through the portal backend (owner decision on #65): read it back.
+  busctl --user call org.freedesktop.impl.portal.desktop.atos /org/freedesktop/portal/desktop \
+    org.freedesktop.impl.portal.Settings Read ss org.freedesktop.appearance color-scheme >"$OUT/portal-color-scheme.txt" 2>&1 || true
   kill $SH; wait $SH 2>/dev/null || true
   # Idle RSS and CPU of a fresh shell process with the two windows in its dock.
   "$BUDGETS" "$SHELL_BIN" --cpu-window "$WINDOW" --json "$OUT/budgets.json" >"$OUT/budgets.md" 2>"$OUT/budgets.err" \

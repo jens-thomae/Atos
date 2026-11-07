@@ -89,8 +89,8 @@ pub fn default_sink_name(value: &str) -> Option<&str> {
     rest.split('"').next() // ponytail: no escapes; node names are [A-Za-z0-9_.:-]
 }
 
-/// Mean of `channelVolumes` in a Props pod.
-pub fn channel_volume(pod: &[u8]) -> Option<f32> {
+/// Mean and number of `channelVolumes` in a Props pod.
+pub fn channel_volume(pod: &[u8]) -> Option<(f32, usize)> {
     let (_, Value::Object(obj)) = PodDeserializer::deserialize_any_from(pod).ok()? else {
         return None;
     };
@@ -98,7 +98,7 @@ pub fn channel_volume(pod: &[u8]) -> Option<f32> {
         Value::ValueArray(ValueArray::Float(v))
             if p.key == spa::sys::SPA_PROP_channelVolumes && !v.is_empty() =>
         {
-            Some(v.iter().sum::<f32>() / v.len() as f32)
+            Some((v.iter().sum::<f32>() / v.len() as f32, v.len()))
         }
         _ => None,
     })
@@ -233,9 +233,10 @@ fn run(
                                     let Some(bytes) = param.map(Pod::as_bytes) else {
                                         return;
                                     };
-                                    if let Some(v) = channel_volume(bytes) {
+                                    if let Some((v, channels)) = channel_volume(bytes) {
                                         if let Some(s) = model.borrow_mut().sinks.get_mut(&id) {
                                             s.linear = Some(v);
+                                            s.channels = channels;
                                         }
                                         publish();
                                     }
@@ -376,6 +377,7 @@ mod tests {
 
     #[test]
     fn volume_pod_round_trips() {
-        assert_eq!(channel_volume(&volume_pod(0.125, 2)), Some(0.125));
+        assert_eq!(channel_volume(&volume_pod(0.125, 2)), Some((0.125, 2)));
+        assert_eq!(channel_volume(&volume_pod(0.5, 6)), Some((0.5, 6)));
     }
 }

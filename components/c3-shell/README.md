@@ -37,13 +37,15 @@ Contents agreed with the owner on the card. Opened by the dock's rightmost butto
 | Wi-Fi tile | NetworkManager, `WirelessEnabled`; subtitle is the first Wi-Fi device's active connection |
 | Bluetooth tile | BlueZ, first adapter's `Powered`; subtitle is a connected device |
 | Power tile | power-profiles-daemon `ActiveProfile`; a click cycles the profiles it offers |
-| Do not disturb, Dark mode | `[quick_settings]` in `$XDG_CONFIG_HOME/atos/shell.toml` (`do_not_disturb`, `dark_mode`). Dark mode re-themes the shell at once; publishing it to the portal is not done yet |
+| Do not disturb, Dark mode | `[quick_settings]` in `$XDG_CONFIG_HOME/atos/shell.toml` (`do_not_disturb`, `dark_mode`). Dark mode re-themes the shell at once and is published to apps: the shell is an xdg-desktop-portal Settings backend (`src/portal.rs`, `data/atos.portal`, installed by the image) answering `org.freedesktop.appearance color-scheme` and emitting `SettingChanged` |
 | Record screen | Disabled tile, "Not available yet": no recorder service exists |
-| Brightness | `/sys/class/backlight` to read, logind `SetBrightness` to write (never below 1); disabled without a backlight |
+| Brightness | `/sys/class/backlight` to read, logind `SetBrightness` to write (never below 1, one worker applies the changes in order); the slider is hidden without a backlight |
 | Volume, sound outputs | PipeWire native protocol (`pipewire` crate): the default sink's `channelVolumes` on the perceptual (cube-root) scale and `default.configured.audio.sink` in the `default` metadata |
-| Privacy chip | Text property of the window, hidden while empty; no source is wired up yet |
+| Privacy chip | `control::PrivacySource` (one method, the chip text or `None`); no implementation exists, so the chip is hidden until a source is handed to the control centre |
 | Settings button | Runs the `Exec=` of `org.atos.Settings.desktop`; nothing if it is not installed |
 | Power options | logind `Suspend`, `Reboot`, `PowerOff` (interactive, so polkit may ask) |
+
+`CONTROL_CENTRE_OPEN_MS` in the shell's output is the time from the open request to the first frame shown; `e2e/` opens the panel five times and `check.sh` fails above `SHELL_OPEN_MS` (100 ms on the NUC, §7).
 
 A tile whose service is missing is shown disabled ("Unavailable"). While the panel is open the services are read again every 3 s; closed, nothing polls. The window is created on each opening and dropped on closing.
 

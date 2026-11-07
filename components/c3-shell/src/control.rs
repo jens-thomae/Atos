@@ -4,6 +4,19 @@
 
 use crate::Tile;
 
+/// Where the privacy chip's text comes from ("Microphone · Meetings") while camera, microphone or
+/// screen capture is active (spec §6 C3). Nothing implements it yet (owner decision on #65): the
+/// chip stays hidden until a source exists and is handed to the control centre.
+pub trait PrivacySource {
+    /// The chip text, or `None` while nothing is being captured.
+    fn chip(&self) -> Option<String>;
+}
+
+/// The window's chip text: empty (hidden) without a source or while nothing is captured.
+pub fn chip_text(source: Option<&dyn PrivacySource>) -> String {
+    source.and_then(PrivacySource::chip).unwrap_or_default()
+}
+
 /// A switchable radio (Wi-Fi, Bluetooth): on or off, plus the connection or device in use.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Radio {
@@ -102,6 +115,22 @@ pub fn tiles(q: &Quick) -> Vec<Tile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_chip_is_hidden_without_a_source_or_capture() {
+        struct Fake(Option<&'static str>);
+        impl PrivacySource for Fake {
+            fn chip(&self) -> Option<String> {
+                self.0.map(String::from)
+            }
+        }
+        assert_eq!(chip_text(None), "");
+        assert_eq!(chip_text(Some(&Fake(None))), "");
+        assert_eq!(
+            chip_text(Some(&Fake(Some("Microphone · Meetings")))),
+            "Microphone · Meetings"
+        );
+    }
 
     #[test]
     fn missing_services_are_disabled_and_record_always_is() {

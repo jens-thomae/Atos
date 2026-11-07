@@ -61,6 +61,7 @@ use crate::toplevels;
 type Task = Box<dyn FnOnce() + Send>;
 type WindowTask = Box<dyn FnOnce(&Rc<LayerWindow>) + Send>;
 type OutputHook = Box<dyn FnMut(&wl_output::WlOutput, bool)>;
+type ShownHook = Box<dyn Fn(&slint::Window)>;
 
 /// How a layer surface sits on its output: the edges it is anchored to and its margin
 /// (top, right, bottom, left) in logical pixels. The exclusive zone is its height.
@@ -95,6 +96,13 @@ thread_local! {
     static NEXT_PLACEMENT: Cell<Option<Placement>> = const { Cell::new(None) };
     static OUTPUTS: RefCell<Vec<wl_output::WlOutput>> = const { RefCell::new(Vec::new()) };
     static OUTPUT_HOOK: RefCell<Option<OutputHook>> = const { RefCell::new(None) };
+    static SHOWN_HOOKS: RefCell<Vec<ShownHook>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Calls `hook` with the window whenever the compositor reports a frame of it as shown (wl_surface
+/// frame callback). Any number of hooks; the control centre times its opening with one.
+pub fn on_shown(hook: impl Fn(&slint::Window) + 'static) {
+    SHOWN_HOOKS.with(|h| h.borrow_mut().push(Box::new(hook)));
 }
 
 fn globals() -> Rc<Globals> {
@@ -776,6 +784,7 @@ impl CompositorHandler for State {
             if w.window.has_active_animations() {
                 w.dirty.set(true);
             }
+            SHOWN_HOOKS.with(|h| h.borrow().iter().for_each(|f| f(&w.window)));
         }
     }
     fn surface_enter(
