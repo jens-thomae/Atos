@@ -30,6 +30,23 @@ ISO=$WORK/install.iso DISK=$WORK/disk.raw VARS=$WORK/vars.fd TPM=$WORK/tpm
 mkdir -p "$WORK" "$OUT"
 build_arg=()
 [ -z "${BASE:-}" ] || build_arg=(--build-arg "BASE=$BASE")
+# The image the installed system tracks; CI sets it to the published image.
+TARGET_IMGREF=${TARGET_IMGREF:-$GUEST_REG:latest}
+
+# The dev VM is aarch64 under emulation; CI is x86_64 with KVM.
+case "$(uname -m)" in
+  aarch64)
+    QEMU=(qemu-system-aarch64 -machine virt) F=/usr/share/AAVMF
+    CODE_SB=$F/AAVMF_CODE.secboot.fd CODE_NOSB=$F/AAVMF_CODE.no-secboot.fd VARS0=$F/AAVMF_VARS.fd
+    TPMDEV=tpm-tis-device SERIAL=ttyAMA0 ;;
+  x86_64)
+    # shellcheck disable=SC2054 # commas are QEMU option syntax
+    QEMU=(qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on) F=/usr/share/OVMF
+    CODE_SB=$F/OVMF_CODE_4M.secboot.fd CODE_NOSB=$F/OVMF_CODE_4M.fd VARS0=$F/OVMF_VARS_4M.fd
+    TPMDEV=tpm-tis SERIAL=ttyS0 ;;
+  *) echo "unsupported architecture" >&2; exit 1 ;;
+esac
+if [ -w /dev/kvm ]; then QEMU+=(-accel kvm -cpu host); else QEMU+=(-cpu max); fi
 
 # One systemd credential, passed over SMBIOS: cred <name> <content>
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
@@ -56,8 +73,8 @@ Type=exec
 # The kernel console is tty1 (last console= in iso.yaml); the serial port is the test's log.
 StandardOutput=tty
 StandardError=tty
-TTYPath=/dev/ttyAMA0
-ExecStart=/bin/sh -c 'atos-install --disk /dev/vda --yes --target-imgref $GUEST_REG:latest && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
+TTYPath=/dev/$SERIAL
+ExecStart=/bin/sh -c 'atos-install --disk /dev/vda --yes --target-imgref $TARGET_IMGREF && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
 
 swtpm_up() {
   mkdir -p "$TPM"
@@ -72,11 +89,11 @@ qemu_run() {
   rm -f "$log"
   echo "QEMU, serial log: $log"
   # shellcheck disable=SC2054 # commas are QEMU option syntax
-  timeout 60m qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none \
-    -drive if=pflash,format=raw,readonly=on,file="${CODE:-/usr/share/AAVMF/AAVMF_CODE.secboot.fd}" \
+  timeout 60m "${QEMU[@]}" -smp 4 -m 4G -display none \
+    -drive if=pflash,format=raw,readonly=on,file="${CODE:-$CODE_SB}" \
     -drive if=pflash,format=raw,file="$VARS" \
     -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
-    -device tpm-tis-device,tpmdev=tpm0 \
+    -device "$TPMDEV",tpmdev=tpm0 \
     -drive if=virtio,format=raw,file="$DISK" \
     -serial file:"$log" "$@" &
   local pid=$!
@@ -136,7 +153,7 @@ step_install() {
   rm -f "$DISK" "$VARS" && truncate -s 20G "$DISK"
   rm -rf "$TPM"
   # Fresh firmware variables: setup mode, as on a machine prepared for key enrolment.
-  cp /usr/share/AAVMF/AAVMF_VARS.fd "$VARS"
+  cp "$VARS0" "$VARS"
   local creds t0
   mapfile -d '' creds < <(
     cred systemd.extra-unit.atos-install-test.service "$INSTALL_UNIT"
@@ -162,7 +179,7 @@ step_apply() { boot "$OUT/apply.log"; }
 step_nosb() {
   cp "$VARS" "$WORK/vars-nosb.fd"
   local VARS=$WORK/vars-nosb.fd
-  CODE=/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd boot "$OUT/nosb.log"
+  CODE=$CODE_NOSB boot "$OUT/nosb.log"
 }
 
 case "${1:-}" in
