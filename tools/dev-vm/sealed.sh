@@ -312,6 +312,7 @@ counting_images() {
   update_images
   variant bad 'ln -sf false /usr/bin/atos-comp'
   variant hang "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > /usr/bin/atos-comp"
+  variant hang-target "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > /usr/bin/atos-comp"
   variant panic "echo 'kargs = [\"rdinit=/usr/bin/true\"]' > /usr/lib/bootc/kargs.d/90-dev-panic.toml"
   variant emerg "echo 'kargs = [\"rd.systemd.unit=emergency.target\"]' > /usr/lib/bootc/kargs.d/90-dev-emerg.toml"
 }
@@ -334,11 +335,9 @@ counting_panic() { HALT='Freezing execution|[Ss]ecurity [Vv]iolation|Access [Dd]
 counting_emerg() { HALT='Freezing execution|[Ss]ecurity [Vv]iolation|Access [Dd]enied' counting_fail emerg; }
 # The image's own timeouts: the check's 2 min, then (with a slow boot here) the target's 5 min.
 counting_hang() { SHIPPED_CHECK=1 counting_fail hang; }
-counting_hang-target() {
-  counting_stage dev-hang counting-stage-hang-target
-  VARS=$CVARS TIMEOUT=150m SHIPPED_CHECK=1 SHIPPED_TARGET=1 ACTION=$ENTRIES_ACTION \
-    boot "$CDISK" "$OUT/counting-hang-target.log"
-}
+# dev-hang-target is dev-hang under another name: `bootc upgrade` stages nothing for an image that
+# is already deployed (dev-hang stays the rollback entry after the hang step).
+counting_hang-target() { SHIPPED_CHECK=1 SHIPPED_TARGET=1 counting_fail hang-target; }
 
 case "${1:-}" in
   build|disk|boot) "step_$1" ;;

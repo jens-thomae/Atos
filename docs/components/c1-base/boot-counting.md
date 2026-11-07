@@ -126,7 +126,77 @@ After the rollback, `bootc status` (patched) reports `booted:` dev-2 (verity `fe
 
 Time from the first boot of dev-bad to the dev-2 desktop: about 22 minutes (three tries of 4.8 to 7.7 minutes, then the fallback boot). That is CPU emulation, not the NUC. On real hardware, each try lasts the boot (§7: 10 s) plus however long the session takes to fail. The longest case is a hang, at 5 minutes per try.
 
-Logs: `tools/dev-vm/out/sealed/counting-{stage-good,good,stage-bad,bad}.log`.
+**Failures before and after switch-root (review of #126, 2026-11-07).** Each image is staged from dev-2, then booted in one QEMU run with no input, until systemd-boot falls back. These boots use the image's own timeouts where noted. Filtered:
+
+```
+counting-panic.log (dev-panic: rdinit=/usr/bin/true, so init exits in the initrd)
+[   18.491633] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+[   18.601781] Rebooting in 10 seconds..
+[   18.775361] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+[   18.884812] Rebooting in 10 seconds..
+[   18.484094] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+[   18.557740] Rebooting in 10 seconds..
+[  181.564882] sh[746]: ATOS-BOOT image=dev-2 counter=none
+       source: /boot//loader/entries/bootc_fedora-45-1+0-3.conf
+        tries: 0 left; 3 done
+```
+
+```
+counting-emerg.log (dev-emerg: rd.systemd.unit=emergency.target, the initrd's emergency mode)
+[   35.190561] systemd[1]: Reached target emergency.target - Emergency Mode.
+atos: counted boot failed, rebooting to count the try
+[   43.578690] reboot: Restarting system
+atos: counted boot failed, rebooting to count the try
+[   49.921120] reboot: Restarting system
+atos: counted boot failed, rebooting to count the try
+[   52.450952] reboot: Restarting system
+[  189.735999] sh[741]: ATOS-BOOT image=dev-2 counter=none
+       source: /boot//loader/entries/bootc_fedora-45-1+0-3.conf
+        tries: 0 left; 3 done
+```
+
+```
+counting-hang.log (dev-hang: atos-comp runs but never opens its socket; the check's shipped 2 min)
+[  371.296323] sh[1738]: ATOS-BOOT image=dev-hang counter=\loader\entries\bootc_fedora-45-1+2-1.conf
+[FAILED] Failed to start atos-session-check.service - Atos boot health check: the desktop session runs.
+[  524.628432] reboot: Restarting system
+[  222.077988] sh[743]: ATOS-BOOT image=dev-hang counter=\loader\entries\bootc_fedora-45-1+1-2.conf
+[  513.629756] reboot: Restarting system
+[  225.308142] sh[743]: ATOS-BOOT image=dev-hang counter=\loader\entries\bootc_fedora-45-1+0-3.conf
+[  523.165114] reboot: Restarting system
+[  236.469522] sh[742]: ATOS-BOOT image=dev-2 counter=none
+        tries: 0 left; 3 done
+```
+
+```
+counting-hang-target.log (dev-hang under another name; both shipped timeouts: here the boot is slow,
+so boot-complete.target's 5 min fires before the check's 2 min)
+[  372.212349] sh[1738]: ATOS-BOOT image=dev-hang-target counter=\loader\entries\bootc_fedora-45-1+2-1.conf
+[ TIME ] Timed out starting boot-complete.target - Boot Completion Check.
+[  !!  ] Rebooting: job timed out
+[  447.901581] reboot: Restarting system
+[  195.075639] sh[744]: ATOS-BOOT image=dev-hang-target counter=\loader\entries\bootc_fedora-45-1+1-2.conf
+[  357.370548] reboot: Restarting system
+[  208.132795] sh[743]: ATOS-BOOT image=dev-hang-target counter=\loader\entries\bootc_fedora-45-1+0-3.conf
+[  366.209096] reboot: Restarting system
+[  227.731560] sh[743]: ATOS-BOOT image=dev-2 counter=none
+        tries: 0 left; 3 done
+```
+
+**A boot without a counter still stops at the emergency shell.** The `erofs` tamper case (`sealed.sh tamper erofs`, a fresh install, no counter) with these images:
+
+```
+tamper-erofs.log
+[   94.863710] initramfs-setup[504]:     5: fs-verity content mismatch
+[  OK  ] Started emergency.service - Emergency Shell.
+Entering emergency mode. Exit the shell to continue.
+```
+
+No `counted boot failed` and no reboot, as before.
+
+One finding on the side: `bootc upgrade` stages nothing for an image that is already deployed. After a rollback, the failed image stays the rollback entry, and pushing it again reports `No changes`, so a failed image is not retried until a new one is published.
+
+Logs: `tools/dev-vm/out/sealed/counting-{stage-good,good,stage-bad,bad,panic,emerg,hang,hang-target}.log` and `tamper-erofs.log`.
 
 ## Limits
 
