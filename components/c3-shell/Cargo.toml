@@ -1,0 +1,45 @@
+[package]
+name = "atos-shell"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+# D-013: our own files are MIT OR Apache-2.0 (per-file SPDX headers); src/accesskit.rs is a modified
+# copy of a Slint file, which we take under GPL-3.0-only only. The binary links Slint: GPL-3.0-only.
+license = "(MIT OR Apache-2.0) AND GPL-3.0-only"
+
+# Outside the root workspace, like the test harness: it builds Slint through the fork
+# (`--config ../../third_party/slint/patch.toml`) and has its own CI workflow (c3-shell.yml).
+[workspace]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+# Every `unsafe` block needs a `// SAFETY:` comment (D-009).
+undocumented_unsafe_blocks = "deny"
+
+# The pins are the layer-shell spike's (spikes/c4-layer-shell/Cargo.toml): every crate there is
+# already in Slint's own tree. New here: cosmic-protocols (see below).
+[dependencies]
+# No backend-winit: our own platform is the only backend (no winit in the process).
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-femtovg"] }
+# image-decoders + svg: app icons are PNG or SVG files (src/icons.rs); both are Slint's own optional
+# dependencies (image, resvg), turned on through the core crate as Slint's default backends do.
+i-slint-core = { version = "=1.18.1", features = ["accessibility-text", "image-decoders", "svg"] }
+accesskit = "=0.24.1"
+accesskit_unix = { version = "=0.22.1", default-features = false, features = ["async-io"] }
+sctk = { package = "smithay-client-toolkit", version = "=0.19.2", default-features = false, features = ["calloop", "xkbcommon"] }
+wayland-backend = { version = "=0.3.17", features = ["client_system"] }
+glutin = { version = "=0.32.3", default-features = false, features = ["egl", "wayland"] }
+raw-window-handle = "=0.6.2"
+# Client bindings of atos-comp's toplevel protocols (MIT, System76). Same commit as
+# components/c2-compositor/Cargo.lock, so client and compositor read the same protocol XML.
+# Not on crates.io; pinned by full commit.
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "c0cff4db14c37ed954983158e4055aa94c7741d9", default-features = false, features = ["client"] }
+
+[dev-dependencies]
+atos-ui-test = { path = "../c4-toolkit/test-harness" }
+
+[build-dependencies]
+slint-build = "=1.18.1"

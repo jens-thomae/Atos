@@ -7,8 +7,8 @@ The Atos base image is a bootc container image (D-008): a **sealed composefs ima
 | | |
 | --- | --- |
 | Image | `quay.io/fedora/fedora-bootc:45` |
-| Pinned digest | `sha256:c3cccbe8c7263cfc610ca9697cf4e0a34bb5b590b394f413f1c159ef63fb15ac` (multi-arch index) |
-| Version label | `45.20261105.0`, kernel `7.2.15-300.fc45` (amd64) |
+| Pinned digest | `sha256:451894faadba48a53c4449efa8b872a1c004b80d8bb3dab71c4c93f631129d59` (multi-arch index) |
+| Version label | `45.20261107.0`, kernel `7.2.15-300.fc45` (amd64) |
 | Size | 65 layers, about 1.04 GB compressed (amd64) |
 
 The digest changes only through a reviewed change to the `FROM` line. CI builds amd64 only.
@@ -266,6 +266,19 @@ GitHub bills each job rounded up to a whole minute.
 | Docs-only | `changes` only | 1 min |
 
 With the compositor (card #58), the `build` job takes 15 min 26 s on the hosted runner ([run 42255610424](https://github.com/jens-thomae/Atos/actions/runs/42255610424)): freeing disk 1 min 54 s, `podman build` 13 min 24 s (mostly the Rust build of `atos-comp`). That is about 16 billed minutes for every push to a pull request and every merge to `main` that touches C1 or C2, with no build cache: about 125 such runs a month fill the Free plan's 2,000 minutes. A cache is tracked in [#86](https://github.com/jens-thomae/Atos/issues/86).
+
+### Layer cache (#86)
+
+`podman build` uses `--cache-from`/`--cache-to` against `ghcr.io/jens-thomae/atos/c1-base-cache`, with `--cache-ttl 168h`. It needs no Containerfile change. A step is reused when its instruction and inputs are unchanged, so the `atos-comp` stage, whose last step deletes `target/`, is reused whenever `components/c2-compositor` and the toolchain pin are unchanged.
+
+| Build (hosted runner, one run each) | `podman build` | Whole job | Run |
+| --- | --- | --- | --- |
+| Cold: empty cache, also pushes it | 18 min 45 s | about 23 min | [42372928364](https://github.com/jens-thomae/Atos/actions/runs/42372928364) |
+| Warm: only `check-seal.sh` changed | 3 min 47 s | about 7 min | [42374654107](https://github.com/jens-thomae/Atos/actions/runs/42374654107) |
+
+Not measured: a change under `components/c2-compositor` rebuilds the compositor with a cold `cargo` (about 13 min). Caching `cargo` dependencies would need a mount in the Containerfile, which is a follow-up. The cold build was slower than the 13 min 24 s above because it also uploads the cache; the later `publish` only pushes what changed.
+
+Trust boundary: **the signed `publish` job never reads the cache** (`--cache-to` only), so every published and signed image is built from scratch, about 16 min per code merge. Pull requests read it (`--cache-from`). `packages: read` in the PR job is not a boundary: a pull request from a branch in this repo runs its own copy of the workflow and can raise its token to `packages: write` and push layers to the cache. buildah reuses a layer by its step key and never checks how it was made. That costs nothing, because a PR build is never published. `publish` still writes the cache from its from-scratch build to keep it warm for PRs. The warm row above is therefore a pull request number; a merge to `main` stays cold. `--cache-ttl 168h` limits how long cached `dnf` layers hide Fedora updates in PR builds.
 
 ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded. The base pull from quay.io (about 1 GB) happens on every run.
 
