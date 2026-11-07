@@ -38,6 +38,14 @@ raw-window-handle = "=0.6.2"
 # Not on crates.io; pinned by full commit.
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "c0cff4db14c37ed954983158e4055aa94c7741d9", default-features = false, features = ["client"] }
 
+# Control centre (#65). zbus is already in the tree through accesskit_unix (same pin, blocking API
+# on short worker threads); toml_edit is D-010's writer (format-preserving, so a toggle never
+# rewrites the user's comments); pipewire is the owner-approved native PipeWire client (volume and
+# outputs have no D-Bus API), see the PR for the justification.
+zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+toml_edit = "0.25"
+pipewire = "0.9"
+
 [dev-dependencies]
 atos-ui-test = { path = "../c4-toolkit/test-harness" }
 

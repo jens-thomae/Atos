@@ -2,6 +2,8 @@
 //! The Atos shell's UI and the parts of it that need no display, so the screenshot and
 //! accessibility tests (`tests/`) can use them. The Wayland side is in the binary (`main.rs`).
 
+pub mod config;
+pub mod control;
 pub mod icons;
 
 slint::include_modules!();

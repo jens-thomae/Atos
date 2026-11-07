@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Registers the test harness's bundled font, so the control centre's screenshot does not depend on
+// the machine's fonts (docs/components/c4-toolkit/screenshot-tests.md). Compiled only for tests/.
+import "../../../c4-toolkit/test-harness/fonts/NotoSans-Regular.ttf";
+
+export component FontLoader inherits Window {
+    default-font-family: "Noto Sans";
+}

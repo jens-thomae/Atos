@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
-# End-to-end check of the shell (#63) on our compositor: headless sway hosts atos-comp (nested,
+# End-to-end check of the shell (#63, #65) on our compositor: headless sway hosts atos-comp (nested,
 # winit backend); inside it the shell and two client windows run. Checks that the dock lists both
 # windows on the AT-SPI bus, that pressing the unfocused one through AT-SPI activates it, and
 # measures the shell's idle RSS and CPU with the budgets harness (docs/budgets.md).
@@ -29,6 +29,13 @@ if [ "${1:-}" = inner ]; then
   python3 -I "$HERE/atspi.py" press "Flower, running" >"$OUT/press.txt" 2>&1 || true
   sleep 1.5
   python3 -I "$HERE/atspi.py" dump "$OUT/atspi-2.txt" || true
+  # Control centre (#65): open it with the dock's button through AT-SPI, dump the tree, close it.
+  python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true
+  sleep 1
+  python3 -I "$HERE/atspi.py" dump "$OUT/atspi-cc.txt" || true
+  python3 -I "$HERE/atspi.py" press "Control centre" >>"$OUT/press.txt" 2>&1 || true
+  sleep 0.5
+  python3 -I "$HERE/atspi.py" dump "$OUT/atspi-cc-closed.txt" || true
   kill $SH; wait $SH 2>/dev/null || true
   # Idle RSS and CPU of a fresh shell process with the two windows in its dock.
   "$BUDGETS" "$SHELL_BIN" --cpu-window "$WINDOW" --json "$OUT/budgets.json" >"$OUT/budgets.md" 2>"$OUT/budgets.err" \

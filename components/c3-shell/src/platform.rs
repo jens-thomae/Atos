@@ -68,6 +68,9 @@ type OutputHook = Box<dyn FnMut(&wl_output::WlOutput, bool)>;
 pub struct Placement {
     pub anchor: Anchor,
     pub margin: [i32; 4],
+    /// The launcher (#64): overlay layer above everything, the keyboard while shown, no exclusive
+    /// zone and drawn over other surfaces' zones.
+    pub overlay: bool,
 }
 
 /// Wayland objects every window needs. Shared, read-only after start-up.
@@ -119,7 +122,8 @@ pub fn seat() -> Option<wl_seat::WlSeat> {
     SEAT.with(|s| s.borrow().clone())
 }
 
-/// Windows created inside `f` become layer surfaces on `output`.
+/// Windows created inside `f` become layer surfaces on `output`. Windows created outside it go on
+/// the output the compositor picks (the focused one).
 pub fn with_output<R>(output: &wl_output::WlOutput, f: impl FnOnce() -> R) -> R {
     NEXT_OUTPUT.with(|n| *n.borrow_mut() = Some(output.clone()));
     let r = f();
@@ -493,10 +497,6 @@ impl LayerWindow {
         if layer.is_some() {
             return Ok(());
         }
-        let output = self
-            .output
-            .as_ref()
-            .ok_or("a shell window needs an output (platform::with_output)")?;
         let placement = NEXT_PLACEMENT
             .with(Cell::get)
             .ok_or("a shell window needs a placement (platform::with_placement)")?;
@@ -506,12 +506,20 @@ impl LayerWindow {
         let surface = g.layer_shell.create_layer_surface(
             &g.qh,
             self.surface.clone(),
-            Layer::Top,
+            if placement.overlay {
+                Layer::Overlay
+            } else {
+                Layer::Top
+            },
             Some("atos-shell"),
-            Some(output),
+            self.output.as_ref(),
         );
         let preferred = self.preferred.get();
-        let height = preferred.height.max(1.) as u32;
+        let height = if placement.anchor.contains(Anchor::TOP | Anchor::BOTTOM) {
+            0
+        } else {
+            preferred.height.max(1.) as u32
+        };
         let width = if placement.anchor.contains(Anchor::LEFT | Anchor::RIGHT) {
             0 // stretched between the margins
         } else {
@@ -521,8 +529,13 @@ impl LayerWindow {
         surface.set_anchor(placement.anchor);
         surface.set_margin(top, right, bottom, left);
         surface.set_size(width, height);
-        surface.set_exclusive_zone(height as i32);
-        surface.set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
+        if placement.overlay {
+            surface.set_exclusive_zone(-1);
+            surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+        } else {
+            surface.set_exclusive_zone(height as i32);
+            surface.set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
+        }
         surface.commit();
         *layer = Some(surface);
         Ok(())
