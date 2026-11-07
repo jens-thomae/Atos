@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//! The Atos shell: one process (D-006) drawing the shell's layer surfaces on every output.
+//! Today that is the dock-taskbar with the running windows (#63).
+
+mod accesskit;
+mod platform;
+mod toplevels;
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use atos_shell::{Dock, DockItem, dock_item};
+use sctk::reexports::client::Proxy;
+use sctk::shell::wlr_layer::Anchor;
+use slint::{ComponentHandle, Model, VecModel};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    slint::platform::set_platform(Box::new(platform::WaylandPlatform::new()?))
+        .map_err(|e| format!("{e:?}"))?;
+
+    // One model for all docks: every output shows the same running windows.
+    let items = Rc::new(VecModel::<DockItem>::default());
+    {
+        let items = items.clone();
+        let icons = RefCell::new(HashMap::new());
+        toplevels::on_change(move |list| update(&items, &list, &mut icons.borrow_mut()));
+    }
+
+    let docks = Rc::new(RefCell::new(HashMap::<u32, Dock>::new()));
+    let first_error = Rc::new(RefCell::new(None));
+    {
+        let (docks, first_error) = (docks.clone(), first_error.clone());
+        platform::on_outputs(move |output, added| {
+            let key = output.id().protocol_id();
+            if !added {
+                if let Some(dock) = docks.borrow_mut().remove(&key) {
+                    dock.hide().ok();
+                }
+                return;
+            }
+            match new_dock(output, &items) {
+                Ok(dock) => {
+                    docks.borrow_mut().insert(key, dock);
+                }
+                Err(e) => {
+                    eprintln!("dock on output {key}: {e}");
+                    first_error.borrow_mut().get_or_insert(e);
+                }
+            }
+        });
+    }
+    if docks.borrow().is_empty() {
+        let why = first_error.borrow_mut().take();
+        return Err(why.unwrap_or_else(|| "no output".into()));
+    }
+    slint::run_event_loop_until_quit()?;
+    Ok(())
+}
+
+fn new_dock(
+    output: &sctk::reexports::client::protocol::wl_output::WlOutput,
+    items: &Rc<VecModel<DockItem>>,
+) -> Result<Dock, Box<dyn std::error::Error>> {
+    let dock = platform::with_output(output, Dock::new)?;
+    dock.set_items(items.clone().into());
+    dock.on_activate(|id| toplevels::activate(id as u32));
+    // Bottom of the output, floating: the gap to the screen edges comes from the tokens.
+    let gap = dock.get_edge_gap() as i32;
+    let placement = platform::Placement {
+        anchor: Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+        margin: [0, gap, gap, gap],
+    };
+    platform::with_placement(placement, || dock.show())?;
+    Ok(dock)
+}
+
+/// Keeps the model in step with the compositor's list, changing only rows that differ so the
+/// docks do not rebuild every slot on each title change. Icons are read once per app ID.
+fn update(
+    items: &VecModel<DockItem>,
+    list: &[toplevels::Toplevel],
+    icons: &mut HashMap<String, slint::Image>,
+) {
+    let new: Vec<DockItem> = list
+        .iter()
+        .map(|t| {
+            let icon = icons
+                .entry(t.app_id.clone())
+                .or_insert_with(|| atos_shell::icons::load(&t.app_id))
+                .clone();
+            dock_item(t.id, &t.title, &t.app_id, t.activated, icon)
+        })
+        .collect();
+    while items.row_count() > new.len() {
+        items.remove(items.row_count() - 1);
+    }
+    for (i, item) in new.into_iter().enumerate() {
+        match items.row_data(i) {
+            Some(old) if old == item => {}
+            Some(_) => items.set_row_data(i, item),
+            None => items.push(item),
+        }
+    }
+}
