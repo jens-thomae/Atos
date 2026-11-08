@@ -124,6 +124,8 @@ boot() {
   mapfile -d '' creds < <(
     cred systemd.extra-unit.atos-report.service "$REPORT_UNIT"
     cred systemd.unit-dropin.multi-user.target~atos-report $'[Unit]\nWants=atos-report.service'
+    # The serial getty also starts here and hangs up the serial tty the report writes to.
+    cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent'
     # Without KVM, udev in the initrd needs longer than the default 45 s to find the root.
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot\x2dluks.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
