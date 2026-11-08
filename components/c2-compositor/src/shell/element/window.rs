@@ -16,9 +16,9 @@ use crate::{
         prelude::*,
     },
 };
+use atos_comp_config::AppearanceConfig;
 use calloop::LoopHandle;
 use cosmic::iced::{Color, Task};
-use atos_comp_config::AppearanceConfig;
 use smithay::{
     backend::{
         drm::DrmNode,

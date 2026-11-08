@@ -21,6 +21,7 @@ use crate::{
         prelude::*,
     },
 };
+use atos_comp_config::AppearanceConfig;
 use calloop::LoopHandle;
 use cosmic::{
     Apply, Element as CosmicElement, Theme,
@@ -33,7 +34,6 @@ use cosmic::{
     },
     theme, widget as cosmic_widget,
 };
-use atos_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts;
 use shortcuts::action::{Direction, FocusDirection};
 use smithay::{

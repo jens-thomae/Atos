@@ -9,11 +9,11 @@ use crate::{
 };
 
 use anyhow::{self, Context, Result};
+use atos_comp_config::output::comp::{AdaptiveSync, OutputState};
 use calloop::{
     LoopSignal,
     timer::{TimeoutAction, Timer},
 };
-use atos_comp_config::output::comp::{AdaptiveSync, OutputState};
 use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
