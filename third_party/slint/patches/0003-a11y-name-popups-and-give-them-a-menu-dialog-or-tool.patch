@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Thomae <jens.thomae@proton.me>
+Date: Sun, 8 Nov 2026 12:42:55 +0100
+Subject: [PATCH] a11y: name popups and give them a menu, dialog or tooltip
+ role
+
+Popup roots become Menu, Dialog or Tooltip nodes named by accessible-label or title. A Dialog window carries the dialog role.
+---
+ internal/backends/winit/accesskit.rs          | 39 +++++++++++++++++--
+ .../compiler/passes/lower_accessibility.rs    |  8 ++++
+ 2 files changed, 43 insertions(+), 4 deletions(-)
+
+diff --git a/internal/backends/winit/accesskit.rs b/internal/backends/winit/accesskit.rs
+index a72575e..70d6aed 100644
+--- a/internal/backends/winit/accesskit.rs
++++ b/internal/backends/winit/accesskit.rs
+@@ -19,7 +19,7 @@
+ use i_slint_core::item_tree::{ItemTreeRc, ItemTreeRef, ItemTreeWeak};
+ use i_slint_core::items::{ItemRc, WindowItem};
+ use i_slint_core::lengths::{LogicalPoint, ScaleFactor};
+-use i_slint_core::window::{PopupWindowLocation, WindowInner};
++use i_slint_core::window::{PopupWindowLocation, WindowInner, WindowKind};
+ use i_slint_core::{properties::PropertyTracker, window::WindowAdapter};
+ 
+ use super::WinitWindowAdapter;
+@@ -70,6 +70,7 @@ pub fn new(
+                 next_component_id: 1,
+                 free_component_ids: Default::default(),
+                 root_node_id: NodeId(0),
++                popup_roles: Default::default(),
+                 components_by_id: Default::default(),
+                 component_ids: Default::default(),
+                 all_nodes: Default::default(),
+@@ -269,6 +270,7 @@ fn rebuild_tree_of_dirty_nodes(&mut self) {
+                                 };
+ 
+                                 let mut node = self.nodes.build_node_without_children(
++                                    cached_node.id,
+                                     &item,
+                                     scale_factor,
+                                     Default::default(),
+@@ -377,6 +379,9 @@ struct NodeCollection {
+     component_ids: HashMap<NonNull<u8>, u32>,
+     all_nodes: Vec<CachedNode>,
+     root_node_id: NodeId,
++    /// Role of each popup's root node. Popups are items of their parent window's tree, so they
++    /// carry the role of their kind instead of `Role::Window`.
++    popup_roles: HashMap<NodeId, Role>,
+     focused_node_tracker: Pin<Box<PropertyTracker<false, DelegateFocusPropertyTracker>>>,
+     /// Emission state, keyed by the inner `TextInput`'s `ItemRc`. Its per-entry property tracker
+     /// stays empty on purpose: the state has to outlive the edits it describes, so that NodeIds
+@@ -512,7 +517,7 @@ fn build_node_for_item_recursively(
+         let (node, text_run_nodes) = {
+             let mut text_run_nodes: Vec<(NodeId, Node)> = Vec::new();
+             let node = tracker.as_ref().evaluate(|| {
+-                let mut n = self.build_node_without_children(&item, scale_factor, window_position);
++                let mut n = self.build_node_without_children(id, &item, scale_factor, window_position);
+                 n.set_children(descendant_children.clone());
+                 self.try_emit_text_input_accessibility(
+                     &item,
+@@ -633,6 +638,11 @@ fn build_new_tree(
+                 let PopupWindowLocation::ChildWindow(location) = popup.location else {
+                     return None;
+                 };
++                let role = match popup.window_kind {
++                    WindowKind::Menu => Role::Menu,
++                    WindowKind::Popup => Role::Dialog,
++                    WindowKind::ToolTip => Role::Tooltip,
++                };
+ 
+                 let parent_item = nearest_accessible_item(popup.parent_item.upgrade()?);
+                 let parent_node = self.encode_item_node_id(if parent_item.is_accessible() {
+@@ -641,12 +651,18 @@ fn build_new_tree(
+                     &root_item
+                 });
+ 
+-                Some(AccessiblePopup { location, parent_node, component: popup.component.clone() })
++                Some(AccessiblePopup { location, parent_node, component: popup.component.clone(), role })
+             })
+             .collect::<Vec<_>>();
+ 
+         self.all_nodes.clear();
+         let mut nodes = Vec::new();
++        self.popup_roles = popups
++            .iter()
++            .map(|popup| {
++                (self.encode_item_node_id(&ItemRc::new_root(popup.component.clone())), popup.role)
++            })
++            .collect();
+ 
+         let root_id = property_tracker.evaluate_as_dependency_root(|| {
+             self.build_node_for_item_recursively(
+@@ -670,6 +686,7 @@ fn build_new_tree(
+ 
+     fn build_node_without_children(
+         &self,
++        id: NodeId,
+         item: &ItemRc,
+         scale_factor: ScaleFactor,
+         window_position: LogicalPoint,
+@@ -679,7 +696,20 @@ fn build_node_without_children(
+             .is_some_and(|x| x == "true");
+ 
+         let (role, label) = if let Some(window_item) = item.downcast::<WindowItem>() {
+-            (Role::Window, Some(window_item.as_pin_ref().title().to_string()))
++            // A popup or a `Dialog` is a named Menu, Dialog or Tooltip; other windows stay Window.
++            let role = self.popup_roles.get(&id).copied().unwrap_or(
++                if item.accessible_role() == i_slint_core::items::AccessibleRole::Dialog {
++                    Role::Dialog
++                } else {
++                    Role::Window
++                },
++            );
++            let label = item
++                .accessible_string_property(AccessibleStringProperty::Label)
++                .map(|x| x.to_string())
++                .filter(|x| !x.is_empty())
++                .unwrap_or_else(|| window_item.as_pin_ref().title().to_string());
++            (role, Some(label))
+         } else {
+             (
+                 match item.accessible_role() {
+@@ -1013,4 +1043,5 @@ struct AccessiblePopup {
+     location: LogicalPoint,
+     parent_node: NodeId,
+     component: ItemTreeRc,
++    role: Role,
+ }
+diff --git a/internal/compiler/passes/lower_accessibility.rs b/internal/compiler/passes/lower_accessibility.rs
+index 3c772f7..fbe9cf7 100644
+--- a/internal/compiler/passes/lower_accessibility.rs
++++ b/internal/compiler/passes/lower_accessibility.rs
+@@ -131,6 +131,14 @@ fn apply_builtin(e: &ElementRc) {
+                 },
+             );
+         }
++    } else if bty.name == "Dialog" {
++        e.borrow_mut().set_binding_if_not_set("accessible-role".into(), || {
++            let enum_ty = crate::typeregister::BUILTIN.enums.AccessibleRole.clone();
++            Expression::EnumerationValue(EnumerationValue {
++                value: enum_ty.values.iter().position(|v| v == "dialog").unwrap(),
++                enumeration: enum_ty,
++            })
++        });
+     } else if bty.name == "Image" {
+         e.borrow_mut().set_binding_if_not_set("accessible-role".into(), || {
+             let enum_ty = crate::typeregister::BUILTIN.enums.AccessibleRole.clone();

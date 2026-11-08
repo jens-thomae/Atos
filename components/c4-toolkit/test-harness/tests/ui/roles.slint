@@ -1,5 +1,5 @@
 import "../../fonts/NotoSans-Regular.ttf";
-import { StandardTableView } from "std-widgets.slint";
+import { StandardTableView, StandardButton } from "std-widgets.slint";
 
 export component RolesTable inherits Window {
     width: 480px;
@@ -39,4 +39,19 @@ export component RolesDialog inherits Window {
         accessible-label: "Properties";
         Text { text: "Size: 2 KB"; }
     }
+}
+
+// A Dialog window: the compiler gives the root the dialog role (the winit backend names it by its title).
+export component RolesDialogWindow inherits Dialog {
+    title: "Rename";
+    width: 300px;
+    height: 150px;
+    default-font-family: "Noto Sans";
+    Text { text: "New name"; }
+    StandardButton { kind: ok; }
+}
+export component RolesWinDlg inherits Window {
+    accessible-role: dialog;
+    accessible-label: "X";
+    Text { text: "hi"; }
 }
