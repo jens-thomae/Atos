@@ -160,3 +160,23 @@ pub fn root_accessibility(root: &impl ComponentHandle) -> (Option<AccessibleRole
         e.accessible_label().unwrap_or_default().to_string(),
     )
 }
+
+/// (role, `accessible-id`) of every element that exposes a role, in document order.
+/// The id is what the winit backend publishes as AccessKit `author_id`; an empty id counts as none, as there.
+pub fn accessible_ids(root: &impl ComponentHandle) -> Vec<(AccessibleRole, Option<String>)> {
+    root.show().expect("show");
+    ElementQuery::from_root(root)
+        .match_predicate(|_| true)
+        .find_all()
+        .iter()
+        .filter_map(|e| {
+            let role = e.accessible_role().filter(|r| *r != AccessibleRole::None)?;
+            Some((
+                role,
+                e.accessible_id()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+            ))
+        })
+        .collect()
+}
