@@ -223,7 +223,7 @@ Buying hardware tokens is out of scope for this card (owner's task).
 4. **Microsoft's KEK (3.2).** (a) Keep it: Microsoft's dbx updates apply as-is, but Microsoft can also change db. (b) Leave it out: only the machine's KEK changes db/dbx, and Atos ships dbx updates itself. Recommended: (b).
 5. **Option ROMs signed under 2011 (3.2).** Where the TPM event log shows option ROMs: trust the Microsoft UEFI CA 2011 (safe for hardware, but every 2011-signed Linux chain boots), enrol the measured hashes (narrow, experimental, breaks on GPU firmware updates), or accept the brick risk. Recommended: CA 2011 by default, hashes as an advanced option.
 6. **Where release images are built (section 6).** (a) The owner builds locally from the reviewed tag; (b) the owner rebuilds and signs CI's digest only if it matches (needs reproducible builds). Artifact attestations are not available on our plan. Recommended: (a).
-7. **Default db contents.** Should the installer include Microsoft's UEFI CA 2023 (other Linux live media boot) and the Windows CAs by default, or ask? Including them is more familiar; leaving them out is safer.
+7. **Default db contents.** Should the installer include Microsoft's UEFI CA 2023 (other Linux live media boot) and the Windows CAs by default, or ask? Including them is more familiar; leaving them out is safer. Note: dual boot with Windows is a requirement (spec §6 C11, owner 2026-11-07), so the Windows CAs must be in db whenever Windows is present; this question is only about the default when it is not.
 8. **Test Secure Boot key in the repo or in a CI secret?** Committing it is simpler and honest about it being public; a secret keeps it out of casual reach. Either way it is readable by every writer (section 6).
 
 ## Sources
