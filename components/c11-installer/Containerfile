@@ -1,0 +1,45 @@
+# Atos installer ISO (C11, #66): a live system that runs atos-install on tty1.
+# Docs: docs/components/c11-installer/README.md.
+# Build: podman build --build-context repo=. -t atos-installer components/c11-installer
+# ISO:   image-builder generic-iso from this image, with the c1-base image as payload (see build-iso.sh).
+# Same base as c1-base, so the layers are shared. Keep in step with components/c1-base/Containerfile.
+ARG BASE=quay.io/fedora/fedora-bootc:45@sha256:451894faadba48a53c4449efa8b872a1c004b80d8bb3dab71c4c93f631129d59
+
+FROM ${BASE} AS build
+RUN dnf -y install --setopt=install_weak_deps=False gcc curl
+ARG RUSTUP_VERSION=1.29.3
+ENV CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup PATH=/opt/cargo/bin:$PATH
+# rustup-init pinned by version, as in c1-base's comp stage.
+RUN set -eux; \
+    case "$(uname -m)" in x86_64) t=x86_64-unknown-linux-gnu ;; aarch64) t=aarch64-unknown-linux-gnu ;; esac; \
+    curl -fsSL -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$t/rustup-init"; \
+    curl -fsSL "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$t/rustup-init.sha256" | sed 's# .*#  /tmp/rustup-init#' | sha256sum --check; \
+    chmod +x /tmp/rustup-init; /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain none; rm /tmp/rustup-init
+WORKDIR /src
+# The workspace manifest names every member, so cargo needs them all present.
+COPY --from=repo Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY --from=repo tools/budgets tools/budgets
+COPY --from=repo tools/tokens tools/tokens
+COPY --from=repo components/c11-installer components/c11-installer
+RUN CARGO_TERM_COLOR=never cargo build --release --locked -p atos-install \
+    && strip -o /atos-install target/release/atos-install
+
+FROM ${BASE}
+# ISO build tools (image-builder runs them from this image) and the live-boot dracut module.
+# The ISO boots through Fedora's Microsoft-signed shim and GRUB, so it starts with Secure Boot on
+# stock firmware (owner answer on #66). Only the media does; installed systems boot systemd-boot
+# and the sealed UKI from c1-base.
+RUN dnf -y install --setopt=install_weak_deps=False \
+      grub2-efi-*-cdboot dracut-live implantisomd5 xorrisofs squashfs-tools \
+    && dnf clean all \
+    && mkdir -p /boot/efi && cp -ra /usr/lib/efi/*/*/EFI /boot/efi
+COPY dracut-40-iso.conf /usr/lib/dracut/dracut.conf.d/40-iso.conf
+RUN set -xe; kver=$(ls /usr/lib/modules); env DRACUT_NO_XATTR=1 dracut -f /usr/lib/modules/$kver/initramfs.img "$kver"
+COPY iso.yaml /usr/lib/image-builder/bootc/iso.yaml
+COPY atos-installer.service /usr/lib/systemd/system/atos-installer.service
+COPY --from=build /atos-install /usr/bin/atos-install
+# The live system runs only the installer: no bootloader updates, no greeter, no update timers.
+RUN systemctl mask bootloader-update.service bootc-fetch-apply-updates.timer rpm-ostree-countme.timer \
+    && systemctl disable getty@tty1.service \
+    && systemctl enable atos-installer.service
+LABEL org.opencontainers.image.title="Atos installer"

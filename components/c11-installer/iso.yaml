@@ -1,0 +1,13 @@
+# image-builder generic-iso settings.
+label: "ATOS-INSTALL"
+# Serial consoles first, tty1 last: the kernel's /dev/console is the last one.
+kernel_args:
+  - console=ttyS0
+  - console=ttyAMA0
+  - console=tty1
+grub2:
+  timeout: 3
+  entries:
+    - name: "Install Atos"
+      linux: ${kernelpath} ${root}
+      initrd: ${initrdpath}
