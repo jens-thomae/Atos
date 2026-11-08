@@ -42,6 +42,7 @@ use std::{
 };
 use tracing::{error, warn};
 
+mod atos_shortcuts;
 mod input_config;
 pub mod key_bindings;
 mod types;
@@ -266,6 +267,7 @@ impl Config {
         if !kiosk_mode {
             system_actions = shortcuts::system_actions(&settings_context);
             shortcuts = shortcuts::shortcuts(&settings_context);
+            atos_shortcuts::load_and_apply(&mut shortcuts, &mut system_actions);
 
             // Listen for updates to the keybindings config.
             match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
@@ -278,11 +280,19 @@ impl Config {
                                     "custom" | "defaults" => {
                                         state.common.config.shortcuts =
                                             shortcuts::shortcuts(&config);
+                                        atos_shortcuts::load_and_apply(
+                                            &mut state.common.config.shortcuts,
+                                            &mut state.common.config.system_actions,
+                                        );
                                     }
 
                                     "system_actions" => {
                                         state.common.config.system_actions =
                                             shortcuts::system_actions(&config);
+                                        atos_shortcuts::load_and_apply(
+                                            &mut state.common.config.shortcuts,
+                                            &mut state.common.config.system_actions,
+                                        );
                                     }
 
                                     _ => (),

@@ -1,3 +1,4 @@
+// Unused since #131: atos-comp has this command built in and the image does not install this file.
 // atos-comp's command for its `System(Launcher)` shortcut (#64): opens or closes the launcher
 // of the running shell. The image installs this file as
 // /usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions; the keys bound to
