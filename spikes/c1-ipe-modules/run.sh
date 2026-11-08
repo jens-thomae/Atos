@@ -30,6 +30,7 @@ DISK=$WORK/ipe.raw VARS_IPE=$WORK/ipe-vars.fd
 BASE=$(sed -n 's/^ARG BASE=//p' "$REPO/components/c1-base/Containerfile")
 DB=$REPO/components/c1-base/secureboot-test
 TOOLS=localhost/ipe-tools
+KVER=$(sudo podman run --rm "$BASE" ls /usr/lib/modules)
 mkdir -p "$M" "$K" "$CTX"
 tools() { sudo podman run --rm -v "$M:/m:z" -v "$REPO:/repo:ro" "$TOOLS" "$@"; }
 
@@ -43,11 +44,9 @@ tools() { sudo podman run --rm -v "$M:/m:z" -v "$REPO:/repo:ro" "$TOOLS" "$@"; }
 CASES="usr usr2 usr3 var var2 etc ovl initmod"
 
 step_tools() {
-  local kver
-  kver=$(sudo podman run --rm "$BASE" ls /usr/lib/modules)
   sudo podman build -t "$TOOLS" -f - "$M" <<EOF
 FROM $BASE
-RUN dnf -y install --setopt=install_weak_deps=False kernel-devel-$kver gcc make elfutils-libelf-devel \
+RUN dnf -y install --setopt=install_weak_deps=False kernel-devel-$KVER gcc make elfutils-libelf-devel \
     && rpm -q kernel-core kernel-devel
 EOF
 }
@@ -72,6 +71,13 @@ digests() { # <dir>...: one sha512 digest per module file (.ko, .ko.xz, ...), so
   sudo find "$@" -type f -name '*.ko*' -print0 | sudo xargs -0 fsverity digest --hash-alg=sha512 --block-size=4096 \
     | awk '{print $1}' | sort -u
 }
+policy() { # <module dirs or files>...: the policy text, plus the three usr test modules
+  echo 'policy_name=atos_kmodules policy_version=1.0.0'
+  echo '# Spike #169: kernel modules only from fs-verity files whose digest is listed here.'
+  echo 'DEFAULT action=ALLOW'
+  echo 'DEFAULT op=KMODULE action=DENY'
+  digests "$@" "$M/ko/mt_usr.ko" "$M/ko/mt_usr2.ko" "$M/ko/mt_usr3.ko" | sed 's/^/op=KMODULE fsverity_digest=/; s/$/ action=ALLOW/'
+}
 sign() { # <policy text file> <key> <cert> <out.p7b>: PKCS#7 SignedData with the policy inside
   openssl cms -sign -binary -nodetach -noattr -nosmimecap -md sha256 -outform DER \
     -in "$1" -inkey "$2" -signer "$3" -out "$4"
@@ -81,15 +87,19 @@ step_policy() {
   [ -f "$K/stranger.key" ] || openssl req -quiet -newkey rsa:2048 -nodes -keyout "$K/stranger.key" -x509 -sha256 \
     -days 3650 -subj "/CN=Atos TEST ipe stranger (dev VM) - not for release/" -out "$K/stranger.crt"
   mnt=$(sudo podman image mount "$IMAGE")
-  { echo 'policy_name=atos_kmodules policy_version=1.0.0'
-    echo '# Spike #169: kernel modules only from fs-verity files whose digest is listed here.'
-    echo 'DEFAULT action=ALLOW'
-    echo 'DEFAULT op=KMODULE action=DENY'
-    digests "$mnt/usr/lib/modules" "$M/ko/mt_usr.ko" "$M/ko/mt_usr2.ko" "$M/ko/mt_usr3.ko" \
-      | sed 's/^/op=KMODULE fsverity_digest=/; s/$/ action=ALLOW/'
-  } > "$M/kmodules.pol"
+  # The full policy: every module file in the image. The kernel's ASN.1 decoder refuses a PKCS#7
+  # message over 65535 bytes (lib/asn1_decoder.c), and IPE takes the policy only with its text
+  # inside the PKCS#7, so this one cannot be loaded (EMSGSIZE in the second run of this script).
+  policy "$mnt/usr/lib/modules" > "$M/kmodules-full.pol"
+  sign "$M/kmodules-full.pol" "$DB/db.key" "$DB/db.crt" "$M/kmodules-full.p7b"
+  # The policy the image ships: a subset that fits, enough for this VM to boot (virtio, DRM,
+  # hw_random, file systems, crypto, lib, block, md) plus the dummy driver the guest loads.
+  local d=$mnt/usr/lib/modules/$KVER/kernel
+  policy "$d"/{drivers/virtio,drivers/gpu/drm,drivers/char/hw_random,fs,crypto,lib,drivers/block,drivers/md} \
+    "$d/drivers/net/dummy.ko.xz" > "$M/kmodules.pol"
   sudo podman image umount "$IMAGE" >/dev/null
   sign "$M/kmodules.pol" "$DB/db.key" "$DB/db.crt" "$CTX/kmodules.p7b"
+  [ "$(stat -c %s "$CTX/kmodules.p7b")" -le 65535 ]
   # What root tries in the guest. allow_all_low has a lower version than the active policy.
   printf 'policy_name=atos_kmodules policy_version=0.9.0\nDEFAULT action=ALLOW\n' > "$M/rollback.pol"
   printf 'policy_name=allow_all_low policy_version=0.1.0\nDEFAULT action=ALLOW\n' > "$M/low.pol"
@@ -102,7 +112,8 @@ step_policy() {
   sign "$M/stranger.pol" "$K/stranger.key" "$K/stranger.crt" "$M/guest/stranger.p7b"
   cp "$M/stranger.pol" "$M/guest/unsigned.pol"
   cp "$M/ko/mt_var.ko" "$M/ko/mt_var2.ko" "$M/ko/mt_etc.ko" "$M/ko/mt_ovl.ko" "$M/ko/mt_initmod.ko" "$M/guest/"
-  { echo "== kmodules.pol: $(grep -c '^op=KMODULE' "$M/kmodules.pol") rules, $(stat -c %s "$M/kmodules.pol") bytes; signed: $(stat -c %s "$CTX/kmodules.p7b") bytes"
+  { echo "== kmodules-full.pol (every module file in the image): $(grep -c '^op=KMODULE' "$M/kmodules-full.pol") rules, $(stat -c %s "$M/kmodules-full.pol") bytes; signed: $(stat -c %s "$M/kmodules-full.p7b") bytes"
+    echo "== kmodules.pol (shipped subset): $(grep -c '^op=KMODULE' "$M/kmodules.pol") rules, $(stat -c %s "$M/kmodules.pol") bytes; signed: $(stat -c %s "$CTX/kmodules.p7b") bytes"
     grep -v '^op=KMODULE' "$M/kmodules.pol"; grep -m2 '^op=KMODULE' "$M/kmodules.pol"
     echo "== mt_usr2.ko: $(digests "$M/ko/mt_usr2.ko")"
     for f in "$M"/guest/*.p7b; do echo "== $(basename "$f"): $(openssl cms -verify -noverify -inform DER -in "$f" 2>/dev/null | head -1), signer: $(openssl cms -cmsout -print -inform DER -in "$f" | sed -n 's/^ *issuer: //p' | head -1)"; done
@@ -128,29 +139,27 @@ RemainAfterExit=yes
 ExecStart=/bin/sh -c "t0=$$(date +%%s%%N); dd if=/usr/lib/atos/ipe/kmodules.p7b of=/sys/kernel/security/ipe/new_policy bs=16M iflag=fullblock status=none && echo 1 > /sys/kernel/security/ipe/policies/atos_kmodules/active && echo atos-ipe-policy: loaded and active in $$(( ($$(date +%%s%%N) - t0) / 1000 )) us"'
 DRACUT='install_items+=" /usr/lib/atos/ipe/kmodules.p7b /usr/lib/systemd/system/atos-ipe-policy.service /usr/lib/systemd/system/initrd.target.wants/atos-ipe-policy.service /usr/bin/dd /usr/bin/date "'
 step_image() {
-  local kver f=$WORK/Containerfile.ipe ctx=$REPO/components/c1-base
-  kver=$(sudo podman run --rm "$BASE" ls /usr/lib/modules)
+  local f=$WORK/Containerfile.ipe ctx=$REPO/components/c1-base
   cp "$M/ko/mt_usr.ko" "$M/ko/mt_usr2.ko" "$M/ko/mt_usr3.ko" "$CTX/"
   printf '%s\n' "$UNIT" > "$CTX/atos-ipe-policy.service"
   printf '%s\n' "$DRACUT" > "$CTX/90-atos-ipe.conf"
-  sed -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe mt_usr.ko mt_usr2.ko mt_usr3.ko /usr/lib/modules/$kver/extra/" \
+  sed -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe mt_usr.ko mt_usr2.ko mt_usr3.ko /usr/lib/modules/$KVER/extra/" \
       -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe kmodules.p7b /usr/lib/atos/ipe/kmodules.p7b" \
       -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe atos-ipe-policy.service /usr/lib/systemd/system/atos-ipe-policy.service" \
       -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe 90-atos-ipe.conf /usr/lib/dracut/dracut.conf.d/90-atos-ipe.conf" \
-      -e "/^LABEL org.opencontainers.image.title/i RUN depmod $kver \&\& mkdir -p /usr/lib/systemd/system/initrd.target.wants \&\& ln -s ../atos-ipe-policy.service /usr/lib/systemd/system/initrd.target.wants/" \
+      -e "/^LABEL org.opencontainers.image.title/i RUN depmod $KVER \&\& mkdir -p /usr/lib/systemd/system/initrd.target.wants \&\& ln -s ../atos-ipe-policy.service /usr/lib/systemd/system/initrd.target.wants/" \
       -e "s#^    && lsinitrd \"/usr/lib/modules/\$kver/initramfs.img\" | grep -q 'emergency.service.d/10-atos-boot-counting.conf' \\\\#&\n    \&\& lsinitrd \"/usr/lib/modules/\$kver/initramfs.img\" | grep -E 'atos-ipe|kmodules' \\\\#" \
       "$ctx/Containerfile" > "$f"
   grep -q 'grep -E .atos-ipe' "$f"
   sudo podman build --build-context repo="$REPO" --build-context ipe="$CTX" -f "$f" -t "$IMAGE:ipe" "$ctx" 2>&1 \
     | tee "$OUT/ipe-image-build.log" | grep -E 'atos-ipe|kmodules|Error|error:' || true
-  # The policy has to list every module file the built image ships, or that module can't load.
+  # Every module file the built image ships that the policy does not list cannot load.
   local mnt missing
   mnt=$(sudo podman image mount "$IMAGE:ipe")
   missing=$(comm -23 <(digests "$mnt/usr/lib/modules") <(sed -n 's/^op=KMODULE fsverity_digest=\([^ ]*\) .*/\1/p' "$M/kmodules.pol" | sort -u) | wc -l)
   echo "ATOS-IPE image: $(sudo find "$mnt/usr/lib/modules" -type f -name '*.ko*' | wc -l) module files, $missing not in the policy" \
     | tee "$OUT/ipe-image.log"
   sudo podman image umount "$IMAGE:ipe" >/dev/null
-  [ "$missing" = 0 ]
 }
 
 step_install() {
@@ -247,13 +256,15 @@ action() {
 echo "ATOS-IPE kernel: $k, lockdown: $(cat /sys/kernel/security/lockdown), lsm: $(cat /sys/kernel/security/lsm)"
 echo "ATOS-IPE config: $(grep -E "^CONFIG_(SECURITY_IPE|IPE_[A-Z_]+|FS_VERITY[A-Z_]*|DM_VERITY|DM_VERITY_VERIFY_ROOTHASH_SIG|SECURITY_SELINUX_DEVELOP)=" /usr/lib/modules/$k/config | tr "\n" " ")"
 journalctl -b --no-pager -o cat -u atos-ipe-policy.service | sed "s/^/ATOS-IPE initrd unit: /"
-echo "ATOS-IPE modules loaded at boot: $(lsmod | tail -n +2 | wc -l); systemd-modules-load: $(systemctl show -P Result systemd-modules-load.service)"
+echo "ATOS-IPE modules loaded at boot: $(lsmod | tail -n +2 | wc -l): $(lsmod | tail -n +2 | cut -d" " -f1 | sort | tr "\n" " ")"
+echo "ATOS-IPE refused by IPE before the checks: $(journalctl -b -k --no-pager -o cat | grep -a "ipe_op=KMODULE" | grep -ao "path=[^ ]*" | sort -u | tr "\n" " ")"
+echo "ATOS-IPE failed units: $(systemctl --failed --no-legend --plain | cut -d" " -f1 | tr "\n" " ")"
 mkdir -p /run/ipe && cd /run/ipe'
   printf 'echo %s | base64 -d | tar -xJ\n' "$(tar -C "$M/guest" -cJ . | base64 -w0)"
   printf 'echo %s | base64 -d > /run/ipe/root.sh\n' "$(printf '%s\n' "$ROOT" | base64 -w0)"
   # shellcheck disable=SC2016 # expands in the guest
   printf '%s\n' 'systemd-run --wait --pipe --quiet -p SELinuxContext=unconfined_u:unconfined_r:unconfined_t:s0 /bin/sh /run/ipe/root.sh
-journalctl -b --no-pager -o cat | grep -aE "atos-ipe:|atos-ipe-policy|ipe_op=|lsm=ipe|type=14(04|20|21|22)|avc: .*(mac_admin|setenforce|module_load|setbool)" | grep -v "sh\[" | sed "s/^/ATOS-IPE log: /" | head -80'
+journalctl -b --no-pager -o cat | grep -aE "atos-ipe:|atos-ipe-policy|ipe_op=|lsm=ipe|type=14(04|20|21|22)|avc: .*(mac_admin|setenforce|module_load|setbool|kernel_t)|[Cc]ore dump|helper.sh" | grep -v "sh\[" | sed "s/^/ATOS-IPE log: /" | head -80'
 }
 
 # The report runs the action with `sh -x`: its trace lines (`sh[pid]: + ...`) are left out.
