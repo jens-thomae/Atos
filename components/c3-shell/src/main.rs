@@ -7,6 +7,7 @@ mod accesskit;
 mod audio;
 mod control_centre;
 mod launcher;
+mod notice_ui;
 mod platform;
 mod portal;
 mod services;
@@ -16,7 +17,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use atos_shell::{Dock, DockItem, Palette, dock_item};
+use atos_shell::{Dock, DockItem, Palette, config, dock_item};
 use sctk::reexports::client::Proxy;
 use sctk::shell::wlr_layer::Anchor;
 use slint::{ComponentHandle, Model, VecModel};
@@ -72,6 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
+    let dark = config::path().is_some_and(|f| config::get_bool(&f, "dark_mode"));
+    notice_ui::init(dark);
     slint::run_event_loop_until_quit()?;
     Ok(())
 }

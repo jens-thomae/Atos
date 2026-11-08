@@ -21,6 +21,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `src/control_centre.rs` | Opens, closes and feeds the panel; Settings launch by desktop-entry id |
 | `src/services.rs`, `src/audio.rs`, `src/portal.rs` | D-Bus services (NetworkManager, BlueZ, power-profiles-daemon, logind), the PipeWire client, and the xdg-desktop-portal Settings backend for dark mode |
 | `src/control.rs`, `src/config.rs` | The six tiles as data and the privacy-chip trait; the shell config file (D-010 TOML) |
+| `ui/notice.slint`, `src/notice.rs`, `src/notice_ui.rs` | The disk-not-sealed notice (#138), see below |
 | `tests/` | Screenshot and accessibility-tree tests with the C4 harness ([screenshot-tests.md](../../docs/components/c4-toolkit/screenshot-tests.md)) |
 | `e2e/` | End-to-end run on atos-comp (nested in headless sway) and its checks, used by CI |
 
@@ -64,6 +65,10 @@ Contents agreed with the owner on the card. Opened by the dock's rightmost butto
 `CONTROL_CENTRE_OPEN_MS` in the shell's output is the time from the open request to the first frame shown; `e2e/` opens the panel five times and `check.sh` fails above `SHELL_OPEN_MS` (100 ms on the NUC, §7).
 
 A tile whose service is missing is shown disabled ("Unavailable"). While the panel is open the services are read again every 3 s; closed, nothing polls. The window is made at start-up, rendered once while hidden (after the shell's first frame, like the launcher's warm-up) and shown and hidden on each use.
+
+## Disk-not-sealed notice (#138)
+
+When `/run/atos/disk-unsealed` exists (written by C11's `atos-tpm-seal` while the install-time no-PCR TPM2 slot is still the unlock; interface in the [C11 README](../../docs/components/c11-installer/README.md)), the shell shows a card in the top right corner of one output: "Your disk is not protected from other systems", what that means in plain words, and to turn on Secure Boot in the firmware settings. **Learn more** opens the C11 page with `xdg-open`. **Dismiss** hides it until the shell restarts, so it is back at the next login while the file lasts. The shell looks at start-up and every 5 s for a minute afterwards (the seal unit may finish after the session starts); after a successful seal the file is gone and nothing shows. Do not disturb does not silence it: it is a security warning. It takes no exclusive zone and no keyboard grab. The shell does not read the LUKS header.
 
 ## Build and test
 

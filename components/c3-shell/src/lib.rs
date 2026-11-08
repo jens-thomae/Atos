@@ -6,6 +6,7 @@ pub mod apps;
 pub mod config;
 pub mod control;
 pub mod icons;
+pub mod notice;
 
 slint::include_modules!();
 
