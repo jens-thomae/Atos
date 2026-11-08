@@ -2,8 +2,8 @@
 # Docs: docs/components/c1-base/README.md. Recipe: bootc-sealed-images(7).
 # Build: podman build --build-context repo=. -f components/c1-base/Containerfile components/c1-base
 # (`repo` is the repository root: the compositor source and the toolchain pin come from there.)
-# Base: fedora-bootc 45 (D-008), multi-arch index digest; version 45.20261107.0.
-ARG BASE=quay.io/fedora/fedora-bootc:45@sha256:451894faadba48a53c4449efa8b872a1c004b80d8bb3dab71c4c93f631129d59
+# Base: fedora-bootc 45 (D-008), multi-arch index digest; version 45.20261108.0.
+ARG BASE=quay.io/fedora/fedora-bootc:45@sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29
 
 # atos-comp (C2) is built in its own stage and only the stripped binary is copied into `base`.
 # Same base image, so its layers are already pulled.
