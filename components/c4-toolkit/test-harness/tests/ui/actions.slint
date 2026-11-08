@@ -1,0 +1,36 @@
+import "../../fonts/NotoSans-Regular.ttf";
+import { LineEdit, Button, ComboBox, Switch, CheckBox } from "std-widgets.slint";
+
+export component ActionsWidgets inherits Window {
+    width: 300px;
+    height: 300px;
+    default-font-family: "Noto Sans";
+    in-out property <string> name: "hello world";
+    in property <bool> locked;
+    VerticalLayout {
+        LineEdit { accessible-label: "Name"; text <=> root.name; }
+        LineEdit { accessible-label: "Locked"; text: "fixed"; read-only: root.locked; }
+        Button { text: "Go"; }
+        CheckBox { text: "Check"; }
+        Switch { text: "Wifi"; }
+        ComboBox { accessible-label: "Mode"; model: ["a", "b"]; }
+    }
+}
+
+// A button half below the fold of a Flickable, in a context menu area.
+export component ActionsScroll inherits Window {
+    width: 200px;
+    height: 100px;
+    default-font-family: "Noto Sans";
+    out property <length> scrolled: fl.content-y;
+    fl := Flickable {
+        content-height: 1000px;
+        area := ContextMenuArea {
+            Menu {
+                MenuItem { title: "Open"; }
+            }
+            Button { y: 80px; width: 100px; height: 30px; text: "Far"; }
+        }
+    }
+    Button { text: "Outside"; x: 120px; width: 70px; height: 30px; }
+}
