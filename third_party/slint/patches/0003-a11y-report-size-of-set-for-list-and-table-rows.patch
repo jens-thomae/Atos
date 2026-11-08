@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Atos <atos@localhost>
+Date: Sun, 8 Nov 2026 12:42:26 +0100
+Subject: [PATCH] a11y: report size of set for list and table rows
+
+Every ListView and StandardTableView row carries the model length, and the table's list does too, so assistants can address rows that are not instantiated.
+---
+ internal/compiler/widgets/common/listview.slint     | 1 +
+ internal/compiler/widgets/cosmic/tableview.slint    | 2 ++
+ internal/compiler/widgets/cupertino/tableview.slint | 2 ++
+ internal/compiler/widgets/fluent/tableview.slint    | 2 ++
+ internal/compiler/widgets/material/tableview.slint  | 2 ++
+ 5 files changed, 9 insertions(+)
+
+diff --git a/internal/compiler/widgets/common/listview.slint b/internal/compiler/widgets/common/listview.slint
+index 117c730..b395637 100644
+--- a/internal/compiler/widgets/common/listview.slint
++++ b/internal/compiler/widgets/common/listview.slint
+@@ -141,6 +141,7 @@ component StandardListViewBase inherits ListView {
+         pressed: i-touch-area.pressed;
+         pressed-x: i-touch-area.pressed-x;
+         pressed-y: i-touch-area.pressed-y;
++        accessible-item-count: root.model.length;
+         accessible-action-default => { i-touch-area.clicked(); }
+ 
+         i-touch-area := TouchArea {
+diff --git a/internal/compiler/widgets/cosmic/tableview.slint b/internal/compiler/widgets/cosmic/tableview.slint
+index a8385e1..df0d8d9 100644
+--- a/internal/compiler/widgets/cosmic/tableview.slint
++++ b/internal/compiler/widgets/cosmic/tableview.slint
+@@ -238,9 +238,11 @@ export component StandardTableView {
+         }
+ 
+         scroll-view := ListView {
++            accessible-item-count: root.rows.length;
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+ 
+diff --git a/internal/compiler/widgets/cupertino/tableview.slint b/internal/compiler/widgets/cupertino/tableview.slint
+index 182331e..f720bf4 100644
+--- a/internal/compiler/widgets/cupertino/tableview.slint
++++ b/internal/compiler/widgets/cupertino/tableview.slint
+@@ -237,9 +237,11 @@ export component StandardTableView {
+         }
+ 
+         scroll-view := ListView {
++            accessible-item-count: root.rows.length;
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+ 
+diff --git a/internal/compiler/widgets/fluent/tableview.slint b/internal/compiler/widgets/fluent/tableview.slint
+index 5fe1834..6c9c708 100644
+--- a/internal/compiler/widgets/fluent/tableview.slint
++++ b/internal/compiler/widgets/fluent/tableview.slint
+@@ -257,9 +257,11 @@ export component StandardTableView {
+         }
+ 
+         scroll-view := ListView {
++            accessible-item-count: root.rows.length;
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+ 
+diff --git a/internal/compiler/widgets/material/tableview.slint b/internal/compiler/widgets/material/tableview.slint
+index 9c047ec..869e79e 100644
+--- a/internal/compiler/widgets/material/tableview.slint
++++ b/internal/compiler/widgets/material/tableview.slint
+@@ -224,9 +224,11 @@ export component StandardTableView {
+         }
+ 
+         scroll-view := ListView {
++            accessible-item-count: root.rows.length;
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+ 
+                 clicked => {

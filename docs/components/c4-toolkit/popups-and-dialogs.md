@@ -1,6 +1,6 @@
 # Popups and dialogs in the accessibility tree (A6)
 
-Card: #95. Decision: D-006 §3.4 (A6), D-007. Patch: `0003-a11y-name-popups-…` in the [Slint queue](README.md#patch-queue).
+Card: #95. Decision: D-006 §3.4 (A6), D-007. Patch: `0004-a11y-name-popups-…` in the [Slint queue](README.md#patch-queue).
 
 ## What the patch does
 
