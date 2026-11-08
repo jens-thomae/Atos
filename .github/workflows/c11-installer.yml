@@ -61,10 +61,17 @@ jobs:
           if [ -z "$REF" ]; then
             sudo podman pull -q "$PAYLOAD"
           else
-            # Tagged as the published image, so the installed system tracks the same reference.
-            # Layer cache as c1-base.yml's pull request builds (read only).
-            sudo podman build --cache-from ghcr.io/jens-thomae/atos/c1-base-cache --cache-ttl 168h \
+            # Built rootless exactly as c1-base.yml's pull request builds (a rootful build's UKI
+            # composefs digest did not match its image), with their layer cache (read only). Tagged
+            # as the published image, so the installed system tracks the same reference.
+            echo "$TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+            podman build --pull=missing --cache-from ghcr.io/jens-thomae/atos/c1-base-cache --cache-ttl 168h \
               --build-context repo=payload-src -t "$PAYLOAD" payload-src/components/c1-base
+            podman logout ghcr.io
+            sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
+            payload-src/components/c1-base/check-seal.sh "$PAYLOAD"
+            podman save "$PAYLOAD" | sudo podman load -q
+            podman rmi -q "$PAYLOAD"
             echo "Payload built from \`$REF\` ($(git -C payload-src rev-parse HEAD))" >> "$GITHUB_STEP_SUMMARY"
           fi
           sudo podman logout ghcr.io
