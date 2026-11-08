@@ -79,13 +79,10 @@ COPY cosign.pub /usr/share/pki/containers/atos-c1-base-test.pub
 COPY session/ /
 # Boot counting (#56): patched bootc names an upgrade's UKI entry `…+3.conf`; the health check
 # decides when a counted boot is good (usr/lib/systemd/system/atos-session-check.service). The
-# initramfs is rebuilt with Fedora's dracut config plus ours, so a counted boot that fails in the
-# initrd reboots too (usr/lib/dracut/dracut.conf.d/40-atos-boot-counting.conf).
+# initramfs is rebuilt in the `kernel` stage below.
 COPY --from=bootc /bootc /usr/bin/bootc
 RUN systemctl enable atos-session-check.service \
     && semodule -i /usr/share/atos/selinux/atos-bless-boot.cil \
-    && kver=$(ls /usr/lib/modules) && dracut --force --kver "$kver" "/usr/lib/modules/$kver/initramfs.img" \
-    && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'emergency.service.d/10-atos-boot-counting.conf' \
     && rm -rf /var/tmp/*
 COPY --from=comp /atos-comp /usr/bin/atos-comp
 COPY --from=repo components/c2-compositor/data/keybindings.ron /usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults
@@ -103,17 +100,24 @@ FROM tools AS sdboot
 RUN for f in /usr/lib/systemd/boot/efi/systemd-boot*.efi; do \
       sbsign --key /keys/db.key --cert /keys/db.crt --output "$f.signed" "$f"; done
 
-# The rootfs the UKI seals: kernel and initramfs move out of /usr, into the UKI.
+# Kernel and initramfs for the UKI (not shipped): only the `uki` stage reads /kernel. The
+# initramfs is rebuilt here with Fedora's dracut config plus ours, so a counted boot that fails in
+# the initrd reboots too (#56, usr/lib/dracut/dracut.conf.d/40-atos-boot-counting.conf); built in
+# `base`, it would ship in a layer of the image (#111).
 FROM base AS kernel
-COPY --from=sdboot /usr/lib/systemd/boot/efi/ /usr/lib/systemd/boot/efi/
-RUN bootc container split-kernel-and-rootfs --output /kernel
+RUN kver=$(ls /usr/lib/modules) && dracut --force --kver "$kver" "/usr/lib/modules/$kver/initramfs.img" \
+    && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'emergency.service.d/10-atos-boot-counting.conf' \
+    && bootc container split-kernel-and-rootfs --output /kernel
 
-FROM kernel AS rootfs
+# The rootfs the UKI seals: kernel and initramfs move out of /usr, into the UKI. The split runs
+# again here and its output is deleted in the same layer, so no layer of the image carries it (#111).
+FROM base AS rootfs
+COPY --from=sdboot /usr/lib/systemd/boot/efi/ /usr/lib/systemd/boot/efi/
 # Directory mtimes: the digest of this rootfs (computed from the filesystem at build time) must equal
 # the one bootc install computes from the OCI layers. Directories our layers changed come out
 # differently in the two (composefs-rs design notes, containers/composefs-rs#132), so this layer
 # sets every directory to the epoch, as the base image already has it.
-RUN rm -rf /kernel \
+RUN bootc container split-kernel-and-rootfs --output /kernel && rm -rf /kernel \
     && find / -xdev -type d -newermt @0 ! -path /proc ! -path /sys ! -path /dev -exec touch -h -d @0 {} + \
     && bootc container lint --fatal-warnings
 

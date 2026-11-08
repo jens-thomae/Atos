@@ -27,13 +27,14 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
    - The test keys' `PK.auth`, `KEK.auth` and `db.auth` in `/usr/lib/bootc/install/secureboot-keys/auto/`. `bootc install` copies them to the ESP as `loader/keys/auto/`.
    - Trust policy (#75): `usr/share/containers/policy.json`, `usr/share/containers/registries.d/atos.yaml`, `usr/lib/bootc/install/85-atos-sigpolicy.toml` and the TEST cosign key as `/usr/share/pki/containers/atos-c1-base-test.pub`. See [trust-policy.md](trust-policy.md).
    - The session (below): `greetd`, Xwayland, Mesa, `xterm`, `session/` (greetd config, `atos` user) and `atos-comp` copied from the `comp` stage.
-   - Boot counting (#56): the patched `bootc`, the health check `atos-session-check.service` (enabled), a timeout drop-in for `boot-complete.target`, one SELinux rule for `systemd-bless-boot`, the karg `panic=10` (`kargs.d/20-atos-panic.toml`), and emergency drop-ins that reboot on a counted boot. The initramfs is rebuilt with dracut so that it carries those drop-ins ([boot-counting.md](boot-counting.md)).
+   - Boot counting (#56): the patched `bootc`, the health check `atos-session-check.service` (enabled), a timeout drop-in for `boot-complete.target`, one SELinux rule for `systemd-bless-boot`, the karg `panic=10` (`kargs.d/20-atos-panic.toml`), and emergency drop-ins that reboot on a counted boot. The initramfs that carries those drop-ins is rebuilt in the `kernel` stage ([boot-counting.md](boot-counting.md)).
    - Label `org.opencontainers.image.title=Atos base`.
 2. **`tools`** (not shipped): `systemd-ukify` and `sbsigntools`, plus the test db key.
 3. **`sdboot`**: signs `systemd-boot*.efi` as `*.efi.signed`. `bootctl install` prefers the `.signed` file.
-4. **`kernel`**: the signed systemd-boot goes into `/usr`. `bootc container split-kernel-and-rootfs` moves the kernel and initramfs out of `/usr/lib/modules/<kver>/`, because they go into the UKI.
-5. **`rootfs`**: the tree that gets sealed. This stage does three things:
-   - Removes the split-out kernel.
+4. **`kernel`** (not shipped): rebuilds the initramfs with Fedora's dracut config plus ours (#56) and checks it carries the emergency drop-in, then `bootc container split-kernel-and-rootfs` moves the kernel and initramfs to `/kernel/<kver>/`. Only the `uki` stage reads them, through a bind mount.
+5. **`rootfs`**: the tree that gets sealed, built `FROM base`. This stage does four things:
+   - Puts the signed systemd-boot into `/usr`.
+   - Runs `split-kernel-and-rootfs` again and deletes its output in the same layer, so the layer only records that the kernel and initramfs are gone from `/usr/lib/modules/<kver>/`. No layer of the image carries a copy (#111); upstream bootc's own Dockerfile does the same. The example in bootc-sealed-images(7) builds the final image on top of the split stage, which ships the split-out files in a layer even where a later layer deletes them.
    - Sets every directory's mtime to the epoch, as the base image already has it. Without this, the digest computed from the filesystem at build time differs from the one `bootc install` computes from the OCI layers for every directory our layers touched, and the install fails with *"embedded composefs= digest … doesn't match"* (found while building this; see the composefs-rs design notes and [containers/composefs-rs#132](https://github.com/containers/composefs-rs/issues/132)).
    - Runs `bootc container lint --fatal-warnings`.
 6. **`uki`** (not shipped): `bootc container ukify` computes the composefs digest of `rootfs`, writes it into the kernel command line (`composefs.digest=v1-sha512-12:<digest>`, plus the V2 `composefs=` form) and has `ukify` build a UKI signed with the test db key.
@@ -164,11 +165,29 @@ The boot times only show that nothing hangs; under emulation they are not compar
 
 Notes:
 
-- **What an update downloads.** A change anywhere in `base` changes the composefs digest, so the UKI (about 108.6 MB compressed) changes with every update. The other large layer is the `kernel` stage's `split-kernel-and-rootfs` output: the kernel and initramfs, which the `rootfs` stage then deletes. That layer ships in every image and every update even though nothing uses it ([#111](https://github.com/jens-thomae/Atos/issues/111)).
+- **What an update downloads.** A change anywhere in `base` changes the composefs digest, so the UKI (about 108.6 MB compressed) changes with every update. Until #111, the other large layer was the `kernel` stage's `split-kernel-and-rootfs` output: the kernel and initramfs, which the `rootfs` stage then deleted, so it shipped in every image and every update. See [Image and update size](#image-and-update-size-111).
 - **Boot entries.** bootc writes one systemd-boot entry per deployment: `bootc_fedora-45-0.conf` (default, sort key `bootc-fedora-0`) and `bootc_fedora-45-1.conf`. Both show the same title, *Fedora Linux 45 (Forty Five) 45 (45)*; nothing marks the second one as the previous version ([#112](https://github.com/jens-thomae/Atos/issues/112)). The menu is hidden (timeout 0, since bootc 1.17.1 ignores an image `loader.conf`) and opens when a key is held during boot.
 - **Booting the previous entry from the menu does not change the default.** The next plain boot starts dev-2 again. While booted from the menu, `bootc status` reports `bootOrder: rollback` and `rollbackQueued: true`, although no rollback was asked for.
 - **Firmware boot order.** After the first boots, AAVMF tries its built-in EFI Shell before the disk. Secure Boot refuses the shell (*Security Violation*) and the firmware moves on to the disk. `sealed.sh` ignores that line.
 - **Logs:** `tools/dev-vm/out/sealed/update-{stage,apply,previous,rollback,back}.log`.
+
+### Image and update size (#111)
+
+Before #111 the image shipped two copies of the kernel and initramfs that nothing reads: the `kernel` stage's `split-kernel-and-rootfs` output (the `rootfs` stage was built on top of it and deleted it in a later layer), and the initramfs rebuilt in `base` (#56), which `split-kernel-and-rootfs` then removed. Both are gone: the initramfs is rebuilt in `kernel`, which is not shipped, and `rootfs` splits and deletes in one layer. The kernel and initramfs now ship only inside the UKI.
+
+Measured in the dev VM (`atos-c111`, aarch64, 2026-11-07) with `sealed.sh update`'s dev-1 and dev-2, built from `main` at 2c31652 (before) and from this change (after). Compressed sizes are the layer sizes in the VM's registry (`podman push`, gzip); the image size is `podman images`.
+
+| | Before | After |
+| --- | --- | --- |
+| Image, uncompressed | 3.04 GB | 2.84 GB |
+| Image, compressed | 80 layers, 1590.1 MB | 79 layers, 1390.1 MB |
+| Layers of ours with the kernel or initramfs | `kernel/<kver>/` (`vmlinuz` 17.4 MB, `initramfs.img` 91.3 MB), and the rebuilt `initramfs.img` (91.3 MB) | none |
+| Update dev-1 to dev-2: new layers | 5, 217.6 MB (UKI 108.7 MB, split-out kernel 108.6 MB, three small) | 4, 109.0 MB (UKI 108.7 MB, three small) |
+| Update dev-1 to dev-2: received by the guest during `bootc upgrade` | 225.8 MB | 113.1 MB |
+
+dev-2 changes only a line near the end of `base`, after the initramfs rebuild, so its update did not include the rebuilt initramfs layer. A real update that changes `base` earlier (a package or base image bump) also downloaded that layer before #111: 100.8 MB compressed then, 9.5 MB now (the SELinux module and the unit links), so such an update now downloads about 200 MB less.
+
+The Fedora base layers still carry the base image's own kernel and initramfs entries; changing the base image is out of scope.
 
 ## Automatic rollback (boot counting)
 
