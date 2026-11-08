@@ -7,8 +7,8 @@ The Atos base image is a bootc container image (D-008): a **sealed composefs ima
 | | |
 | --- | --- |
 | Image | `quay.io/fedora/fedora-bootc:45` |
-| Pinned digest | `sha256:451894faadba48a53c4449efa8b872a1c004b80d8bb3dab71c4c93f631129d59` (multi-arch index) |
-| Version label | `45.20261107.0`, kernel `7.2.15-300.fc45` (amd64) |
+| Pinned digest | `sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29` (multi-arch index) |
+| Version label | `45.20261108.0` (kernel not re-checked after the bump) |
 | Size | 65 layers, about 1.04 GB compressed (amd64) |
 
 The digest changes only through a reviewed change to the `FROM` line. CI builds amd64 only.
