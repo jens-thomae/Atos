@@ -1,0 +1,193 @@
+From 8bff87e6f677bbc74cf7b0e2cb2c3d0ee53d0b7b Mon Sep 17 00:00:00 2001
+From: Jens Thomae <jens.thomae@proton.me>
+Date: Sat, 7 Nov 2026 21:29:03 +0100
+Subject: [PATCH] composefs: refuse to stage an image older than the booted or
+ staged one
+
+Atos carried patch (#75). Signed version floor: the target image's
+version label (org.opencontainers.image.version, else version) must not
+be lower than the booted image's or the staged image's, compared as
+dot-separated integers, so an update the client already accepted is
+not replaced by an older one. The label is in the image config, covered
+by the signature containers-policy.json checks. The check runs before
+anything on disk changes: before validate_update (which removes staged
+entries) when the image is already in the repository, and after the
+pull otherwise. Only upgrade and switch pass through here; boot entries
+and bootc rollback are unaffected.
+---
+ crates/lib/src/bootc_composefs/switch.rs |   2 +
+ crates/lib/src/bootc_composefs/update.rs | 124 +++++++++++++++++++++++
+ 2 files changed, 126 insertions(+)
+
+diff --git a/crates/lib/src/bootc_composefs/switch.rs b/crates/lib/src/bootc_composefs/switch.rs
+index 0cb0b9e..7dff8e4 100644
+--- a/crates/lib/src/bootc_composefs/switch.rs
++++ b/crates/lib/src/bootc_composefs/switch.rs
+@@ -95,6 +95,8 @@ pub(crate) async fn switch_composefs(
+     let (image, img_config) = is_image_pulled(repo, &target_imgref).await?;
+ 
+     if let Some(cfg_verity) = image {
++        // Atos (#75): before validate_update, which removes staged entries.
++        crate::bootc_composefs::update::check_version_floor(storage, &host, &img_config.config)?;
+         let action = validate_update(
+             storage,
+             booted_cfs,
+diff --git a/crates/lib/src/bootc_composefs/update.rs b/crates/lib/src/bootc_composefs/update.rs
+index c0dcafe..f2527c8 100644
+--- a/crates/lib/src/bootc_composefs/update.rs
++++ b/crates/lib/src/bootc_composefs/update.rs
+@@ -223,6 +223,123 @@ pub(crate) fn validate_update(
+     Ok(UpdateAction::Proceed)
+ }
+ 
++/// Atos (#75): true if `new` may replace an image whose version is `floor`. Versions are
++/// dot-separated unsigned integers, compared component by component (`45.2` < `45.10`).
++/// A floor that is not in that form sets no floor; a `new` that is missing or not in that
++/// form cannot prove it is newer, so it is refused.
++pub(crate) fn version_floor_allows(new: Option<&str>, floor: &str) -> bool {
++    fn parse(v: &str) -> Option<Vec<u64>> {
++        v.split('.').map(|c| c.parse().ok()).collect()
++    }
++    let Some(floor) = parse(floor) else {
++        return true;
++    };
++    new.and_then(parse).is_some_and(|new| new >= floor)
++}
++
++/// Atos (#75): the first of `floors` (booted, staged) that `new` does not satisfy, if any.
++fn violated_floor<'a>(
++    new: Option<&str>,
++    floors: &'a [(&'a str, String)],
++) -> Option<&'a (&'a str, String)> {
++    floors.iter().find(|(_, f)| !version_floor_allows(new, f))
++}
++
++/// Atos (#75): signed version floor. Refuses an image whose version label
++/// (`org.opencontainers.image.version`, else `version`) is lower than the booted image's or
++/// the staged image's (the floor is the higher of the two: an update the client already
++/// accepted must not be replaced by an older one).
++/// The label lives in the image config, which the manifest names by digest, so the
++/// signature checked by containers-policy.json covers it. Only pulls (`bootc upgrade`,
++/// `bootc switch`) call this, and always before anything on disk changes: before
++/// `validate_update` when the image is already in the repository (it removes staged
++/// entries), and after the pull otherwise. Existing boot entries and `bootc rollback` are not
++/// affected, so the previous version always stays bootable.
++pub(crate) fn check_version_floor(
++    storage: &Storage,
++    host: &Host,
++    new_config: &ostree_ext::oci_spec::image::ImageConfiguration,
++) -> Result<()> {
++    let new = ostree_ext::container::version_for_config(new_config);
++    let booted = Some(host.require_composefs_booted()?);
++    let staged = host
++        .status
++        .staged
++        .as_ref()
++        .map(|s| s.require_composefs())
++        .transpose()?;
++    let mut floors = Vec::new();
++    for (which, depl) in [("booted", booted), ("staged", staged)] {
++        let Some(depl) = depl else { continue };
++        let (img, _) = get_imginfo(storage, &depl.verity)?;
++        if let Some(v) = ostree_ext::container::version_for_config(&img.config) {
++            floors.push((which, v.to_owned()));
++        }
++    }
++    if let Some((which, floor)) = violated_floor(new, &floors) {
++        anyhow::bail!(
++            "Refusing image version {}: lower than the {which} version {floor} (signed version floor)",
++            new.unwrap_or("(none)")
++        );
++    }
++    Ok(())
++}
++
++/// Atos (#75): the floor for an image just pulled, read from the local repository.
++fn check_version_floor_pulled(
++    storage: &Storage,
++    host: &Host,
++    repo: &ComposefsRepository,
++    manifest_digest: &str,
++) -> Result<()> {
++    let digest: composefs_oci::OciDigest = manifest_digest
++        .parse()
++        .with_context(|| format!("Parsing manifest digest {manifest_digest}"))?;
++    let image = composefs_oci::OciImage::<Sha512HashValue>::open(repo, &digest, None)
++        .with_context(|| format!("Opening pulled image {manifest_digest}"))?;
++    let config = image
++        .config()
++        .ok_or_else(|| anyhow::anyhow!("Pulled image has no config"))?;
++    check_version_floor(storage, host, config)
++}
++
++#[cfg(test)]
++mod version_floor_tests {
++    use super::version_floor_allows as allows;
++
++    #[test]
++    fn version_floor() {
++        assert!(allows(Some("20261108.0"), "20261107.120000"));
++        assert!(allows(Some("45.10"), "45.2"));
++        assert!(allows(Some("20261107.1"), "45.20261107.0"));
++        assert!(allows(Some("1.2"), "1.2"));
++        assert!(!allows(Some("45.2"), "45.10"));
++        assert!(!allows(Some("1.2"), "1.2.0"));
++        assert!(!allows(None, "1.2"));
++        assert!(!allows(Some("dev-2"), "1.2"));
++        assert!(!allows(Some(""), "1.2"));
++        assert!(allows(None, "dev-1"));
++    }
++
++    /// The floor is the higher of booted and staged: v3 booted, v5 staged, v4 refused.
++    #[test]
++    fn version_floor_booted_and_staged() {
++        use super::violated_floor;
++        let floors = [("booted", "3".to_owned()), ("staged", "5".to_owned())];
++        assert_eq!(
++            violated_floor(Some("4"), &floors).map(|f| f.0),
++            Some("staged")
++        );
++        assert_eq!(
++            violated_floor(Some("2"), &floors).map(|f| f.0),
++            Some("booted")
++        );
++        assert!(violated_floor(Some("5"), &floors).is_none());
++        assert!(violated_floor(Some("6"), &floors[..1]).is_none());
++        assert!(violated_floor(Some("4"), &floors[..1]).is_none());
++    }
++}
++
+ /// This is just an intersection of SwitchOpts and UpgradeOpts
+ pub(crate) struct DoUpgradeOpts {
+     pub(crate) apply: bool,
+@@ -291,6 +408,9 @@ pub(crate) async fn do_upgrade(
+     )
+     .await?;
+ 
++    // Atos (#75): never stage an image older than the booted one.
++    check_version_floor_pulled(storage, host, &repo, &manifest_digest)?;
++
+     // If the target image produces the same fs-verity digest as any existing
+     // deployment (booted, staged, rollback, or pinned), error out.  Two images
+     // from different sources can have identical content; we cannot silently reuse
+@@ -555,6 +675,8 @@ pub(crate) async fn upgrade_composefs(
+         img_config = staged_img_config;
+ 
+         if let Some(cfg_verity) = img_pulled {
++            // Atos (#75): before validate_update, which removes staged entries.
++            check_version_floor(storage, &host, &img_config.config)?;
+             let action = validate_update(
+                 storage,
+                 composefs,
+@@ -587,6 +709,8 @@ pub(crate) async fn upgrade_composefs(
+ 
+     // We already have this container config
+     if let Some(cfg_verity) = img_pulled {
++        // Atos (#75): before validate_update, which removes staged entries.
++        check_version_floor(storage, &host, &img_config.config)?;
+         let action = validate_update(
+             storage,
+             composefs,
+-- 
+2.50.1 (Apple Git-155)
+
