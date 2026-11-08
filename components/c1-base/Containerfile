@@ -47,6 +47,28 @@ RUN set -eux; . /src/UPSTREAM; \
     && cargo test --release --locked -p bootc-lib -- boot_count version_floor \
     && strip -o /bootc target/release/bootc && rm -rf target /opt/cargo
 
+# NVIDIA's open kernel modules (D-017, #162; docs/components/c1-base/nvidia.md), not shipped. Built
+# from the source tag that matches the userspace (nvidia/UPSTREAM), against exactly the base image's
+# kernel, and signed with the TEST db key. D-014: the release key signs only in the owner's local
+# release build, never in CI. Only the four signed .ko files are copied into `base`.
+# kernel-devel for an older kernel still resolves through Fedora's updates-archive repository.
+FROM ${BASE} AS nvidia
+COPY nvidia/UPSTREAM /src/UPSTREAM
+COPY secureboot-test/db.key secureboot-test/db.crt /keys/
+RUN set -eux; . /src/UPSTREAM; kver=$(ls /usr/lib/modules); \
+    test "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core)" = "$kver"; \
+    dnf -y install --setopt=install_weak_deps=False "kernel-devel-$kver" gcc gcc-c++ make git-core; \
+    git clone -q --depth 1 --branch "$tag" "$repo" /src/nv; \
+    test "$(git -C /src/nv rev-parse HEAD)" = "$commit"; \
+    grep -qx "NVIDIA_VERSION = $tag" /src/nv/version.mk; \
+    make -C /src/nv -j"$(nproc)" modules SYSSRC="/usr/src/kernels/$kver"; \
+    mkdir /out; for m in nvidia nvidia-modeset nvidia-drm nvidia-uvm; do \
+      strip --strip-debug -o "/out/$m.ko" "/src/nv/kernel-open/$m.ko"; \
+      "/usr/src/kernels/$kver/scripts/sign-file" sha512 /keys/db.key /keys/db.crt "/out/$m.ko"; \
+      test "$(modinfo -F vermagic "/out/$m.ko" | cut -d' ' -f1)" = "$kver"; \
+    done; \
+    test "$(modinfo -F version /out/nvidia.ko)" = "$tag"
+
 FROM ${BASE} AS base
 
 # D-005: no call home. Fedora's anonymous countme counter runs from this timer.
@@ -60,6 +82,39 @@ RUN dnf -y install --setopt=install_weak_deps=False greetd greetd-selinux \
     && rm -rf /var/lib/greetd/.config /run/selinux-policy \
     && systemctl set-default graphical.target \
     && systemctl enable greetd.service
+
+# NVIDIA graphics (D-017, #162; docs/components/c1-base/nvidia.md). NVK (mesa-vulkan-drivers) for
+# every GPU nouveau drives. NVIDIA's userspace and GSP firmware come unmodified from RPM Fusion
+# nonfree, at exactly the version the modules above were built from. Its packages require
+# `nvidia-kmod` (our signed modules, not a package) and `nvidia-settings` (an X11 GTK tool, left
+# out), so dnf cannot install them. They are downloaded and signature-checked, dnf installs what they
+# need from Fedora, rpm installs them with --nodeps, and the build fails unless exactly those two
+# requirements stay open. On aarch64 (dev VM only; CI and releases are amd64) a third: RPM Fusion
+# ships no libnvidia-rmapi-tegra. grubby is left out too: a scriptlet would use it to add
+# rd.driver.blacklist=nouveau to GRUB entries, which a UKI does not have and a single image must not get.
+# Driver selection and initramfs: usr/lib/modprobe.d/atos-nvidia.conf, usr/lib/dracut/dracut.conf.d/40-atos-nvidia.conf.
+# Pins, key and modules are bind-mounted, so no layer carries a second copy of them.
+RUN --mount=type=bind,source=nvidia,target=/run/nvidia \
+    --mount=type=bind,from=nvidia,source=/out,target=/run/nvidia-ko \
+    set -eux; . /run/nvidia/UPSTREAM; kver=$(ls /usr/lib/modules); k=/run/nvidia/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020; \
+    open="nvidia-kmod nvidia-settings"; [ "$(uname -m)" != aarch64 ] || open="$open libnvidia-rmapi-tegra.so.$tag"; \
+    pkgs="xorg-x11-drv-nvidia xorg-x11-drv-nvidia-libs xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-cuda-libs \
+      xorg-x11-drv-nvidia-power nvidia-modprobe nvidia-persistenced"; \
+    dnf download --repofrompath="rpmfusion-nonfree,$rpmfusion/$(uname -m)/os/" --repo=rpmfusion-nonfree \
+      --destdir /tmp/nvidia/rpm $(for p in $pkgs; do echo "$p-$userspace"; done); \
+    rpmkeys --import "$k"; rpmkeys --checksig /tmp/nvidia/rpm/*.rpm; \
+    rpm -qp --provides /tmp/nvidia/rpm/*.rpm | sed 's/ .*//' > /tmp/nvidia/own; \
+    dnf -y install --setopt=install_weak_deps=False mesa-vulkan-drivers $(rpm -qp --requires /tmp/nvidia/rpm/*.rpm \
+      | grep -v -e '^rpmlib(' -e '^(' | sed 's/ .*//' | sort -u | grep -vxF -f /tmp/nvidia/own \
+      | grep -vE "^($(echo /usr/bin/grubby $open | tr ' ' '|'))(\(|\$)"); \
+    rpm -i --nodeps /tmp/nvidia/rpm/*.rpm; \
+    test "$(rpm -V --nofiles $pkgs | sed -n 's/^\t\(.*\) is needed by .*/\1/p' \
+      | sed 's/[ (].*//' | LC_ALL=C sort -u | xargs)" = "$(printf '%s\n' $open | LC_ALL=C sort | xargs)"; \
+    test "$(rpm -q --qf '%{VERSION}' xorg-x11-drv-nvidia)" = "$tag"; \
+    install -D -m 0644 -t "/usr/lib/modules/$kver/extra/nvidia" /run/nvidia-ko/*.ko; depmod -a "$kver"; \
+    systemctl enable nvidia-suspend.service nvidia-resume.service nvidia-hibernate.service \
+      nvidia-suspend-then-hibernate.service; \
+    rm -rf /tmp/nvidia /run/dnf /var/lib/dnf /var/cache/* /var/log/*
 
 # systemd-boot instead of bootupd/GRUB/shim: sealed images boot systemd-boot signed with our own
 # key (D-014), and bootc picks systemd-boot when bootupd is absent.
@@ -109,6 +164,7 @@ RUN for f in /usr/lib/systemd/boot/efi/systemd-boot*.efi; do \
 FROM base AS kernel
 RUN kver=$(ls /usr/lib/modules) && dracut --force --kver "$kver" "/usr/lib/modules/$kver/initramfs.img" \
     && lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -q 'emergency.service.d/10-atos-boot-counting.conf' \
+    && ! lsinitrd "/usr/lib/modules/$kver/initramfs.img" | grep -E '/(nvidia|nouveau)[^/]*\.ko' \
     && bootc container split-kernel-and-rootfs --output /kernel
 
 # The rootfs the UKI seals: kernel and initramfs move out of /usr, into the UKI. The split runs
