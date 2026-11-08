@@ -67,8 +67,8 @@ Reading (derived from these numbers, not separately measured):
 
 Option A as D-015 describes it holds on our image: transient, key-free, `/etc` and `/var` untouched, gone after a reboot. Points for the follow-up cards:
 
-1. **Warn about RAM.** The cost is real: a compiler is ~215 MB. The shell's usr-overlay entry (card #105 and the developer-mode UI) should say it, not only "discarded on reboot".
-2. **Packages are not persistent, but the dnf cache is.** `/var/cache` keeps ~90 MB per install session on disk. Not a trust issue; it is the reason a user may see disk use go up after a "transient" session.
+1. **Warn about RAM.** The cost is real: gcc is ~176 MB, plus ~40 MB once. The shell's usr-overlay entry (card #105 and the developer-mode UI) should say it, not only "discarded on reboot".
+2. **Packages are not persistent, but the dnf cache is.** `/var/cache` grew by ~88 MB on disk in this run (four installs). Not a trust issue; it is the reason a user may see disk use go up after a "transient" session.
 3. **Not checked:** x86_64 (this ran on aarch64 only); behaviour at the tmpfs size limit or under memory pressure; SELinux denials during the installs (the guest was `Enforcing`; the log shows no failures, but denials were not searched for); a `systemctl` restart of services after replacing files in `/usr`; an image update (`bootc upgrade`) while an overlay is mounted.
 
 ## Sources
