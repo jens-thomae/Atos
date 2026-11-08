@@ -1,6 +1,6 @@
 # How Atos supports NVIDIA graphics (decision write-up)
 
-Card: #153 · Written: 2026-11-08 · No decisions-log entry exists yet; the owner assigns the ID (the next free one is D-017 at the time of writing). This write-up ends in a recommendation for the owner ([section 5](#5-recommendation-for-the-owner-to-decide)). It decides nothing. No image was built and no NVIDIA hardware was used for it.
+Card: #153 · Written: 2026-11-08 · **Decided as D-017 on 2026-11-08** (card #161): the owner chose a single image for everyone over the variant recommended below. This write-up ends in a recommendation for the owner ([section 5](#5-recommendation-for-the-owner-to-decide)). It decides nothing. No image was built and no NVIDIA hardware was used for it.
 
 Every statement about a driver, package, licence or kernel links the upstream page or file it comes from. All of them were opened on 2026-11-08. **Read in code** means I read the source but did not run it. **Not checked** means I found no source either way. **Unconfirmed** marks a claim from a secondary source, or one I could not confirm upstream.
 
