@@ -107,7 +107,7 @@ Why it matters even so: **loading a module does not change PCR7 or PCR11**. A di
 - **x86_64 and real firmware.** The run is aarch64 under edk2. The kernel code path is architecture-independent; the keyring contents depend on the firmware's db.
 - **`MokListTrusted` on** under B2: spike #76 already showed non-CA MOKs going to `.platform` with it on, which this card's result makes a module trust anchor too.
 - **A real Microsoft- or Fedora-signed module.** We hold no such key; the `ca`/`leaf_*` cases stand in for one.
-- **IPE.** Fedora's kernel has `CONFIG_SECURITY_IPE=y` (`ipe` is in `CONFIG_LSM`). An IPE policy that allows module loads only from fs-verity-protected files (our composefs `/usr`) could stop modules from `/var` or `/etc` whatever their signature. Not checked; see the proposal on card #158.
+- **IPE.** Checked in #169: an IPE policy keyed on fs-verity digests stops signed modules from outside `/usr`, but Fedora's kernel can't load a policy large enough for all of `/usr`'s modules, and root can switch it off. See [ipe-modules.md](ipe-modules.md).
 
 ## Side finding: an extra Microsoft cert in db
 
