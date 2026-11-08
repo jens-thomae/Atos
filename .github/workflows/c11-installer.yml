@@ -72,8 +72,12 @@ jobs:
             podman logout ghcr.io
             sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
             payload-src/components/c1-base/check-seal.sh "$PAYLOAD"
-            podman save "$PAYLOAD" | sudo podman load -q
+            # Into root's storage through a compressed OCI layout, like a registry push and pull:
+            # loaded from `podman save`, the install ran out of /var/tmp twice (#180).
+            podman push -q "$PAYLOAD" "oci:$RUNNER_TEMP/payload:latest"
             podman rmi "$PAYLOAD" >/dev/null
+            sudo podman tag "$(sudo podman pull -q "oci:$RUNNER_TEMP/payload:latest")" "$PAYLOAD"
+            sudo rm -rf "$RUNNER_TEMP/payload"
             echo "Payload built from \`$REF\` ($(git -C payload-src rev-parse HEAD))" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Build the ISO
