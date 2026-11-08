@@ -26,7 +26,6 @@ Every number below is from the logs of one run of `image install overlay after`,
 | `touch /usr/…` after | ok |
 | `dnf install` of `strace`, `tmux`, `gdb`, `gcc` (`install_weak_deps=False`, one call each) | all four ok; `rpm -q` finds them; `strace -V`, `gdb --version`, `tmux -V`, `gcc --version` run; `gcc` compiled and ran a C program (exit code 42). Packages 658 → 677 |
 | `composefs=` on the command line afterwards | unchanged; the lower layer is still the verified image |
-| `bootc status` afterwards | still reports the booted image (no change visible in it) |
 
 ## 3. RAM
 
@@ -34,12 +33,12 @@ The upper layer is in tmpfs. It does not appear as its own mount (`df -t tmpfs` 
 
 | Step | Installed size added | `Shmem` added | `MemAvailable` change |
 | --- | --- | --- | --- |
-| `bootc usr-overlay` itself | 0 | +4.2 MB | −132 MB (the log's baseline, before overlay: 3320840 kB, after: 3188152 kB; not caused by the overlay alone, boot was still settling) |
+| `bootc usr-overlay` itself | 0 | +4.2 MB | −133 MB (3320840 → 3188152 kB; `Shmem` grew only 4 MB, so most of it is not the overlay's own memory: not investigated) |
 | `strace` (first install) | 2.7 MB | **+43.6 MB** | −38.7 MB |
 | `tmux` | 1.6 MB | +1.7 MB | −3.2 MB |
 | `gdb` | 55.6 MB | +55.1 MB | −70.6 MB |
 | `gcc` | 170.7 MB | +175.8 MB | −169.4 MB |
-| **All four** | **230.6 MB** | **+289 MB** (175.8 → 464.8 MB) | −463 MB since baseline |
+| **All four** | **230.6 MB** | **+289 MB** (175.8 → 464.8 MB) | −465 MB since the baseline before the overlay |
 
 Reading (derived from these numbers, not separately measured):
 
@@ -59,7 +58,7 @@ Reading (derived from these numbers, not separately measured):
 
 ## 5. Other behaviour
 
-- **`bootc usr-overlay --read-only`** works (`/usr` mounts `ro`; writes are refused). It is a different overlay from the writable one: it is not a way to make the writable one read-only again.
+- **`bootc usr-overlay --read-only`** works (`/usr` mounts `ro`; writes are refused). It was tried only on a fresh boot, not on an already writable overlay.
 - **A second `bootc usr-overlay`** while an overlay is mounted prints `An overlayfs is already mounted on /usr` and succeeds without changing it. After `--read-only` the second call therefore leaves `/usr` read-only: writes still refused.
 - **`dnf install --transient`** (no prior `usr-overlay`): `OK`; `strace` runs afterwards (`strace -- version 7.3`). `Shmem` grew by 56 MB (175.8 → 232.0 MB). **dnf leaves `/usr` mounted read-only** (`ro` in the mount options) when it is done, so that overlay stays but cannot be written to. After the next reboot `strace` is not installed. So dnf's own flag is an alternative entry point to `bootc usr-overlay` that needs no separate step; the card did not ask for it, it is here because dnf's error message points to it.
 
