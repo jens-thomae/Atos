@@ -1,6 +1,6 @@
 # Spike: locally sealed and signed developer image (D-015)
 
-Card: #100 · Run: 2026-11-08 in the `atos-c100` dev VM (aarch64) · Script: [`spikes/c1-dev-image/run.sh`](../../../spikes/c1-dev-image/run.sh)
+Card: #100 · Run: 2026-11-08 in the `atos-c100` dev VM (aarch64), on fedora-bootc 45.20261107.0 (main moved to 45.20261108.0 during the run; not rerun) · Script: [`spikes/c1-dev-image/run.sh`](../../../spikes/c1-dev-image/run.sh)
 
 This spike decides nothing. It checks item 2 of [developer-mode.md §6](developer-mode.md#6-implementation-cards-it-implies): can a developer build an image `FROM` the release image, seal it with `bootc container ukify`, sign it with a second (developer) key that sits next to the TEST db cert, `bootc switch` to it from `containers-storage` and boot it? It also checks whether the signing tools work with a TPM-resident key (developer-mode.md 2.2.2).
 
