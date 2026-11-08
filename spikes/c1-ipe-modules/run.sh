@@ -93,10 +93,11 @@ step_policy() {
   policy "$mnt/usr/lib/modules" > "$M/kmodules-full.pol"
   sign "$M/kmodules-full.pol" "$DB/db.key" "$DB/db.crt" "$M/kmodules-full.p7b"
   # The policy the image ships: a subset that fits, enough for this VM to boot (virtio, DRM,
-  # hw_random, file systems, crypto, lib, block, md) plus the dummy driver the guest loads.
-  local d=$mnt/usr/lib/modules/$KVER/kernel
-  policy "$d"/{drivers/virtio,drivers/gpu/drm,drivers/char/hw_random,fs,crypto,lib,drivers/block,drivers/md} \
-    "$d/drivers/net/dummy.ko.xz" > "$M/kmodules.pol"
+  # hw_random, file systems, crypto, lib, block) plus the dummy driver the guest loads.
+  local d=$mnt/usr/lib/modules/$KVER/kernel drm
+  mapfile -t drm < <(sudo find "$d/drivers/gpu/drm" -maxdepth 1 -name '*.ko*')
+  policy "$d"/{drivers/virtio,drivers/gpu/drm/virtio,drivers/gpu/drm/display,drivers/char/hw_random,fs,crypto,lib,drivers/block} \
+    "${drm[@]}" "$d/drivers/net/dummy.ko.xz" > "$M/kmodules.pol"
   sudo podman image umount "$IMAGE" >/dev/null
   sign "$M/kmodules.pol" "$DB/db.key" "$DB/db.crt" "$CTX/kmodules.p7b"
   [ "$(stat -c %s "$CTX/kmodules.p7b")" -le 65535 ]
