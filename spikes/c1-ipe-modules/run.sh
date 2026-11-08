@@ -248,13 +248,18 @@ echo "ATOS-IPE policies now: $(ls $S/policies | tr "\n" " "), allow_all active=$
 try etc-after-helper insmod /etc/atos-ipe/mt_etc.ko
 # unconfined_t may transition to any domain, and the domains that have mac_admin (install_t,
 # livecd_t, setfiles_mac_t) accept container_var_lib_t files as entrypoints: a copy of sh with that
-# label, started with runcon. Stops at the first combination that writes 0 to enforce.
-cp /usr/bin/bash ./sh-ctr && chcon -t container_var_lib_t ./sh-ctr
-for t in install_t livecd_t setfiles_mac_t; do for r in unconfined_r system_r; do
-  out=$(runcon -r $r -t $t ./sh-ctr -c "id -Z; echo 0 > $S/enforce && echo enforce=\$(cat $S/enforce)" 2>&1 | tr "\n" " ")
-  echo "ATOS-IPE root, secure_mode_policyload: runcon -r $r -t $t sh: $out"
-  [ "$(cat $S/enforce)" = 0 ] && break 2
-done; done
+# label, started with runcon. Not from /run: it is mounted nosuid, and SELinux refuses domain
+# transitions from nosuid mounts (nosuid_transition, the fourth run). Stops at the first
+# combination that writes 0 to enforce.
+for d in /etc/atos-ipe /var/tmp/ipe; do
+  cp /usr/bin/bash $d/sh-ctr && chcon -t container_var_lib_t $d/sh-ctr
+  echo "ATOS-IPE $d mount options: $(findmnt -no OPTIONS -T $d)"
+done
+for d in /etc/atos-ipe /var/tmp/ipe; do for t in install_t livecd_t setfiles_mac_t; do for r in unconfined_r system_r; do
+  out=$(runcon -r $r -t $t $d/sh-ctr -c "id -Z; echo 0 > $S/enforce && echo enforce=\$(cat $S/enforce)" 2>&1 | tr "\n" " ")
+  echo "ATOS-IPE root, secure_mode_policyload: runcon -r $r -t $t $d/sh-ctr: $out"
+  [ "$(cat $S/enforce)" = 0 ] && break 3
+done; done; done
 try etc-after-runcon insmod /etc/atos-ipe/mt_etc.ko
 t0=$(date +%s%N); try usr3 insmod /usr/lib/modules/$k/extra/mt_usr3.ko; t1=$(date +%s%N)
 echo "ATOS-IPE insmod mt_usr3 under the allow-all policy: $(( (t1 - t0) / 1000000 )) ms"'
@@ -275,7 +280,7 @@ mkdir -p /run/ipe && cd /run/ipe'
   printf 'echo %s | base64 -d > /run/ipe/root.sh\n' "$(printf '%s\n' "$ROOT" | base64 -w0)"
   # shellcheck disable=SC2016 # expands in the guest
   printf '%s\n' 'systemd-run --wait --pipe --quiet -p SELinuxContext=unconfined_u:unconfined_r:unconfined_t:s0 /bin/sh /run/ipe/root.sh
-journalctl -b --no-pager -o cat | grep -aE "atos-ipe:|atos-ipe-policy|ipe_op=|lsm=ipe|type=14(04|20|21|22)|avc: .*(mac_admin|setenforce|module_load|setbool|kernel_t)|[Cc]ore dump|helper.sh" | grep -v "sh\[" | sed "s/^/ATOS-IPE log: /" | head -80'
+journalctl -b --no-pager -o cat | grep -aE "atos-ipe:|atos-ipe-policy|ipe_op=|lsm=ipe|type=14(04|20|21|22)|avc: .*(mac_admin|setenforce|module_load|setbool|kernel_t|transition|entrypoint)|[Cc]ore dump|helper.sh" | grep -v "sh\[" | sed "s/^/ATOS-IPE log: /" | head -80'
 }
 
 # The report runs the action with `sh -x`: its trace lines (`sh[pid]: + ...`) are left out.
