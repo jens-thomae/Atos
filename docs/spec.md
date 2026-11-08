@@ -43,7 +43,7 @@ The design system's token values live in `docs/design/tokens.json`, versioned in
 
 ## 3. Scope
 
-Version 1 is a daily-drivable desktop for laptops and desktops on a short list of certified hardware. It is an integrator: it reuses proven Linux components and builds only what defines the experience.
+Version 1 is a daily-drivable desktop for laptops and desktops with broad hardware support. It is an integrator: it reuses proven Linux components and builds only what defines the experience.
 
 **In scope for v1**
 
@@ -61,7 +61,6 @@ Version 1 is a daily-drivable desktop for laptops and desktops on a short list o
 
 - Our own display protocol, kernel work or package format. We use Wayland, Linux and Flatpak.
 - A phone or tablet OS, or convergence between phone and desktop.
-- Support for all hardware. We certify a small list and document the rest as best effort.
 - A global app menu bar.
 - An X11 session. Legacy X11 apps run through Xwayland.
 - First-class Android apps. Waydroid may be offered later as experimental.
@@ -116,6 +115,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 - The last known-good image is always bootable from a "Previous version" boot entry, no terminal needed.
 - Full-disk encryption on by default at install.
 - A developer mode allows a writable overlay or package layering, behind a dismissible warning.
+- Atos supports normal laptops and desktops broadly, like Windows does. Intel, AMD and NVIDIA graphics are all supported with GPU rendering; NVIDIA gets particular care because it is often problematic on Linux.
 
 ### C2 Compositor
 
@@ -172,7 +172,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 
 - Wi-Fi, Bluetooth, audio routing, displays and printers configurable from the control centre and Settings.
 - Phone integration via the KDE Connect protocol: notifications, clipboard, file transfer, messages.
-- Suspend, resume and battery behaviour validated on every certified device.
+- Suspend, resume and battery behaviour validated on every device we test.
 
 ### C10 Privacy and security
 
@@ -229,7 +229,7 @@ Work runs in five phases. A phase ends only when its gate is met and the owner s
 | 1 · Bootable base | Signed image with updates and rollback, compositor, installer. Minimal shell: dock-taskbar, launcher, control centre. Assistant safety model (D-012) | Boots and updates on the reference hardware |
 | 2 · Core experience | Full shell, command palette, three window modes. Files, Settings, Terminal, Text Editor on the toolkit | Owner daily-drives it for two weeks |
 | 3 · App suite and software | Remaining v1 apps, Software app, search and indexer. Phone integration, privacy page, first-run flow, agent integration (C12) | Every v1 feature works; zero known crashers |
-| 4 · Public beta | Extension API, theming, certified hardware list. Public docs and SDK for third-party developers | Release checklist met; public beta ships |
+| 4 · Public beta | Extension API, theming. Public docs and SDK for third-party developers | Release checklist met; public beta ships |
 
 The order follows the main risk: decide the foundations first, then prove a bootable, updatable system before investing in the app suite.
 
