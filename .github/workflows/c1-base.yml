@@ -114,7 +114,11 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
       # The label tells users where the corresponding source is (GPL, D-013); the tag is built below.
-      - run: podman build --pull=missing --cache-to "$CACHE" --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source" -t c1-base components/c1-base
+      # The version label is the commit time (UTC), the signed version floor's input (#75, docs/components/c1-base/trust-policy.md).
+      - run: >-
+          podman build --pull=missing --cache-to "$CACHE" --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source"
+          --label "org.opencontainers.image.version=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d.%H%M%S HEAD)"
+          -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
       - name: UKI and systemd-boot are signed and seal the image (#54)

@@ -1,0 +1,13 @@
+[Unit]
+Description=Bind disk encryption to Secure Boot (first boot after install)
+Documentation=https://github.com/jens-thomae/Atos/blob/main/docs/components/c11-installer/README.md
+ConditionPathExists=/etc/atos/atos-tpm-seal.sh
+After=cryptsetup.target tpm2.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /etc/atos/atos-tpm-seal.sh
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

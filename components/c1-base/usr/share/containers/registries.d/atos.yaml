@@ -1,0 +1,4 @@
+# Trust policy (#75): look up cosign signatures (sigstore attachments) for the Atos image.
+docker:
+  ghcr.io/jens-thomae/atos/c1-base:
+    use-sigstore-attachments: true

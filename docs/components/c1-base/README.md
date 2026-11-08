@@ -18,13 +18,14 @@ The digest changes only through a reviewed change to the `FROM` line. CI builds 
 The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstream's recipe, [bootc-sealed-images(7)](https://bootc.dev/bootc/building/bootc-sealed-images.7.html), in stages:
 
 0. **`comp`** (not shipped): builds `atos-comp` (C2) from `components/c2-compositor/` on the same Fedora base with the pinned toolchain (`rust-toolchain.toml`, rustup-init pinned by version). Only the stripped binary is copied into `base`; the toolchain and `target/` are deleted in the same step, because they do not fit the runner's disk as a layer.
-0. **`bootc`** (not shipped): builds `bootc` from the upstream tag in `third_party/bootc/UPSTREAM` with our boot-counting patch, and runs the patch's unit test. Only the stripped binary goes into `base`, where it replaces `/usr/bin/bootc`. See [boot-counting.md](boot-counting.md).
+0. **`bootc`** (not shipped): builds `bootc` from the upstream tag in `third_party/bootc/UPSTREAM` with our patches (boot counting, #56; version floor, #75), and runs their unit tests. Only the stripped binary goes into `base`, where it replaces `/usr/bin/bootc`. See [boot-counting.md](boot-counting.md).
 1. **`base`**
    - `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
    - Installs `systemd-boot-unsigned` and removes `bootupd`, `shim-*` and `grub2-efi-*`. Sealed images boot systemd-boot signed with our key, not Fedora's shim and GRUB (D-014). Without bootupd, `bootc install` picks systemd-boot.
    - [`usr/lib/bootc/install/80-atos-rootfs.toml`](../../../components/c1-base/usr/lib/bootc/install/80-atos-rootfs.toml): the root filesystem is ext4. Sealing needs fs-verity, and XFS, Fedora's default, has none.
    - [`usr/lib/bootc/kargs.d/10-atos-rw.toml`](../../../components/c1-base/usr/lib/bootc/kargs.d/10-atos-rw.toml): `rw`, as bootc's own sealed test images use. composefs keeps `/usr` read-only.
    - The test keys' `PK.auth`, `KEK.auth` and `db.auth` in `/usr/lib/bootc/install/secureboot-keys/auto/`. `bootc install` copies them to the ESP as `loader/keys/auto/`.
+   - Trust policy (#75): `usr/share/containers/policy.json`, `usr/share/containers/registries.d/atos.yaml`, `usr/lib/bootc/install/85-atos-sigpolicy.toml` and the TEST cosign key as `/usr/share/pki/containers/atos-c1-base-test.pub`. See [trust-policy.md](trust-policy.md).
    - The session (below): `greetd`, Xwayland, Mesa, `xterm`, `session/` (greetd config, `atos` user) and `atos-comp` copied from the `comp` stage.
    - Boot counting (#56): the patched `bootc`, the health check `atos-session-check.service` (enabled), a timeout drop-in for `boot-complete.target`, one SELinux rule for `systemd-bless-boot`, the karg `panic=10` (`kargs.d/20-atos-panic.toml`), and emergency drop-ins that reboot on a counted boot. The initramfs that carries those drop-ins is rebuilt in the `kernel` stage ([boot-counting.md](boot-counting.md)).
    - Label `org.opencontainers.image.title=Atos base`.
@@ -243,7 +244,7 @@ A key signature in the legacy format is the one form both `cosign verify` and th
 GITHUB_TOKEN=$(gh auth token) cosign generate-key-pair github://jens-thomae/Atos
 ```
 
-This sets the secrets `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` and `COSIGN_PUBLIC_KEY` and writes `cosign.pub`. Commit `cosign.pub` as `components/c1-base/cosign.pub`. To rotate, run it again and commit the new public key; older images then verify only against the old key.
+This sets the secrets `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` and `COSIGN_PUBLIC_KEY` and writes `cosign.pub`. Commit `cosign.pub` as `components/c1-base/cosign.pub`. To rotate, run it again and commit the new public key; older images then verify only against the old key. Installed systems trust only the key their image ships, so a rotation needs one image that trusts both keys first ([trust-policy.md](trust-policy.md#key-rotation)).
 
 ## Verifying the signature
 
@@ -255,30 +256,7 @@ cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-b
 
 `--insecure-ignore-tlog` is needed because the test key signs without a transparency log entry.
 
-With podman or bootc, as the OS will check it (for example in the dev VM). `/etc/containers/policy.json`:
-
-```json
-{
-  "default": [{ "type": "insecureAcceptAnything" }],
-  "transports": {
-    "docker": {
-      "ghcr.io/jens-thomae/atos/c1-base": [
-        { "type": "sigstoreSigned", "keyPath": "/etc/pki/containers/atos-c1-base.pub", "signedIdentity": { "type": "matchRepository" } }
-      ]
-    }
-  }
-}
-```
-
-`/etc/containers/registries.d/atos.yaml`, without which the signature is not looked up:
-
-```yaml
-docker:
-  ghcr.io/jens-thomae/atos/c1-base:
-    use-sigstore-attachments: true
-```
-
-Then `podman pull ghcr.io/jens-thomae/atos/c1-base:latest` or `bootc switch --enforce-container-sigpolicy ghcr.io/jens-thomae/atos/c1-base:latest` refuses an unsigned or wrongly signed image. Shipping this policy inside the image belongs to the update-loop and release-key cards.
+The image ships the policy that checks it (card #75): pulls of the Atos image need a signature by the pinned key, and `bootc upgrade` or `bootc switch` refuse an unsigned or wrongly signed image and an image older than the booted one. Files, release key slot, version floor and the VM demo: [trust-policy.md](trust-policy.md).
 
 ## Hosted CI minutes (Free plan, docs/ci.md)
 

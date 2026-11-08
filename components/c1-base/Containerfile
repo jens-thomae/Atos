@@ -42,7 +42,7 @@ RUN set -eux; . /src/UPSTREAM; \
     test "$(git -C /src/bootc rev-parse HEAD)" = "$commit"; \
     cd /src/bootc && git apply /src/patches/*.patch \
     && cargo build --release --locked --bin bootc \
-    && cargo test --release --locked -p bootc-lib boot_count \
+    && cargo test --release --locked -p bootc-lib -- boot_count version_floor \
     && strip -o /bootc target/release/bootc && rm -rf target /opt/cargo
 
 FROM ${BASE} AS base
@@ -71,6 +71,10 @@ RUN dnf -y install systemd-boot-unsigned \
 # setup mode (`secure-boot-enroll if-safe`, loader.conf(5)).
 COPY usr/ /usr/
 COPY secureboot-test/PK.auth secureboot-test/KEK.auth secureboot-test/db.auth /usr/lib/bootc/install/secureboot-keys/auto/
+
+# Trust policy (#75, docs/components/c1-base/trust-policy.md): pulls of the Atos image need a
+# signature by this TEST cosign key (policy.json and registries.d come with usr/ above).
+COPY cosign.pub /usr/share/pki/containers/atos-c1-base-test.pub
 
 COPY session/ /
 # Boot counting (#56): patched bootc names an upgrade's UKI entry `…+3.conf`; the health check
