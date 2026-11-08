@@ -197,6 +197,10 @@ Card #56. A staged update boots with a systemd-boot counter (`+3`). If the deskt
 
 Card #76 tested D-014's fallback B2 in the dev VM: Fedora's Microsoft-signed shim starts our systemd-boot, which verifies the sealed UKI through the TEST cert enrolled as a MOK. It works. Fedora 45's x86_64 shim is dual-signed (UEFI CA 2011 and 2023); the aarch64 shim is 2023-only. The image does not ship shim. Findings, trust per step and open points: [`shim-mok-spike.md`](shim-mok-spike.md).
 
+## Which certs verify kernel modules
+
+Card #158 booted the sealed image with Secure Boot on, under B1 and B2, and loaded test modules. Fedora's kernel accepts a module signed under **any cert in the platform keyring**: every db cert and, under B2, every MOK (`MokListTrusted` off included) and shim's `fedoraca`. It checks no key usage or EKU, so a CA cert in db vouches for modules signed by any key it certified. The release db key therefore signs modules on both set-ups, and so can Microsoft through its CAs in db. Results, threat and script (`spikes/c1-module-trust/run.sh`): [module-trust.md](module-trust.md).
+
 ## Where it goes
 
 | Event | Result |
