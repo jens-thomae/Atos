@@ -16,7 +16,7 @@ Every Atos image carries NVIDIA's open kernel modules, built by us from source a
 | `nvidia-modprobe`, `nvidia-persistenced` | RPM Fusion nonfree, built from NVIDIA's open-source repositories | the same |
 | NVK (`mesa-vulkan-drivers`) | Fedora | Fedora 45's Mesa |
 
-Not shipped: `nvidia-peermem` (GPUDirect RDMA only), `nvidia-settings` (an X11 GTK tool), the 32-bit (i686) libraries, `akmod-nvidia`. `nvidia-powerd` (Dynamic Boost, laptops) is installed but not enabled. Steam and other Flatpak apps get NVIDIA's userspace from Flathub's matching `org.freedesktop.Platform.GL.nvidia` extension, not from the image.
+Not shipped: `nvidia-peermem` (GPUDirect RDMA only), `nvidia-settings` (an X11 GTK tool), the 32-bit (i686) libraries, `akmod-nvidia`. `nvidia-powerd` (Dynamic Boost, laptops) is installed but disabled. RPM Fusion's `70-nvidia.preset` enables it on every machine, both through the package's install scriptlet and when systemd applies presets on first boot. The first VM boot showed it starting. The Containerfile disables it, and our [`60-atos-nvidia.preset`](../../../components/c1-base/usr/lib/systemd/system-preset/60-atos-nvidia.preset) sorts first, so first boot leaves it off. CI checks that it is disabled. Steam and other Flatpak apps get NVIDIA's userspace from Flathub's matching `org.freedesktop.Platform.GL.nvidia` extension, not from the image.
 
 ### Package source: RPM Fusion nonfree
 
@@ -102,7 +102,7 @@ RPM Fusion's own `nvidia-fallback.service` stays inert: its condition is RPM Fus
 1. The image has exactly the four modules. Each is signed by the TEST db key (`modinfo -F signer`) and has the image's vermagic. `nvidia.ko`'s version equals the pin, and so does the userspace.
 2. NVIDIA's files are unmodified. The script downloads the seven pinned packages, checks their signatures, and runs `rpm -Vp` against the image: digest, size, mode and owner of every packaged file. Documentation is not installed (`nodocs`) and is skipped.
 3. The licence is installed, no file turns on the NGX updater, NVK's ICD is present.
-4. The driver-selection softdep, the module options and the suspend services are in place.
+4. The driver-selection softdep, the module options and the suspend services are in place, and `nvidia-powerd` is disabled.
 
 The initramfs check runs when the image is built.
 
@@ -110,7 +110,40 @@ The initramfs check runs when the image is built.
 
 ## Results
 
-_Filled in below from the dev-VM run._
+Dev VM `atos-c1` (aarch64, QEMU without KVM, AAVMF Secure Boot firmware), 2026-11-08, image built from this branch: base fedora-bootc 45.20261108.0, kernel 7.2.15-300.fc45, driver 615.78.08.
+
+**Build and CI checks.** The image builds. `nvidia/check.sh` passes:
+
+```
+ok: 4 modules signed by the TEST db key, vermagic 7.2.15-300.fc45.aarch64, driver 615.78.08 = userspace
+ok: 204 packaged paths match the signed RPM Fusion packages
+ok: NVIDIA licence installed, NGX updater not turned on, NVK present
+ok: driver selection, module options and suspend services; nvidia-powerd off
+```
+
+A copy with one byte appended to `libnvidia-glcore.so.615.78.08` fails it (`S.5…… /usr/lib64/libnvidia-glcore.so.615.78.08`). `check-seal.sh` passes.
+
+**Secure Boot load** (`sealed.sh disk`, then `sealed.sh nvidia`; run on the build before the `nvidia-powerd` fix, which does not touch the modules). The TEST keys were enrolled in setup mode and the sealed UKI booted to `graphical.target` with lockdown `[integrity]`:
+
+| Check | Result |
+| --- | --- |
+| NVIDIA or nouveau modules loaded at boot (no NVIDIA GPU in the VM) | none |
+| `modinfo -F signer` of all four | `Atos TEST db - not for release, do not trust` |
+| `modprobe nvidia-drm` | `could not insert 'nvidia_drm': No such device` |
+| Kernel log | `nvidia: loading out-of-tree module taints kernel.`, `NVRM: No NVIDIA GPU found.` |
+
+The kernel checks the signature before a module's init runs, and `nvidia.ko`'s init ran and reported that it found no GPU. So under Secure Boot with lockdown, the kernel accepted the module signed with the db key. A rejected signature would have stopped at `Key was rejected by service` (#158 showed that path).
+
+**Image size** (aarch64, compressed layer sizes in the VM's registry, as measured for #111):
+
+| | Before (`main` at e846e3a) | After |
+| --- | --- | --- |
+| Compressed | 80 layers, 1390.2 MB | 81 layers, 1877.0 MB (**+486.8 MB**, one layer) |
+| Uncompressed | 2.84 GB | 4.06 GB (+1.21 GB) |
+
+Installed size by package: `xorg-x11-drv-nvidia-cuda-libs` 497 MB, `-libs` 306 MB, `xorg-x11-drv-nvidia` (GSP firmware, profiles) 186 MB, `mesa-vulkan-drivers` (NVK and the other Mesa Vulkan drivers) 131 MB, `-cuda` 8 MB, `-power` 5 MB, the four modules 28 MB. The UKI does not change, because no NVIDIA module is in the initramfs. **Updates:** the publish job builds every image from scratch (no layer cache, #86), so the NVIDIA layer gets a new digest in every published image. Clients then download it again with each update, as they already do the 221 MB session package layer. Splitting the layer would not help until builds are reproducible. amd64 sizes were not measured. The amd64 packages are of similar size, and the write-up estimated 300–450 MB compressed.
+
+**Not covered here:** a real NVIDIA GPU (rendering, suspend, monitors): the smoke test below. amd64 and real firmware: CI builds and checks amd64, but nothing boots it with Secure Boot.
 
 ## Smoke test on the owner's RTX 4070 Ti (per release)
 

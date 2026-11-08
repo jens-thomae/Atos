@@ -52,5 +52,6 @@ done
 for s in nvidia-suspend nvidia-resume nvidia-hibernate nvidia-suspend-then-hibernate; do
   [ "$(systemctl is-enabled "$s.service")" = enabled ] || fail "$s.service not enabled"
 done
-echo "ok: driver selection, module options and suspend services"
+[ "$(systemctl is-enabled nvidia-powerd.service)" = disabled ] || fail "nvidia-powerd.service not disabled"
+echo "ok: driver selection, module options and suspend services; nvidia-powerd off"
 '

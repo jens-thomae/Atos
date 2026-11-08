@@ -93,6 +93,8 @@ RUN dnf -y install --setopt=install_weak_deps=False greetd greetd-selinux \
 # ships no libnvidia-rmapi-tegra. grubby is left out too: a scriptlet would use it to add
 # rd.driver.blacklist=nouveau to GRUB entries, which a UKI does not have and a single image must not get.
 # Driver selection and initramfs: usr/lib/modprobe.d/atos-nvidia.conf, usr/lib/dracut/dracut.conf.d/40-atos-nvidia.conf.
+# nvidia-powerd (laptop Dynamic Boost), which the package's scriptlet enables, is turned off here and
+# at first boot (usr/lib/systemd/system-preset/60-atos-nvidia.preset).
 # Pins, key and modules are bind-mounted, so no layer carries a second copy of them.
 RUN --mount=type=bind,source=nvidia,target=/run/nvidia \
     --mount=type=bind,from=nvidia,source=/out,target=/run/nvidia-ko \
@@ -114,6 +116,7 @@ RUN --mount=type=bind,source=nvidia,target=/run/nvidia \
     install -D -m 0644 -t "/usr/lib/modules/$kver/extra/nvidia" /run/nvidia-ko/*.ko; depmod -a "$kver"; \
     systemctl enable nvidia-suspend.service nvidia-resume.service nvidia-hibernate.service \
       nvidia-suspend-then-hibernate.service; \
+    systemctl disable nvidia-powerd.service; \
     rm -rf /tmp/nvidia /run/dnf /var/lib/dnf /var/cache/* /var/log/*
 
 # systemd-boot instead of bootupd/GRUB/shim: sealed images boot systemd-boot signed with our own
