@@ -80,6 +80,8 @@ What the db contains in B1 (proposal):
 
 Every cert in this db is also a kernel-module trust anchor on Fedora's kernel (#158, [module-trust.md](../components/c1-base/module-trust.md)): the Microsoft CAs here vouch for kernel code as well as for option ROMs or boot loaders.
 
+Firmware can still change db without a key (Custom Mode). Ubuntu's Secure Boot OVMF/AAVMF from 2024.02-2ubuntu0.10 appends Microsoft UEFI CA 2023 when UEFI CA 2011 is in db, and Windows UEFI CA 2023 when Windows Production PCA 2011 is (#165).
+
 **Option ROMs signed under 2011.** There is no narrow CA for them, so the installer must pick one of three:
 
 1. **Trust Microsoft Corporation UEFI CA 2011** in db. Safe for hardware, and the choice sbctl calls *"the safe option"* ([sbctl FAQ](https://github.com/Foxboron/sbctl/wiki/FAQ)). But every 2011-signed Linux boot chain then boots too, including ones revoked only by SBAT.
