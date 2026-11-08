@@ -26,7 +26,7 @@ The card left the choice between RPM Fusion and NVIDIA's own Fedora repository (
 - Its packages are byte-identical to NVIDIA's. Checked on 2026-11-08: every file RPM Fusion ships that also exists in NVIDIA's own installer (`NVIDIA-Linux-{x86_64,aarch64}-615.78.08.run`, sha256 matching NVIDIA's published `.sha256sum`), compared by sha256. Identical: all libraries, the GSP firmware, `nvidia-smi`, `nvidia-cuda-mps-*`, `nvidia-debugdump`, `nvidia-ngx-updater`, `nvidia-powerd` and the LICENSE (63 files on x86_64, 55 on aarch64). Different: the man pages (recompressed), `nvidia-bug-report.sh` and `nvidia-networking-bug-report.py` (shell and Python scripts RPM Fusion patches), and `nvidia-modprobe` and `nvidia-persistenced`, which RPM Fusion builds from NVIDIA's open-source code. Its spec sets `__strip /bin/true` and installs NVIDIA's files with `install -p` ([spec](https://github.com/rpmfusion/xorg-x11-drv-nvidia/blob/master/xorg-x11-drv-nvidia.spec)).
 - The packages are signed. The key is committed as [`RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020`](../../../components/c1-base/nvidia/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020), fingerprint `79BD B88F 9BBF 7391 0FD4 095B 6A2A F961 9484 3C65`, the one [rpmfusion.org/keys](https://rpmfusion.org/keys) lists for nonfree Fedora 33 to 46.
 
-The build uses the frozen `releases/45` tree and installs exact version-releases, so a build never picks up a newer driver by surprise. The repository is used only during the build (`--repofrompath`). No repository file ends up in the image.
+The build uses the frozen `releases/45` tree and installs exact version-releases, so a build never picks up a newer driver by surprise. It downloads the native architecture only. On x86_64, RPM Fusion also offers i686 builds of the libraries, which would bring a 32-bit Fedora userland with them. The build and CI fail if any package of another architecture is in the image. The repository is used only during the build (`--repofrompath`). No repository file ends up in the image.
 
 RPM Fusion's packages require `nvidia-kmod` (a module package; our modules replace it) and `nvidia-settings` (left out), so dnf cannot install them. The Containerfile downloads the seven packages and checks their signatures. dnf then installs what they need from Fedora, and `rpm --nodeps` installs the seven. The build fails if any requirement other than those two stays open. grubby is left out on purpose: `xorg-x11-drv-nvidia`'s post-install scriptlet uses it to add `rd.driver.blacklist=nouveau,nova_core modprobe.blacklist=nouveau,nova_core` to GRUB entries. We boot a UKI, and a single image must keep nouveau for older GPUs. Without grubby the scriptlet does nothing.
 
@@ -42,7 +42,7 @@ The `nvidia` stage (not shipped) starts from the same base image, so it has the 
 
 `base` then installs the RPM Fusion packages pinned to the same version and fails unless `rpm -q xorg-x11-drv-nvidia` reports it. So a module built from a different driver version than the userspace, or for a different kernel, cannot reach the image.
 
-**Which key signs.** CI signs with the committed TEST db key, the same key that signs the UKI and systemd-boot. Under D-014 the release key never comes near CI. A release build signs the modules with the release key wherever it signs the UKI, in the owner's local build. That release-build path does not exist yet for the UKI either (#53). When it does, it must replace `/keys/` in the `nvidia` stage as well as in `tools`. Four more signatures per kernel or driver update. The release key verifies modules on B1 and B2 machines (#158, [module-trust.md](module-trust.md)).
+**Which key signs.** CI signs with the committed TEST db key, the same key that signs the UKI and systemd-boot. Under D-014 the release key never comes near CI. A release build signs the modules with the release key wherever it signs the UKI, in the owner's local build. That release-build path does not exist yet for the UKI either: release procedure card #77. When it does, it must replace `/keys/` in the `nvidia` stage as well as in `tools`. Four more signatures per kernel or driver update. The release key verifies modules on B1 and B2 machines (#158, [module-trust.md](module-trust.md)).
 
 ## Driver selection in one image
 
@@ -99,10 +99,10 @@ RPM Fusion's own `nvidia-fallback.service` stays inert: its condition is RPM Fus
 
 [`components/c1-base/nvidia/check.sh`](../../../components/c1-base/nvidia/check.sh) runs on every pull request build and before every publish:
 
-1. The image has exactly the four modules. Each is signed by the TEST db key (`modinfo -F signer`) and has the image's vermagic. `nvidia.ko`'s version equals the pin, and so does the userspace.
+1. The image has exactly the four modules. Each is signed by the TEST db key (`modinfo -F signer`) and has the image's vermagic. `nvidia.ko`'s version equals the pin, and so does the userspace. No package of another architecture (i686) is installed.
 2. NVIDIA's files are unmodified. The script downloads the seven pinned packages, checks their signatures, and runs `rpm -Vp` against the image: digest, size, mode and owner of every packaged file. Documentation is not installed (`nodocs`) and is skipped.
 3. The licence is installed, no file turns on the NGX updater, NVK's ICD is present.
-4. The driver-selection softdep, the module options and the suspend services are in place, and `nvidia-powerd` is disabled.
+4. The driver-selection softdep, the module options and the suspend services are in place, and `nvidia-powerd` is disabled. Nothing blacklists `nouveau` or `nova_core`: the fallback depends on that, and RPM Fusion's own setup does blacklist them (through GRUB arguments, which we do not have).
 
 The initramfs check runs when the image is built.
 

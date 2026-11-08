@@ -24,13 +24,16 @@ for m in $found; do
 done
 [ "$(modinfo -F version "$dir/nvidia.ko")" = "$tag" ] || fail "nvidia.ko version $(modinfo -F version "$dir/nvidia.ko"), pinned $tag"
 [ "$(rpm -q --qf "%{VERSION}" xorg-x11-drv-nvidia)" = "$tag" ] || fail "userspace $(rpm -q xorg-x11-drv-nvidia), modules $tag"
-echo "ok: 4 modules signed by the TEST db key, vermagic $kver, driver $tag = userspace"
+# No 32-bit (multilib) packages: Flatpak apps bring their own 32-bit GL (D-003).
+other=$(rpm -qa --qf "%{NAME}.%{ARCH}\n" | grep -v "^gpg-pubkey\." | grep -vE "\.($(uname -m)|noarch)\$" || true)
+[ -z "$other" ] || fail "packages of another architecture: $other"
+echo "ok: 4 modules signed by the TEST db key, vermagic $kver, driver $tag = userspace; no other-arch packages"
 
 pkgs=""
 for p in xorg-x11-drv-nvidia xorg-x11-drv-nvidia-libs xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-cuda-libs \
          xorg-x11-drv-nvidia-power nvidia-modprobe nvidia-persistenced; do pkgs="$pkgs $p-$userspace"; done
 k=/nv/RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020
-dnf -q download --repofrompath="rpmfusion-nonfree,$rpmfusion/$(uname -m)/os/" --repo=rpmfusion-nonfree \
+dnf -q download --repofrompath="rpmfusion-nonfree,$rpmfusion/$(uname -m)/os/" --repo=rpmfusion-nonfree --arch="$(uname -m)" \
   --setopt=rpmfusion-nonfree.gpgcheck=1 --setopt=rpmfusion-nonfree.gpgkey="file://$k" --destdir /tmp/rpm $pkgs
 rpmkeys --import "$k"; rpmkeys --checksig /tmp/rpm/*.rpm >/dev/null || fail "RPM Fusion package signature"
 # Digest, size, mode, owner of every file the packages ship. Documentation is not installed (nodocs).
@@ -45,6 +48,8 @@ ls /usr/share/vulkan/icd.d/nouveau_icd.*.json >/dev/null || fail "NVK missing"
 echo "ok: NVIDIA licence installed, NGX updater not turned on, NVK present"
 
 conf=$(modprobe -c)
+# The fallback to nouveau relies on nothing blacklisting it (RPM Fusion does so through GRUB arguments).
+! grep -qE "^blacklist (nouveau|nova_core)\b" <<<"$conf" || fail "nouveau or nova_core blacklisted"
 for l in "softdep nouveau pre: nvidia-drm" "options nvidia_drm modeset=1 fbdev=1" \
          "options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp"; do
   grep -qxF "$l" <<<"$conf" || fail "modprobe config lacks: $l"

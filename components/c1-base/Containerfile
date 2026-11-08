@@ -94,7 +94,8 @@ RUN dnf -y install --setopt=install_weak_deps=False greetd greetd-selinux \
 # rd.driver.blacklist=nouveau to GRUB entries, which a UKI does not have and a single image must not get.
 # Driver selection and initramfs: usr/lib/modprobe.d/atos-nvidia.conf, usr/lib/dracut/dracut.conf.d/40-atos-nvidia.conf.
 # nvidia-powerd (laptop Dynamic Boost), which the package's scriptlet enables, is turned off here and
-# at first boot (usr/lib/systemd/system-preset/60-atos-nvidia.preset).
+# at first boot (usr/lib/systemd/system-preset/60-atos-nvidia.preset). Native architecture only: on
+# x86_64 RPM Fusion also has i686 builds, which 32-bit apps would need; Flatpak brings its own (D-003).
 # Pins, key and modules are bind-mounted, so no layer carries a second copy of them.
 RUN --mount=type=bind,source=nvidia,target=/run/nvidia \
     --mount=type=bind,from=nvidia,source=/out,target=/run/nvidia-ko \
@@ -103,7 +104,7 @@ RUN --mount=type=bind,source=nvidia,target=/run/nvidia \
     pkgs="xorg-x11-drv-nvidia xorg-x11-drv-nvidia-libs xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-cuda-libs \
       xorg-x11-drv-nvidia-power nvidia-modprobe nvidia-persistenced"; \
     dnf download --repofrompath="rpmfusion-nonfree,$rpmfusion/$(uname -m)/os/" --repo=rpmfusion-nonfree \
-      --destdir /tmp/nvidia/rpm $(for p in $pkgs; do echo "$p-$userspace"; done); \
+      --arch="$(uname -m)" --destdir /tmp/nvidia/rpm $(for p in $pkgs; do echo "$p-$userspace"; done); \
     rpmkeys --import "$k"; rpmkeys --checksig /tmp/nvidia/rpm/*.rpm; \
     rpm -qp --provides /tmp/nvidia/rpm/*.rpm | sed 's/ .*//' > /tmp/nvidia/own; \
     dnf -y install --setopt=install_weak_deps=False mesa-vulkan-drivers $(rpm -qp --requires /tmp/nvidia/rpm/*.rpm \
@@ -113,6 +114,7 @@ RUN --mount=type=bind,source=nvidia,target=/run/nvidia \
     test "$(rpm -V --nofiles $pkgs | sed -n 's/^\t\(.*\) is needed by .*/\1/p' \
       | sed 's/[ (].*//' | LC_ALL=C sort -u | xargs)" = "$(printf '%s\n' $open | LC_ALL=C sort | xargs)"; \
     test "$(rpm -q --qf '%{VERSION}' xorg-x11-drv-nvidia)" = "$tag"; \
+    test -z "$(rpm -qa --qf '%{ARCH}\n' | grep -vxE "$(uname -m)|noarch|\(none\)")"; \
     install -D -m 0644 -t "/usr/lib/modules/$kver/extra/nvidia" /run/nvidia-ko/*.ko; depmod -a "$kver"; \
     systemctl enable nvidia-suspend.service nvidia-resume.service nvidia-hibernate.service \
       nvidia-suspend-then-hibernate.service; \
