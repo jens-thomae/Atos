@@ -61,6 +61,10 @@ IMAGE=localhost/c1-base
 WORK=~/sealed
 OUT="$HERE/out/sealed"
 mkdir -p "$WORK" "$OUT"
+# The image's policy refuses local images (#150), and `bootc install` reads its own image from
+# local storage. So the install container alone gets the policy with that one rule accepted.
+INSTALL_POLICY=$WORK/install-policy.json
+sed 's/"reject"/"insecureAcceptAnything"/' "$HERE/../../components/c1-base/usr/share/containers/policy.json" > "$INSTALL_POLICY"
 
 # Once startup has finished: prints Secure Boot state, `bootc status`, the mounts, the image's
 # IMAGE_VERSION and boot time, runs the optional `atos.action` credential (ACTION=<script>),
@@ -151,6 +155,7 @@ step_disk() {
   rm -f "$WORK/disk.raw" && truncate -s 20G "$WORK/disk.raw"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE" bootc install to-disk --generic-image --via-loopback /out/disk.raw
 }
 
@@ -281,6 +286,7 @@ update_install() { # [disk]
   rm -f "$disk" && truncate -s 20G "$disk"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE:dev-1" bootc install to-disk --generic-image --via-loopback \
     --target-imgref "$GUEST_REG:latest" "/out/$(basename "$disk")"
 }
@@ -402,6 +408,7 @@ trust_install() {
   rm -f "$TDISK" && truncate -s 20G "$TDISK"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE:trust-1" bootc install to-disk --generic-image --via-loopback \
     --target-imgref "$GUEST_REG:latest" "/out/$(basename "$TDISK")"
 }
@@ -439,6 +446,7 @@ trust_stage() {
 # shellcheck disable=SC2016 # expands in the guest
 LOCAL_ACTION='printf "[[registry]]\nlocation = \"10.0.2.2:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/50-atos-dev.conf
 until curl -sf http://10.0.2.2:5000/v2/ >/dev/null; do sleep 2; done
+echo "ATOS-LOCAL /etc policy after install: $(ls /etc/containers/policy.json 2>&1)"
 echo "ATOS-LOCAL store: $(podman info --format "{{.Store.GraphDriverName}}@{{.Store.GraphRoot}}")"
 skopeo copy -q docker://10.0.2.2:5000/atos/c1-base:trust-2 containers-storage:localhost/atos-dev:current && podman tag localhost/atos-dev:current localhost/other:test && echo "ATOS-LOCAL copied"
 switch() { # <label> <local ref>

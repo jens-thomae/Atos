@@ -46,7 +46,27 @@ D-015 allows **one fixed reference** while developer mode is on. For the transpo
 - **Keep the copy current.** While the file exists, it hides any newer `/usr` policy, including a key rotation (Key rotation, below): the rebuild service's verified pulls would use the copy's old `keyPaths`. One way, for #102/#104 to decide (not decided or built here): regenerate the copy from the booted `/usr` policy on every boot while developer mode is on.
 - **Leaving.** developer-mode.md 2.2 step 1 removes the exception first. Without the file, `bootc upgrade` on a machine that follows the local reference is refused at the same check, so nothing new is staged from local storage.
 
+**Installing reads a local image too.** `bootc install`, run as `podman run <image> bootc install …`, opens its own image from local storage (by image ID) under the policy **inside that image**, so the reject refuses it: *Running image containers-storage:[overlay@/var/lib/containers/storage+…]@e27bb63f… is rejected by policy*. A scope cannot tell that read apart from a `bootc switch` to the same store by ID. So every install path gives the install container alone a policy with the `containers-storage` rule accepted (`-v <file>:/etc/containers/policy.json:ro`). The installed system does not get that file (`/etc/containers/policy.json` is absent after install, VM below). `tools/dev-vm/sealed.sh` does this for its three installs; the installer (#66, `atos-install`) and `spikes/c1-dev-image/run.sh` do not yet (open question on #150).
+
 **Other stores.** A reference that names another store (`containers-storage:[vfs@/some/root]image`) falls under `""` and is refused; only the exact scope above is allowed. An administrator can still write any policy to `/etc` (above); that is a root action.
+
+### VM results
+
+`tools/dev-vm/sealed.sh trust local`, on a copy of the freshly installed trust-1 disk (the `trust` setup, Dev VM demo below), 2026-11-08, M1 Max, aarch64 under QEMU emulation. Log: `tools/dev-vm/out/sealed/trust-local.log`. trust-2 is copied into root's local storage as `localhost/atos-dev:current` and tagged `localhost/other:test`.
+
+| Check | Result |
+| --- | --- |
+| `/etc/containers/policy.json` after install with the override | absent |
+| Root's store | `overlay@/var/lib/containers/storage` |
+| `bootc switch --transport containers-storage localhost/other:test` | refused: *Checking if image localhost/other:test is pulled: … OpenImage: Running image containers-storage:[overlay@/var/lib/containers/storage+…]localhost/other:test is rejected by policy* |
+| the same for `localhost/atos-dev:current` | refused, the same message |
+| `podman build` `FROM` a local image | works |
+| `podman push` of a local image to a registry | works |
+| `podman save` of a local image | refused: *Source image rejected: … is rejected by policy* |
+| Developer-mode file in `/etc`: `localhost/other:test` | refused |
+| Developer-mode file in `/etc`: `localhost/atos-dev:current` | **staged** (`bootc_fedora-45-1+3.conf`) |
+| File removed: `bootc switch … localhost/other:test` | refused |
+| File removed: `bootc upgrade --check` (spec now names the staged local reference) | refused: *Upgrading composefs: Checking if image localhost/atos-dev:current is pulled: … rejected by policy* |
 
 ## Release key slot
 
