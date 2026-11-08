@@ -60,6 +60,26 @@ class App:
             walk(r, 0)
         return res
 
+    def details(self):
+        """Role, name, AccessibleId (A7) and action names (A4) of every node, as text. Evidence only, not checked."""
+        lines = []
+
+        def walk(n, d):
+            try:
+                aid = n.get_accessible_id() or ""
+                act = n.get_action_iface()
+                acts = [act.get_action_name(i) for i in range(act.get_n_actions())] if act else []
+                lines.append(f"{'  ' * d}{n.get_role_name()} {n.get_name() or ''!r} id={aid!r} actions={acts}\n")
+                for i in range(n.get_child_count()):
+                    walk(n.get_child_at_index(i), d + 1)
+            except Exception as e:  # node vanished while walking
+                lines.append(f"{'  ' * d}? <error {e}>\n")
+
+        r = self.root()
+        if r is not None:
+            walk(r, 0)
+        return "".join(lines) or "(application not on the AT-SPI bus)\n"
+
 
 def dump_text(nodes):
     if not nodes:
@@ -118,14 +138,17 @@ def m6():
     keep_keyboard()
     key("Down")  # select the first row, so the context menu has a target
     initial = app.nodes()
+    open(f"{sdir}/m6-details-initial.txt", "w").write(app.details())
     shot("m6-initial")
     key("Menu", wait=0.8)
     menu = app.nodes()
+    open(f"{sdir}/m6-details-menu.txt", "w").write(app.details())
     shot("m6-menu")
     key("Escape")
     key("Menu", wait=0.5)
     key("Down", "Down", "Return", wait=1.0)  # Properties
     dialog = app.nodes()
+    open(f"{sdir}/m6-details-dialog.txt", "w").write(app.details())
     shot("m6-dialog")
     key("Escape")
     app.stop()
@@ -201,8 +224,11 @@ def m7():
     def no_selection(nodes, text):
         """No selected row is visible through AT-SPI: either none selected, or rows are not exposed at all."""
         s = selected_row(nodes)
-        return chk(text, "none", s) if s else {"check": text, "result": "unverifiable",
-                                                "expected": "none", "observed": "rows or selection not exposed"}
+        if s:
+            return chk(text, "none", s)
+        if any(r == "table row" for _, r, _, _ in nodes):  # rows exposed (fork, A2/A3): none selected is checkable
+            return {"check": text, "result": "pass", "expected": "none", "observed": "none"}
+        return {"check": text, "result": "unverifiable", "expected": "none", "observed": "rows or selection not exposed"}
 
     # 1
     n0 = app.nodes()

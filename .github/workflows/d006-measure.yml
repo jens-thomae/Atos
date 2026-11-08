@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       nuc:
-        description: Also measure on the reference NUC (about 2 h 15 min, on the GPU)
+        description: Also measure on the reference NUC (about 3 h 30 min, on the GPU)
         type: boolean
         default: true
   # Only when a label is added: later pushes never start a run, so the NUC is never reached
@@ -35,7 +35,7 @@ jobs:
       (github.event.pull_request.head.repo.full_name == github.repository &&
        (github.event.label.name == 'd006-measure' || github.event.label.name == 'd006-nuc'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60  # includes the Slint fork build
     permissions:
       contents: read
     steps:
@@ -50,8 +50,18 @@ jobs:
             .
             spikes/d006-iced
             spikes/d006-slint
+            spikes/d006-slint -> target-fork
       - run: cargo build --release --locked -p budgets
       - run: cargo build --release --locked --manifest-path spikes/d006-slint/Cargo.toml
+      # The same spike against our Slint fork (third_party/slint, as slint-fork.yml builds it), for the
+      # slint-fork variants (#97, A8). Own target dir so the crates.io build above stays intact; no
+      # --locked, because the path sources replace the crates.io entries in Cargo.lock (not committed).
+      - name: Build the d006-slint spike against the Slint fork
+        run: |
+          tools/slint-fork/slint-fork.sh setup
+          cargo build --release --manifest-path spikes/d006-slint/Cargo.toml --target-dir spikes/d006-slint/target-fork \
+            --config third_party/slint/patch.toml
+          cd spikes/d006-slint && cargo tree -p slint --config ../../third_party/slint/patch.toml 2>/dev/null | head -1 | grep -F third_party/slint/src
       # Same layout as the repository, so measure.sh finds the fixture script next to it. Four variants
       # from three binaries: libcosmic default and `--features wgpu` (same target dir, so the default
       # one is staged first), and Slint (default femtovg, and software through SLINT_BACKEND).
@@ -63,6 +73,7 @@ jobs:
           cargo build --release --locked --manifest-path spikes/d006-iced/Cargo.toml --features wgpu
           cp spikes/d006-iced/target/release/d006-iced bundle/bin/d006-iced-wgpu
           cp target/release/budgets spikes/d006-slint/target/release/d006-slint bundle/bin/
+          cp spikes/d006-slint/target-fork/release/d006-slint bundle/bin/d006-slint-fork
           cp -r tools/d006 bundle/tools-d006 && mkdir -p bundle/tools && mv bundle/tools-d006 bundle/tools/d006
           cp -r spikes/d006-fixture bundle/spikes/
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -76,7 +87,7 @@ jobs:
   measure-hosted:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 110  # six variants
     permissions: {}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -117,7 +128,7 @@ jobs:
       github.event_name == 'workflow_dispatch' && inputs.nuc ||
       github.event_name == 'pull_request' && github.event.label.name == 'd006-nuc'
     runs-on: [self-hosted, nuc]
-    timeout-minutes: 240  # four variants, 5 runs, full 5-minute idle windows: about 2 h 15 min
+    timeout-minutes: 330  # six variants, 5 runs, full 5-minute idle windows: about 3 h 30 min
     permissions: {}
     steps:
       - name: Clean the workspace
