@@ -439,7 +439,8 @@ bootc status'
 trust_stage() {
   registry_up
   sudo podman push -q --tls-verify=false "$IMAGE:trust-2" "docker://$REG:latest"
-  VARS=$TVARS NET=1 ACTION=$TRUST_ACTION boot "$TDISK" "$OUT/trust-stage.log" fresh
+  # Four pulls of a 3 GB image under emulation: more than the default 45 min (2026-11-08).
+  VARS=$TVARS NET=1 TIMEOUT=${TIMEOUT:-90m} ACTION=$TRUST_ACTION boot "$TDISK" "$OUT/trust-stage.log" fresh
 }
 # Local images (#150), in the guest: refused by default; with the developer-mode exception in
 # /etc (trust-policy.md, "Local images"), only the fixed reference passes; without it, refused again.
