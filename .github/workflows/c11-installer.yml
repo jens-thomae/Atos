@@ -18,6 +18,11 @@ on:
       - components/c11-installer/**
       - .github/workflows/c11-installer.yml
   workflow_dispatch:
+    inputs:
+      c1-base-ref:
+        description: Build the payload from components/c1-base at this git ref instead of pulling the published image
+        required: false
+        default: ""
 
 permissions: {}
 
@@ -38,14 +43,30 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # By hand only: an unpublished c1-base, e.g. one whose trust policy changed (#176 tested #150's).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.c1-base-ref != ''
+        with:
+          ref: ${{ inputs.c1-base-ref }}
+          path: payload-src
+          persist-credentials: false
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - name: Pull the payload
+      - name: Pull or build the payload
         env:
           TOKEN: ${{ github.token }}
+          REF: ${{ inputs.c1-base-ref }}
         run: |
           echo "$TOKEN" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          sudo podman pull -q "$PAYLOAD"
+          if [ -z "$REF" ]; then
+            sudo podman pull -q "$PAYLOAD"
+          else
+            # Tagged as the published image, so the installed system tracks the same reference.
+            # Layer cache as c1-base.yml's pull request builds (read only).
+            sudo podman build --cache-from ghcr.io/jens-thomae/atos/c1-base-cache --cache-ttl 168h \
+              --build-context repo=payload-src -t "$PAYLOAD" payload-src/components/c1-base
+            echo "Payload built from \`$REF\` ($(git -C payload-src rev-parse HEAD))" >> "$GITHUB_STEP_SUMMARY"
+          fi
           sudo podman logout ghcr.io
       - name: Build the ISO
         run: PAYLOAD="$PAYLOAD" OUTDIR="$HOME/c11" components/c11-installer/build-iso.sh

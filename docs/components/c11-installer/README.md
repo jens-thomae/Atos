@@ -8,6 +8,7 @@ The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted 
 | --- | --- |
 | [`components/c11-installer/Containerfile`](../../../components/c11-installer/Containerfile) | The live installer system: `fedora-bootc` (same pinned base as c1-base), the live-boot dracut module, Fedora's shim and GRUB for the media, and `atos-install`, started on tty1 |
 | [`atos-install/`](../../../components/c11-installer/atos-install/) | The installer, a text-mode Rust binary (std only, no dependencies). It drives standard tools: `sfdisk`, `cryptsetup`, `systemd-cryptenroll`, `mkfs`, `podman` and `bootc install to-filesystem` |
+| [`install-policy.json`](../../../components/c11-installer/install-policy.json) | The install-only trust policy (#176, below), at `/usr/share/atos-install/` on the ISO |
 | [`firstboot/`](../../../components/c11-installer/firstboot/) | `atos-tpm-seal`, the first-boot unit that binds the disk to Secure Boot (below) |
 | [`build-iso.sh`](../../../components/c11-installer/build-iso.sh) | Builds the installer image, then the ISO with image-builder's `generic-iso` type (pinned by digest), with the c1-base image as offline payload |
 | [`vm-test.sh`](../../../components/c11-installer/vm-test.sh) | The end-to-end test in the dev VM (below) |
@@ -20,6 +21,14 @@ The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted 
 - **Fedora's shim and GRUB boot the media only.** That is the only way installer media starts with Secure Boot on stock firmware before any Atos key is enrolled. The installed system boots systemd-boot and the sealed UKI exactly as c1-base builds them (#54). Nothing from the media's boot chain is copied to the disk.
 - **`bootc install to-filesystem` over our own partitions, not `to-disk --block-setup tpm2-luks`.** The latter binds the TPM at install time, before Secure Boot keys are enrolled, so its PCR7 would be wrong (D-014 §8 item 5). Doing the partitioning ourselves also gives the layout below.
 - **The image is unchanged.** The payload is the c1-base image as published, so the installed system is the same signed image that CI checks.
+
+## Trust policy during the install (#176)
+
+The image's trust policy rejects local `containers-storage` images (#150, [trust-policy.md](../c1-base/trust-policy.md)). `bootc install` runs inside the image and reads that same image from local storage (by image ID), so under the image's own policy it would refuse itself. A policy scope cannot tell that read apart from `bootc switch --transport containers-storage`, so the image policy cannot allow one and refuse the other (owner option A on #150).
+
+`atos-install` therefore bind-mounts `install-policy.json` read-only at `/etc/containers/policy.json` **in the install container only**. It rejects everything by default and accepts only `containers-storage` images in `[overlay@/var/lib/containers/storage]`: inside the container that is the ISO's read-only payload store, which holds only the image being installed. Nothing is loosened compared to before #150: the install source was never checked by policy (Fedora's default was `insecureAcceptAnything`), and installing reads the image from the ISO, not from a registry.
+
+The installed system gets **no** `/etc/containers/policy.json`, so the image's `/usr/share/containers/policy.json` applies from the first boot. `bootc install` deploys the image's own `/etc`, not the container's; `atos-install` checks this after the install and fails if the file is there. The #100 dev-image spike (`spikes/c1-dev-image/run.sh`) uses the same file for its `bootc install`.
 
 ## Disk layout and unlock
 
