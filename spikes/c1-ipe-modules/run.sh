@@ -246,6 +246,16 @@ echo "$old" > /proc/sys/kernel/core_pattern
 echo "ATOS-IPE helper: $(tr "\n" " " < helper.out 2>&1)"
 echo "ATOS-IPE policies now: $(ls $S/policies | tr "\n" " "), allow_all active=$(cat $S/policies/allow_all/active 2>&1), atos_kmodules active=$(cat $S/policies/atos_kmodules/active)"
 try etc-after-helper insmod /etc/atos-ipe/mt_etc.ko
+# unconfined_t may transition to any domain, and the domains that have mac_admin (install_t,
+# livecd_t, setfiles_mac_t) accept container_var_lib_t files as entrypoints: a copy of sh with that
+# label, started with runcon. Stops at the first combination that writes 0 to enforce.
+cp /usr/bin/bash ./sh-ctr && chcon -t container_var_lib_t ./sh-ctr
+for t in install_t livecd_t setfiles_mac_t; do for r in unconfined_r system_r; do
+  out=$(runcon -r $r -t $t ./sh-ctr -c "id -Z; echo 0 > $S/enforce && echo enforce=\$(cat $S/enforce)" 2>&1 | tr "\n" " ")
+  echo "ATOS-IPE root, secure_mode_policyload: runcon -r $r -t $t sh: $out"
+  [ "$(cat $S/enforce)" = 0 ] && break 2
+done; done
+try etc-after-runcon insmod /etc/atos-ipe/mt_etc.ko
 t0=$(date +%s%N); try usr3 insmod /usr/lib/modules/$k/extra/mt_usr3.ko; t1=$(date +%s%N)
 echo "ATOS-IPE insmod mt_usr3 under the allow-all policy: $(( (t1 - t0) / 1000000 )) ms"'
 
