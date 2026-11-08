@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Atos <atos@localhost>
+Date: Sun, 8 Nov 2026 16:13:45 +0100
+Subject: [PATCH] a11y: derive row ids from the list or table's accessible-id
+
+StandardListView items, StandardTableView rows and column headers get <id>/item-N, /row-N and /column-N when the widget has an accessible-id. The winit backend publishes an empty id as no author_id.
+---
+ internal/backends/winit/accesskit.rs                | 6 +++++-
+ internal/compiler/widgets/common/listview.slint     | 1 +
+ internal/compiler/widgets/cosmic/tableview.slint    | 2 ++
+ internal/compiler/widgets/cupertino/tableview.slint | 2 ++
+ internal/compiler/widgets/fluent/tableview.slint    | 2 ++
+ internal/compiler/widgets/material/tableview.slint  | 2 ++
+ 6 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/internal/backends/winit/accesskit.rs b/internal/backends/winit/accesskit.rs
+index 0e61e3d..25ea8ef 100644
+--- a/internal/backends/winit/accesskit.rs
++++ b/internal/backends/winit/accesskit.rs
+@@ -826,7 +826,11 @@ fn build_node_without_children(
+             node.set_description(description.to_string());
+         }
+ 
+-        if let Some(id) = item.accessible_string_property(AccessibleStringProperty::Id) {
++        // An empty id means "none": widgets derive the ids of their rows from their own, which may be unset.
++        if let Some(id) = item
++            .accessible_string_property(AccessibleStringProperty::Id)
++            .filter(|id| !id.is_empty())
++        {
+             node.set_author_id(id.to_string());
+         }
+ 
+diff --git a/internal/compiler/widgets/common/listview.slint b/internal/compiler/widgets/common/listview.slint
+index b395637..7fa6752 100644
+--- a/internal/compiler/widgets/common/listview.slint
++++ b/internal/compiler/widgets/common/listview.slint
+@@ -142,6 +142,7 @@ component StandardListViewBase inherits ListView {
+         pressed-x: i-touch-area.pressed-x;
+         pressed-y: i-touch-area.pressed-y;
+         accessible-item-count: root.model.length;
++        accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/item-" + index;
+         accessible-action-default => { i-touch-area.clicked(); }
+ 
+         i-touch-area := TouchArea {
+diff --git a/internal/compiler/widgets/cosmic/tableview.slint b/internal/compiler/widgets/cosmic/tableview.slint
+index df0d8d9..a42d9c1 100644
+--- a/internal/compiler/widgets/cosmic/tableview.slint
++++ b/internal/compiler/widgets/cosmic/tableview.slint
+@@ -213,6 +213,7 @@ export component StandardTableView {
+ 
+                 for column[index] in root.columns : TableViewColumn {
+                     accessible-label: column.title;
++                    accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/column-" + index;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+                     min-width: max(column.min-width, column.width);
+@@ -242,6 +243,7 @@ export component StandardTableView {
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/row-" + idx;
+                 accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+diff --git a/internal/compiler/widgets/cupertino/tableview.slint b/internal/compiler/widgets/cupertino/tableview.slint
+index f720bf4..0460413 100644
+--- a/internal/compiler/widgets/cupertino/tableview.slint
++++ b/internal/compiler/widgets/cupertino/tableview.slint
+@@ -209,6 +209,7 @@ export component StandardTableView {
+ 
+                 for column[index] in root.columns : TableViewColumn {
+                     accessible-label: column.title;
++                    accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/column-" + index;
+                     last: index == root.columns.length - 1;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+@@ -241,6 +242,7 @@ export component StandardTableView {
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/row-" + idx;
+                 accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+diff --git a/internal/compiler/widgets/fluent/tableview.slint b/internal/compiler/widgets/fluent/tableview.slint
+index 6c9c708..5de422e 100644
+--- a/internal/compiler/widgets/fluent/tableview.slint
++++ b/internal/compiler/widgets/fluent/tableview.slint
+@@ -232,6 +232,7 @@ export component StandardTableView {
+ 
+                 for column[index] in root.columns : TableViewColumn {
+                     accessible-label: column.title;
++                    accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/column-" + index;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+                     min-width: max(column.min-width, column.width);
+@@ -261,6 +262,7 @@ export component StandardTableView {
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/row-" + idx;
+                 accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+                 even: mod(idx, 2) == 0;
+diff --git a/internal/compiler/widgets/material/tableview.slint b/internal/compiler/widgets/material/tableview.slint
+index 869e79e..3fe64b2 100644
+--- a/internal/compiler/widgets/material/tableview.slint
++++ b/internal/compiler/widgets/material/tableview.slint
+@@ -199,6 +199,7 @@ export component StandardTableView {
+ 
+                 for column[index] in root.columns : TableViewColumn {
+                     accessible-label: column.title;
++                    accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/column-" + index;
+                     sort-order: column.sort-order;
+                     horizontal-stretch: column.horizontal-stretch;
+                     min-width: max(column.min-width, column.width);
+@@ -228,6 +229,7 @@ export component StandardTableView {
+             for row[idx] in root.rows : TableViewRow {
+                 accessible-label: row[0].text; // ponytail: first cell names the row
+                 accessible-item-index: idx;
++                accessible-id: root.accessible-id == "" ? "" : root.accessible-id + "/row-" + idx;
+                 accessible-item-count: root.rows.length;
+                 selected: idx == root.current-row;
+ 
