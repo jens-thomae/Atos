@@ -1,10 +1,16 @@
 # Base image mirror (#117, docs/components/c1-base/base-mirror.md): copies every pinned fedora-bootc index
 # that ghcr.io/jens-thomae/atos/fedora-bootc lacks from quay.io, by digest, and checks the copy.
-# Run by hand on the branch that bumps the pin (`gh workflow run base-mirror.yml --ref <branch>`), before its
-# PR build, which pulls the base from the mirror. Idempotent: an already mirrored digest is only checked.
+# Runs on every push to a branch of this repository that changes a pin (so a bump PR's build finds its base),
+# or by hand. Pushes need write access to the repository, so forks cannot trigger it; their PRs only read.
+# Idempotent: an already mirrored digest is only checked.
 name: Base image mirror
 
 on:
+  push:
+    paths:
+      - components/*/Containerfile
+      - tools/ci/mirror-base.sh
+      - .github/workflows/base-mirror.yml
   workflow_dispatch:
 
 permissions: {}
