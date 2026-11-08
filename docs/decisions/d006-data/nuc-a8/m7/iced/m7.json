@@ -1,0 +1,278 @@
+[
+ {
+  "step": 1,
+  "text": "Focus on the list, no row selected; Down selects docs",
+  "checks": [
+   {
+    "check": "focus on list at start",
+    "result": "unverifiable",
+    "expected": [
+     "table",
+     "Files"
+    ],
+    "observed": null
+   },
+   {
+    "check": "no row selected at start",
+    "result": "unverifiable",
+    "expected": "none",
+    "observed": "rows or selection not exposed"
+   },
+   {
+    "check": "Down selects docs",
+    "result": "unverifiable",
+    "expected": "docs",
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 2,
+  "text": "Enter opens docs",
+  "checks": [
+   {
+    "check": "path label",
+    "result": "unverifiable",
+    "expected": "/tmp/tmp.8lhTQ7LzRr/fx/small/docs",
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 3,
+  "text": "Down/Enter into 2026 and november",
+  "checks": [
+   {
+    "check": "path label after 2026",
+    "result": "unverifiable",
+    "expected": "/tmp/tmp.8lhTQ7LzRr/fx/small/docs/2026",
+    "observed": null
+   },
+   {
+    "check": "path label after november",
+    "result": "unverifiable",
+    "expected": "/tmp/tmp.8lhTQ7LzRr/fx/small/docs/2026/november",
+    "observed": null
+   },
+   {
+    "check": "no row selected",
+    "result": "unverifiable",
+    "expected": "none",
+    "observed": "rows or selection not exposed"
+   }
+  ]
+ },
+ {
+  "step": 4,
+  "text": "Backspace to docs/2026; Alt+Up to docs",
+  "checks": [
+   {
+    "check": "after Backspace",
+    "result": "unverifiable",
+    "expected": "/tmp/tmp.8lhTQ7LzRr/fx/small/docs/2026",
+    "observed": null
+   },
+   {
+    "check": "after Alt+Up",
+    "result": "unverifiable",
+    "expected": "/tmp/tmp.8lhTQ7LzRr/fx/small/docs",
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 5,
+  "text": "Shift+Tab to Up, to Home; Down; Enter opens /",
+  "checks": [
+   {
+    "check": "Shift+Tab focuses Up",
+    "result": "unverifiable",
+    "expected": [
+     "push button",
+     "Up"
+    ],
+    "observed": null
+   },
+   {
+    "check": "Shift+Tab focuses Home",
+    "result": "unverifiable",
+    "expected": [
+     "list item",
+     "Home"
+    ],
+    "observed": null
+   },
+   {
+    "check": "Down focuses File system",
+    "result": "unverifiable",
+    "expected": [
+     "list item",
+     "File system"
+    ],
+    "observed": null
+   },
+   {
+    "check": "Enter opens /",
+    "result": "unverifiable",
+    "expected": "/",
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 6,
+  "text": "Down to Start folder; Enter; Tab twice to list",
+  "checks": [
+   {
+    "check": "Down focuses Start folder",
+    "result": "unverifiable",
+    "expected": [
+     "list item",
+     "Start folder"
+    ],
+    "observed": null
+   },
+   {
+    "check": "Enter returns to small",
+    "result": "unverifiable",
+    "expected": "/tmp/tmp.8lhTQ7LzRr/fx/small",
+    "observed": null
+   },
+   {
+    "check": "Tab twice focuses the list",
+    "result": "unverifiable",
+    "expected": [
+     "table",
+     "Files"
+    ],
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 7,
+  "text": "End selects Ünïcödé.txt; Home selects docs",
+  "checks": [
+   {
+    "check": "End selects Ünïcödé.txt (AT-SPI)",
+    "result": "unverifiable",
+    "expected": "Ünïcödé.txt",
+    "observed": null
+   },
+   {
+    "check": "End selects Ünïcödé.txt (Enter prints SPIKE_OPEN)",
+    "result": "pass",
+    "expected": "SPIKE_OPEN /tmp/tmp.8lhTQ7LzRr/fx/small/Ünïcödé.txt",
+    "observed": "SPIKE_OPEN /tmp/tmp.8lhTQ7LzRr/fx/small/Ünïcödé.txt"
+   },
+   {
+    "check": "Home selects docs (AT-SPI)",
+    "result": "unverifiable",
+    "expected": "docs",
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 8,
+  "text": "Shift+F10; Down twice; Enter opens Properties; Escape closes, focus on list",
+  "checks": [
+   {
+    "check": "Shift+F10 opens a menu with Open",
+    "result": "unverifiable",
+    "expected": true,
+    "observed": null
+   },
+   {
+    "check": "Properties dialog open",
+    "result": "unverifiable",
+    "expected": true,
+    "observed": null
+   },
+   {
+    "check": "dialog closed",
+    "result": "unverifiable",
+    "expected": false,
+    "observed": null
+   },
+   {
+    "check": "focus returns to list",
+    "result": "unverifiable",
+    "expected": [
+     "table",
+     "Files"
+    ],
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 9,
+  "text": "Down twice selects notes-1.txt; Menu, Down, Enter copies the path",
+  "checks": [
+   {
+    "check": "wl-paste",
+    "result": "fail",
+    "expected": "/tmp/tmp.8lhTQ7LzRr/fx/small/notes-1.txt",
+    "observed": "/tmp/tmp.8lhTQ7LzRr/fx/small/notes-2.txt"
+   }
+  ]
+ },
+ {
+  "step": 10,
+  "text": "Escape closes an open menu without action",
+  "checks": [
+   {
+    "check": "menu was open",
+    "result": "unverifiable",
+    "expected": true,
+    "observed": null
+   },
+   {
+    "check": "menu closed",
+    "result": "unverifiable",
+    "expected": false,
+    "observed": null
+   },
+   {
+    "check": "no dialog opened",
+    "result": "unverifiable",
+    "expected": false,
+    "observed": null
+   },
+   {
+    "check": "focus on list",
+    "result": "unverifiable",
+    "expected": [
+     "table",
+     "Files"
+    ],
+    "observed": null
+   }
+  ]
+ },
+ {
+  "step": 11,
+  "text": "Enter on notes-1.txt prints SPIKE_OPEN",
+  "checks": [
+   {
+    "check": "stdout",
+    "result": "fail",
+    "expected": "SPIKE_OPEN /tmp/tmp.8lhTQ7LzRr/fx/small/notes-1.txt",
+    "observed": "SPIKE_OPEN /tmp/tmp.8lhTQ7LzRr/fx/small/notes-2.txt"
+   }
+  ]
+ },
+ {
+  "step": 12,
+  "text": "10k folder: End, Home, Page Down, Page Up, each within 1 s (screenshots reviewed by hand)",
+  "checks": [
+   {
+    "check": "End selects item-09999.md (Enter prints SPIKE_OPEN)",
+    "result": "pass",
+    "expected": "SPIKE_OPEN /tmp/tmp.8lhTQ7LzRr/fx/10k/item-09999.md",
+    "observed": "SPIKE_OPEN /tmp/tmp.8lhTQ7LzRr/fx/10k/item-09999.md"
+   }
+  ]
+ }
+]
