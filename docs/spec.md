@@ -116,6 +116,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 - The last known-good image is always bootable from a "Previous version" boot entry, no terminal needed.
 - Full-disk encryption on by default at install.
 - A developer mode allows a writable overlay or package layering, behind a dismissible warning.
+- Atos supports normal laptops and desktops broadly, like Windows does. Intel, AMD and NVIDIA graphics are all supported with GPU rendering; NVIDIA gets particular care because it is often problematic on Linux.
 
 ### C2 Compositor
 
