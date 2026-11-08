@@ -6,12 +6,12 @@ Subject: [PATCH] a11y: name popups and give them a menu, dialog or tooltip
 
 Popup roots become Menu, Dialog or Tooltip nodes named by accessible-label or title. A Dialog window carries the dialog role.
 ---
- internal/backends/winit/accesskit.rs          | 39 +++++++++++++++++--
- .../compiler/passes/lower_accessibility.rs    |  8 ++++
- 2 files changed, 43 insertions(+), 4 deletions(-)
+ internal/backends/winit/accesskit.rs          | 84 ++++++++++++++++++-
+ .../compiler/passes/lower_accessibility.rs    |  8 ++
+ 2 files changed, 88 insertions(+), 4 deletions(-)
 
 diff --git a/internal/backends/winit/accesskit.rs b/internal/backends/winit/accesskit.rs
-index a72575e..70d6aed 100644
+index a72575e..0e61e3d 100644
 --- a/internal/backends/winit/accesskit.rs
 +++ b/internal/backends/winit/accesskit.rs
 @@ -19,7 +19,7 @@
@@ -49,33 +49,35 @@ index a72575e..70d6aed 100644
      focused_node_tracker: Pin<Box<PropertyTracker<false, DelegateFocusPropertyTracker>>>,
      /// Emission state, keyed by the inner `TextInput`'s `ItemRc`. Its per-entry property tracker
      /// stays empty on purpose: the state has to outlive the edits it describes, so that NodeIds
-@@ -512,7 +517,7 @@ fn build_node_for_item_recursively(
+@@ -512,7 +517,8 @@ fn build_node_for_item_recursively(
          let (node, text_run_nodes) = {
              let mut text_run_nodes: Vec<(NodeId, Node)> = Vec::new();
              let node = tracker.as_ref().evaluate(|| {
 -                let mut n = self.build_node_without_children(&item, scale_factor, window_position);
-+                let mut n = self.build_node_without_children(id, &item, scale_factor, window_position);
++                let mut n =
++                    self.build_node_without_children(id, &item, scale_factor, window_position);
                  n.set_children(descendant_children.clone());
                  self.try_emit_text_input_accessibility(
                      &item,
-@@ -633,6 +638,11 @@ fn build_new_tree(
+@@ -633,6 +639,7 @@ fn build_new_tree(
                  let PopupWindowLocation::ChildWindow(location) = popup.location else {
                      return None;
                  };
-+                let role = match popup.window_kind {
-+                    WindowKind::Menu => Role::Menu,
-+                    WindowKind::Popup => Role::Dialog,
-+                    WindowKind::ToolTip => Role::Tooltip,
-+                };
++                let role = popup_role(&popup.window_kind);
  
                  let parent_item = nearest_accessible_item(popup.parent_item.upgrade()?);
                  let parent_node = self.encode_item_node_id(if parent_item.is_accessible() {
-@@ -641,12 +651,18 @@ fn build_new_tree(
+@@ -641,12 +648,23 @@ fn build_new_tree(
                      &root_item
                  });
  
 -                Some(AccessiblePopup { location, parent_node, component: popup.component.clone() })
-+                Some(AccessiblePopup { location, parent_node, component: popup.component.clone(), role })
++                Some(AccessiblePopup {
++                    location,
++                    parent_node,
++                    component: popup.component.clone(),
++                    role,
++                })
              })
              .collect::<Vec<_>>();
  
@@ -90,7 +92,7 @@ index a72575e..70d6aed 100644
  
          let root_id = property_tracker.evaluate_as_dependency_root(|| {
              self.build_node_for_item_recursively(
-@@ -670,6 +686,7 @@ fn build_new_tree(
+@@ -670,6 +688,7 @@ fn build_new_tree(
  
      fn build_node_without_children(
          &self,
@@ -98,29 +100,76 @@ index a72575e..70d6aed 100644
          item: &ItemRc,
          scale_factor: ScaleFactor,
          window_position: LogicalPoint,
-@@ -679,7 +696,20 @@ fn build_node_without_children(
+@@ -679,7 +698,18 @@ fn build_node_without_children(
              .is_some_and(|x| x == "true");
  
          let (role, label) = if let Some(window_item) = item.downcast::<WindowItem>() {
 -            (Role::Window, Some(window_item.as_pin_ref().title().to_string()))
 +            // A popup or a `Dialog` is a named Menu, Dialog or Tooltip; other windows stay Window.
-+            let role = self.popup_roles.get(&id).copied().unwrap_or(
-+                if item.accessible_role() == i_slint_core::items::AccessibleRole::Dialog {
-+                    Role::Dialog
-+                } else {
-+                    Role::Window
-+                },
++            let role = window_role(
++                self.popup_roles.get(&id).copied(),
++                item.accessible_role() == i_slint_core::items::AccessibleRole::Dialog,
 +            );
-+            let label = item
-+                .accessible_string_property(AccessibleStringProperty::Label)
-+                .map(|x| x.to_string())
-+                .filter(|x| !x.is_empty())
-+                .unwrap_or_else(|| window_item.as_pin_ref().title().to_string());
++            let label = window_label(
++                item.accessible_string_property(AccessibleStringProperty::Label)
++                    .as_ref()
++                    .map(|x| x.as_str()),
++                window_item.as_pin_ref().title().as_str(),
++            );
 +            (role, Some(label))
          } else {
              (
                  match item.accessible_role() {
-@@ -1013,4 +1043,5 @@ struct AccessiblePopup {
+@@ -1009,8 +1039,54 @@ pub fn invoke(&self, window: &Window) {
+     }
+ }
+ 
++fn popup_role(kind: &WindowKind) -> Role {
++    match kind {
++        WindowKind::Menu => Role::Menu,
++        WindowKind::Popup => Role::Dialog,
++        WindowKind::ToolTip => Role::Tooltip,
++    }
++}
++
++/// A popup root takes its kind's role, a `Dialog` window the dialog role, any other window `Window`.
++fn window_role(popup_role: Option<Role>, is_dialog: bool) -> Role {
++    popup_role.unwrap_or(if is_dialog { Role::Dialog } else { Role::Window })
++}
++
++/// The `accessible-label` of a window item, else its title.
++fn window_label(accessible_label: Option<&str>, title: &str) -> String {
++    accessible_label.filter(|x| !x.is_empty()).unwrap_or(title).to_string()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn popup_kinds_map_to_roles() {
++        assert_eq!(popup_role(&WindowKind::Menu), Role::Menu);
++        assert_eq!(popup_role(&WindowKind::Popup), Role::Dialog);
++        assert_eq!(popup_role(&WindowKind::ToolTip), Role::Tooltip);
++    }
++
++    #[test]
++    fn window_roles() {
++        assert_eq!(window_role(Some(Role::Menu), true), Role::Menu);
++        assert_eq!(window_role(None, true), Role::Dialog);
++        assert_eq!(window_role(None, false), Role::Window);
++    }
++
++    #[test]
++    fn window_names() {
++        assert_eq!(window_label(Some("Network"), "title"), "Network");
++        assert_eq!(window_label(Some(""), "title"), "title");
++        assert_eq!(window_label(None, "title"), "title");
++        assert_eq!(window_label(None, ""), "");
++    }
++}
++
+ struct AccessiblePopup {
      location: LogicalPoint,
      parent_node: NodeId,
      component: ItemTreeRc,
