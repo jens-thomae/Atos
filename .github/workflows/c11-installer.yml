@@ -73,7 +73,7 @@ jobs:
             sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
             payload-src/components/c1-base/check-seal.sh "$PAYLOAD"
             podman save "$PAYLOAD" | sudo podman load -q
-            podman rmi -q "$PAYLOAD"
+            podman rmi "$PAYLOAD" >/dev/null
             echo "Payload built from \`$REF\` ($(git -C payload-src rev-parse HEAD))" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Build the ISO
