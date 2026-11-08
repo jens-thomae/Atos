@@ -38,7 +38,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # GitHub release downloads sometimes 504; a step cannot retry itself, so run it a second time on failure.
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        id: tools
+        continue-on-error: true
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        if: steps.tools.outcome == 'failure'
         with:
           tool: cargo-deny@0.20.2,cargo-audit@0.22.2
 
