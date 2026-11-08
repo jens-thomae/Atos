@@ -11,12 +11,12 @@
 #            module file in the image's /usr (and the three usr test modules), DEFAULT op=KMODULE
 #            action=DENY, signed with the TEST db key; plus the policies the guest tries as root
 #   image    localhost/c1-base:ipe = the shipped Containerfile plus the usr test modules in
-#            /usr/lib/modules/<kver>/extra, the signed policy in /usr/lib/atos/ipe and a unit that
-#            loads and activates it early in boot; then checks that the policy covers every module
-#            file of the built image
+#            /usr/lib/modules/<kver>/extra, the signed policy in /usr/lib/atos/ipe and an initrd
+#            unit that loads and activates it (UNIT); then checks that the policy covers every
+#            module file of the built image
 #   install  installs localhost/c1-base:ipe to ~/sealed/ipe.raw
 #   boot     B1 (D-014): setup-mode enrolment of the committed TEST keys, sealed boot, then the guest
-#            checks below (action())
+#            checks below (action(), ROOT): module loads, then what root can do to the policy
 # Keys: the committed TEST db key (in db, so in the kernel's platform keyring) signs the modules and
 # the policies; `stranger`, a VM-only self-signed key in no keyring, signs one policy.
 # Logs: tools/dev-vm/out/sealed/ipe-*.
@@ -36,11 +36,11 @@ tools() { sudo podman run --rm -v "$M:/m:z" -v "$REPO:/repo:ro" "$TOOLS" "$@"; }
 # One module per case, named mt_<case>, all signed with the TEST db key:
 #   usr usr2 usr3  shipped in the image's /usr/lib/modules/<kver>/extra, as D-017's NVIDIA modules
 #                  would be (Atos-signed, not Fedora-signed)
-#   var            copied to /var/tmp in the guest
+#   var var2       copied to /var/tmp in the guest
 #   etc            copied to /etc in the guest
 #   ovl            copied into /usr after `bootc usr-overlay` (#99)
 #   initmod        loaded from a buffer with init_module(2), so the kernel sees no file
-CASES="usr usr2 usr3 var etc ovl initmod"
+CASES="usr usr2 usr3 var var2 etc ovl initmod"
 
 step_tools() {
   local kver
@@ -101,7 +101,7 @@ step_policy() {
   sign "$M/high.pol" "$DB/db.key" "$DB/db.crt" "$M/guest/high.p7b"
   sign "$M/stranger.pol" "$K/stranger.key" "$K/stranger.crt" "$M/guest/stranger.p7b"
   cp "$M/stranger.pol" "$M/guest/unsigned.pol"
-  cp "$M/ko/mt_var.ko" "$M/ko/mt_etc.ko" "$M/ko/mt_ovl.ko" "$M/ko/mt_initmod.ko" "$M/guest/"
+  cp "$M/ko/mt_var.ko" "$M/ko/mt_var2.ko" "$M/ko/mt_etc.ko" "$M/ko/mt_ovl.ko" "$M/ko/mt_initmod.ko" "$M/guest/"
   { echo "== kmodules.pol: $(grep -c '^op=KMODULE' "$M/kmodules.pol") rules, $(stat -c %s "$M/kmodules.pol") bytes; signed: $(stat -c %s "$CTX/kmodules.p7b") bytes"
     grep -v '^op=KMODULE' "$M/kmodules.pol"; grep -m2 '^op=KMODULE' "$M/kmodules.pol"
     echo "== mt_usr2.ko: $(digests "$M/ko/mt_usr2.ko")"
@@ -109,30 +109,40 @@ step_policy() {
   } | tee "$OUT/ipe-policy.log"
 }
 
-# Loads and activates the policy as soon as securityfs is mounted, before udev and
-# systemd-modules-load load anything from /usr. One write: each write() is parsed as one policy.
+# Loads and activates the policy in the initrd, which the signed UKI carries: late (the root file
+# system is mounted, so the initrd's own module loads are done), before switch-root, and before
+# SELinux has a policy (systemd loads it after switch-root; Fedora's policy gives no service domain
+# CAP_MAC_ADMIN, which every write to IPE's securityfs nodes needs: a first run of this script loaded
+# the policy from a unit after switch-root and got EPERM, avc denied mac_admin for initrc_t).
+# One write: each write(2) is parsed as one policy.
+# shellcheck disable=SC2016 # systemd and sh expand it
 UNIT='[Unit]
 Description=Atos IPE kernel module policy (spike #169, dev VM only)
 DefaultDependencies=no
-Before=systemd-modules-load.service systemd-udevd.service systemd-udev-trigger.service sysinit.target
+ConditionPathExists=/etc/initrd-release
+After=initrd-fs.target
+Before=initrd.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c "dd if=/usr/lib/atos/ipe/kmodules.p7b of=/sys/kernel/security/ipe/new_policy bs=16M iflag=fullblock status=none && echo 1 > /sys/kernel/security/ipe/policies/atos_kmodules/active"
-[Install]
-WantedBy=sysinit.target'
+ExecStart=/bin/sh -c "t0=$$(date +%%s%%N); dd if=/usr/lib/atos/ipe/kmodules.p7b of=/sys/kernel/security/ipe/new_policy bs=16M iflag=fullblock status=none && echo 1 > /sys/kernel/security/ipe/policies/atos_kmodules/active && echo atos-ipe-policy: loaded and active in $$(( ($$(date +%%s%%N) - t0) / 1000 )) us"'
+DRACUT='install_items+=" /usr/lib/atos/ipe/kmodules.p7b /usr/lib/systemd/system/atos-ipe-policy.service /usr/lib/systemd/system/initrd.target.wants/atos-ipe-policy.service /usr/bin/dd /usr/bin/date "'
 step_image() {
   local kver f=$WORK/Containerfile.ipe ctx=$REPO/components/c1-base
   kver=$(sudo podman run --rm "$BASE" ls /usr/lib/modules)
   cp "$M/ko/mt_usr.ko" "$M/ko/mt_usr2.ko" "$M/ko/mt_usr3.ko" "$CTX/"
   printf '%s\n' "$UNIT" > "$CTX/atos-ipe-policy.service"
+  printf '%s\n' "$DRACUT" > "$CTX/90-atos-ipe.conf"
   sed -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe mt_usr.ko mt_usr2.ko mt_usr3.ko /usr/lib/modules/$kver/extra/" \
       -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe kmodules.p7b /usr/lib/atos/ipe/kmodules.p7b" \
       -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe atos-ipe-policy.service /usr/lib/systemd/system/atos-ipe-policy.service" \
-      -e "/^LABEL org.opencontainers.image.title/i RUN depmod $kver \&\& systemctl enable atos-ipe-policy.service" \
+      -e "/^LABEL org.opencontainers.image.title/i COPY --from=ipe 90-atos-ipe.conf /usr/lib/dracut/dracut.conf.d/90-atos-ipe.conf" \
+      -e "/^LABEL org.opencontainers.image.title/i RUN depmod $kver \&\& mkdir -p /usr/lib/systemd/system/initrd.target.wants \&\& ln -s ../atos-ipe-policy.service /usr/lib/systemd/system/initrd.target.wants/" \
+      -e "s#^    && lsinitrd \"/usr/lib/modules/\$kver/initramfs.img\" | grep -q 'emergency.service.d/10-atos-boot-counting.conf' \\\\#&\n    \&\& lsinitrd \"/usr/lib/modules/\$kver/initramfs.img\" | grep -E 'atos-ipe|kmodules' \\\\#" \
       "$ctx/Containerfile" > "$f"
-  grep -q atos-ipe-policy "$f"
-  sudo podman build --build-context repo="$REPO" --build-context ipe="$CTX" -f "$f" -t "$IMAGE:ipe" "$ctx"
+  grep -q 'grep -E .atos-ipe' "$f"
+  sudo podman build --build-context repo="$REPO" --build-context ipe="$CTX" -f "$f" -t "$IMAGE:ipe" "$ctx" 2>&1 \
+    | tee "$OUT/ipe-image-build.log" | grep -E 'atos-ipe|kmodules|Error|error:' || true
   # The policy has to list every module file the built image ships, or that module can't load.
   local mnt missing
   mnt=$(sudo podman image mount "$IMAGE:ipe")
@@ -150,37 +160,31 @@ step_install() {
     "$IMAGE:ipe" bootc install to-disk --generic-image --via-loopback "/out/$(basename "$DISK")"
 }
 
-# Guest script, run as root by sealed.sh's report unit. Every result line starts with ATOS-IPE.
-# The test files travel inside the script (xz, base64), as the systemd credential carries it.
-action() {
-  # shellcheck disable=SC2016 # expands in the guest
-  printf '%s\n' 'k=$(uname -r); S=/sys/kernel/security/ipe
-echo "ATOS-IPE kernel: $k, lockdown: $(cat /sys/kernel/security/lockdown), lsm: $(cat /sys/kernel/security/lsm)"
-echo "ATOS-IPE config: $(grep -E "^CONFIG_(SECURITY_IPE|IPE_[A-Z_]+|FS_VERITY[A-Z_]*|DM_VERITY|DM_VERITY_VERIFY_ROOTHASH_SIG)=" /usr/lib/modules/$k/config | tr "\n" " ")"
-echo "ATOS-IPE unit: $(systemctl show -P ActiveState,Result atos-ipe-policy.service | tr "\n" " ")$(systemd-analyze blame --no-pager | grep atos-ipe-policy)"
-journalctl -b -u atos-ipe-policy.service --no-pager -o cat | sed "s/^/ATOS-IPE unit log: /"
-echo "ATOS-IPE policies: $(ls $S/policies | tr "\n" " "), atos_kmodules active=$(cat $S/policies/atos_kmodules/active 2>&1) version=$(cat $S/policies/atos_kmodules/version 2>&1), enforce=$(cat $S/enforce)"
-echo "ATOS-IPE modules from /usr at boot: $(lsmod | tail -n +2 | wc -l) loaded; systemd-modules-load: $(systemctl show -P Result systemd-modules-load.service)"
+# Runs as root in unconfined_t, the domain a root login gets. Every result line starts with ATOS-IPE.
+# shellcheck disable=SC2016 # expands in the guest
+ROOT='k=$(uname -r); S=/sys/kernel/security/ipe; cd /run/ipe
+echo "ATOS-IPE root context: $(id -Z), SELinux $(getenforce), policies: $(ls $S/policies | tr "\n" " "), atos_kmodules active=$(cat $S/policies/atos_kmodules/active 2>&1) version=$(cat $S/policies/atos_kmodules/version 2>&1), enforce=$(cat $S/enforce)"
 try() { # <case> <command...>: one result line
   local c=$1; shift
   if out=$("$@" 2>&1); then echo "ATOS-IPE load $c: LOADED"; else echo "ATOS-IPE load $c: refused: ${out##*: }"; fi
 }
-mkdir -p /run/ipe && cd /run/ipe'
-  printf 'echo %s | base64 -d | tar -xJ\n' "$(tar -C "$M/guest" -cJ . | base64 -w0)"
-  # shellcheck disable=SC2016 # expands in the guest
-  printf '%s\n' '# An in-tree Fedora module from /usr that is not loaded yet, through modprobe (as udev would).
+# w writes a file in one write(2), put writes a value.
+w() { if out=$(dd if="$1" of="$2" bs=16M iflag=fullblock status=none 2>&1); then echo ACCEPTED; else echo "refused: ${out##*: }"; fi; }
+put() { if out=$( (echo "$1" > "$2") 2>&1); then echo ACCEPTED; else echo "refused: ${out##*: }"; fi; }
+# 1. Module loads under the policy. An in-tree Fedora module from /usr that is not loaded yet,
+# through modprobe (as udev would load it).
 for m in dummy veth ifb vcan nlmon; do modinfo -n $m >/dev/null 2>&1 && ! lsmod | grep -q "^$m " && break; done
 echo "ATOS-IPE in-tree module: $m = $(modinfo -n $m)"
 try usr-intree modprobe $m
 t0=$(date +%s%N); try usr insmod /usr/lib/modules/$k/extra/mt_usr.ko; t1=$(date +%s%N)
 echo "ATOS-IPE insmod mt_usr under the full policy: $(( (t1 - t0) / 1000000 )) ms"
 # Signed copies outside /usr, labelled as module files so SELinux is not what refuses them (#158).
-mkdir -p /var/tmp/ipe /etc/atos-ipe && cp mt_var.ko /var/tmp/ipe/ && cp mt_etc.ko /etc/atos-ipe/
+mkdir -p /var/tmp/ipe /etc/atos-ipe && cp mt_var.ko mt_var2.ko /var/tmp/ipe/ && cp mt_etc.ko /etc/atos-ipe/
 cp /usr/lib/modules/$k/extra/mt_usr2.ko /var/tmp/ipe/mt_usr2.ko
 chcon -t modules_object_t /var/tmp/ipe/*.ko /etc/atos-ipe/*.ko
 try var insmod /var/tmp/ipe/mt_var.ko
 try etc insmod /etc/atos-ipe/mt_etc.ko
-# The same bytes as a module in /usr (its digest is in the policy), but without fs-verity, then with it.
+# The same bytes as a module in /usr (its digest is in the policy), without fs-verity, then with it.
 try usr2-copy insmod /var/tmp/ipe/mt_usr2.ko
 # The image has no fsverity-utils: FS_IOC_ENABLE_VERITY (SHA-512, 4 KiB, as composefs) and
 # FS_IOC_MEASURE_VERITY from Python.
@@ -195,37 +199,61 @@ echo "ATOS-IPE fs-verity of mt_usr2.ko in /usr: $(python3 -c "$V" measure /usr/l
 echo "ATOS-IPE fs-verity of its /var copy, enabled: $(python3 -c "$V" enable /var/tmp/ipe/mt_usr2.ko 2>&1 | tail -n 1 | cut -c1-40)"
 try usr2-copy-verity insmod /var/tmp/ipe/mt_usr2.ko
 # init_module(2): the module from a buffer, no file for IPE to look at.
-if command -v python3 >/dev/null; then
-  try initmod python3 -c "import ctypes, os, sys; b = open(sys.argv[1], \"rb\").read(); l = ctypes.CDLL(None, use_errno=True); nr = {\"aarch64\": 105, \"x86_64\": 175}[os.uname().machine]
+try initmod python3 -c "import ctypes, os, sys; b = open(sys.argv[1], \"rb\").read(); l = ctypes.CDLL(None, use_errno=True); nr = {\"aarch64\": 105, \"x86_64\": 175}[os.uname().machine]
 r = l.syscall(nr, b, len(b), b\"\")
 sys.exit(0) if r == 0 else sys.exit(os.strerror(ctypes.get_errno()))" mt_initmod.ko
-else echo "ATOS-IPE load initmod: skipped (no python3)"; fi
-# bootc usr-overlay (#99): a writable overlay on /usr, files there have no fs-verity.
+# bootc usr-overlay (#99): a writable overlay on /usr; files written there have no fs-verity.
 if out=$(bootc usr-overlay 2>&1); then
   cp mt_ovl.ko /usr/lib/modules/$k/extra/ && chcon -t modules_object_t /usr/lib/modules/$k/extra/mt_ovl.ko
   try ovl insmod /usr/lib/modules/$k/extra/mt_ovl.ko
 else echo "ATOS-IPE usr-overlay: failed: $(printf "%s" "$out" | tail -n 1)"; fi
-# What root can do to the policy (CAP_MAC_ADMIN). w writes a file in one write(2), put a value.
-w() { if out=$(dd if="$1" of="$2" bs=16M iflag=fullblock status=none 2>&1); then echo ACCEPTED; else echo "refused: ${out##*: }"; fi; }
-put() { if out=$( (echo "$1" > "$2") 2>&1); then echo ACCEPTED; else echo "refused: ${out##*: }"; fi; }
-echo "ATOS-IPE root: delete the active policy: $(put 1 $S/policies/atos_kmodules/delete)"
-echo "ATOS-IPE root: update it to version 0.9.0 (TEST db key): $(w rollback.p7b $S/policies/atos_kmodules/update)"
-echo "ATOS-IPE root: new unsigned policy: $(w unsigned.pol $S/new_policy)"
-echo "ATOS-IPE root: new policy signed by a key in no keyring: $(w stranger.p7b $S/new_policy)"
-echo "ATOS-IPE root: new allow_all_low 0.1.0 (TEST db key): $(w low.p7b $S/new_policy)"
-echo "ATOS-IPE root: activate allow_all_low: $(put 1 $S/policies/allow_all_low/active)"
-echo "ATOS-IPE policies now: $(ls $S/policies | tr "\n" " "), atos_kmodules active=$(cat $S/policies/atos_kmodules/active)"
-# Permissive mode: one write to the enforce node.
-echo "ATOS-IPE root: write 0 to enforce: $(put 0 $S/enforce), enforce=$(cat $S/enforce)"
-try var-permissive insmod /var/tmp/ipe/mt_var.ko
-echo "ATOS-IPE root: write 1 to enforce: $(put 1 $S/enforce), enforce=$(cat $S/enforce)"
-try etc-enforcing-again insmod /etc/atos-ipe/mt_etc.ko
-# A higher-version allow-all policy signed by a platform-keyring key replaces the active one.
-echo "ATOS-IPE root: new allow_all 9.0.0 (TEST db key): $(w high.p7b $S/new_policy), activate: $(put 1 $S/policies/allow_all/active)"
-try etc-allow-all insmod /etc/atos-ipe/mt_etc.ko
+# 2. Root against the policy, SELinux enforcing: every IPE write needs CAP_MAC_ADMIN.
+echo "ATOS-IPE root, SELinux enforcing: write 0 to enforce: $(put 0 $S/enforce); delete the policy: $(put 1 $S/policies/atos_kmodules/delete); new allow_all 9.0.0 (TEST db key): $(w high.p7b $S/new_policy)"
+# 3. setenforce 0 first (SELinux permissive), then IPE'"'"'s own checks.
+echo "ATOS-IPE root: setenforce 0: $(setenforce 0 2>&1 && echo ACCEPTED), SELinux $(getenforce)"
+echo "ATOS-IPE root, SELinux permissive: delete the active policy: $(put 1 $S/policies/atos_kmodules/delete)"
+echo "ATOS-IPE root, SELinux permissive: update it to version 0.9.0 (TEST db key): $(w rollback.p7b $S/policies/atos_kmodules/update)"
+echo "ATOS-IPE root, SELinux permissive: new unsigned policy: $(w unsigned.pol $S/new_policy)"
+echo "ATOS-IPE root, SELinux permissive: new policy signed by a key in no keyring: $(w stranger.p7b $S/new_policy)"
+echo "ATOS-IPE root, SELinux permissive: new allow_all_low 0.1.0 (TEST db key): $(w low.p7b $S/new_policy), activate it: $(put 1 $S/policies/allow_all_low/active)"
+echo "ATOS-IPE root, SELinux permissive: write 0 to enforce: $(put 0 $S/enforce), enforce=$(cat $S/enforce)"
+try var-ipe-permissive insmod /var/tmp/ipe/mt_var.ko
+echo "ATOS-IPE root: write 1 to enforce: $(put 1 $S/enforce), enforce=$(cat $S/enforce); setenforce 1: $(setenforce 1 2>&1 && echo ACCEPTED), SELinux $(getenforce)"
+try var2-enforcing-again insmod /var/tmp/ipe/mt_var2.ko
+# 4. secure_mode_policyload on: no setenforce, load_policy or setsebool until the next boot.
+echo "ATOS-IPE root: setsebool secure_mode_policyload on: $(setsebool secure_mode_policyload on 2>&1 && echo ACCEPTED), now $(getsebool secure_mode_policyload)"
+echo "ATOS-IPE root, secure_mode_policyload: setenforce 0: $(setenforce 0 2>&1 && echo ACCEPTED), SELinux $(getenforce)"
+echo "ATOS-IPE root, secure_mode_policyload: write 0 to enforce: $(put 0 $S/enforce)"
+# A helper the kernel starts itself (core_pattern pipe): it runs in kernel_t, which has mac_admin.
+# It replaces the active policy with allow_all 9.0.0, signed with the TEST db key (in .platform).
+printf "#!/bin/sh\n{ id -Z; dd if=/run/ipe/high.p7b of=$S/new_policy bs=16M iflag=fullblock status=none && echo 1 > $S/policies/allow_all/active && echo replaced; } > /run/ipe/helper.out 2>&1\n" > helper.sh
+chmod +x helper.sh
+old=$(cat /proc/sys/kernel/core_pattern)
+echo "ATOS-IPE root, secure_mode_policyload: core_pattern=|/run/ipe/helper.sh: $(put "|/run/ipe/helper.sh" /proc/sys/kernel/core_pattern)"
+(ulimit -c unlimited; sh -c "kill -SEGV \$\$") 2>/dev/null
+for i in $(seq 30); do [ -s helper.out ] && break; sleep 1; done
+echo "$old" > /proc/sys/kernel/core_pattern
+echo "ATOS-IPE helper: $(tr "\n" " " < helper.out 2>&1)"
+echo "ATOS-IPE policies now: $(ls $S/policies | tr "\n" " "), allow_all active=$(cat $S/policies/allow_all/active 2>&1), atos_kmodules active=$(cat $S/policies/atos_kmodules/active)"
+try etc-after-helper insmod /etc/atos-ipe/mt_etc.ko
 t0=$(date +%s%N); try usr3 insmod /usr/lib/modules/$k/extra/mt_usr3.ko; t1=$(date +%s%N)
-echo "ATOS-IPE insmod mt_usr3 under the allow-all policy: $(( (t1 - t0) / 1000000 )) ms"
-journalctl -b --no-pager -o cat | grep -aE "atos-ipe:|ipe_op=|lsm=ipe|AUDIT_IPE|type=14(04|20|21|22)" | sed "s/^/ATOS-IPE log: /" | head -60'
+echo "ATOS-IPE insmod mt_usr3 under the allow-all policy: $(( (t1 - t0) / 1000000 )) ms"'
+
+# Guest script, run by sealed.sh's report unit (initrc_t): boot facts, then ROOT as unconfined_t.
+# The test files travel inside the script (xz, base64), as the systemd credential carries it.
+action() {
+  # shellcheck disable=SC2016 # expands in the guest
+  printf '%s\n' 'k=$(uname -r)
+echo "ATOS-IPE kernel: $k, lockdown: $(cat /sys/kernel/security/lockdown), lsm: $(cat /sys/kernel/security/lsm)"
+echo "ATOS-IPE config: $(grep -E "^CONFIG_(SECURITY_IPE|IPE_[A-Z_]+|FS_VERITY[A-Z_]*|DM_VERITY|DM_VERITY_VERIFY_ROOTHASH_SIG|SECURITY_SELINUX_DEVELOP)=" /usr/lib/modules/$k/config | tr "\n" " ")"
+journalctl -b --no-pager -o cat -u atos-ipe-policy.service | sed "s/^/ATOS-IPE initrd unit: /"
+echo "ATOS-IPE modules loaded at boot: $(lsmod | tail -n +2 | wc -l); systemd-modules-load: $(systemctl show -P Result systemd-modules-load.service)"
+mkdir -p /run/ipe && cd /run/ipe'
+  printf 'echo %s | base64 -d | tar -xJ\n' "$(tar -C "$M/guest" -cJ . | base64 -w0)"
+  printf 'echo %s | base64 -d > /run/ipe/root.sh\n' "$(printf '%s\n' "$ROOT" | base64 -w0)"
+  # shellcheck disable=SC2016 # expands in the guest
+  printf '%s\n' 'systemd-run --wait --pipe --quiet -p SELinuxContext=unconfined_u:unconfined_r:unconfined_t:s0 /bin/sh /run/ipe/root.sh
+journalctl -b --no-pager -o cat | grep -aE "atos-ipe:|atos-ipe-policy|ipe_op=|lsm=ipe|type=14(04|20|21|22)|avc: .*(mac_admin|setenforce|module_load|setbool)" | grep -v "sh\[" | sed "s/^/ATOS-IPE log: /" | head -80'
 }
 
 # The report runs the action with `sh -x`: its trace lines (`sh[pid]: + ...`) are left out.
