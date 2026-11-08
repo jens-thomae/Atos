@@ -41,7 +41,7 @@ tools() { sudo podman run --rm -v "$M:/m:z" -v "$REPO:/repo:ro" "$TOOLS" "$@"; }
 #   stranger    sign-file, stranger key (control: a key in no keyring)
 #   db          sign-file, committed TEST db key (the cert that signs our UKI; in db on B1, MOK on B2)
 #   db_tamper   as db, then one byte of the module changed (control: the signature covers the code)
-#   db_attrs    TEST db key, PKCS#7 with signed attributes (contentType, signingTime, messageDigest),
+#   db_attrs    TEST db key, PKCS#7 with signed attributes (contentType, messageDigest),
 #               as Authenticode signatures have them
 #   ca          sign-file, ca key (a CA cert without digitalSignature signs directly)
 #   leaf_cs     leaf-cs key, its cert inside the PKCS#7 (chain to ca)
@@ -210,9 +210,7 @@ step_b2() {
   cp /usr/share/AAVMF/AAVMF_VARS.ms.fd "$B2VARS"
   sudo podman run --rm -v "$WORK:/w:z" -v "$REPO:/repo:ro" "$TOOLS" sh -c "
     virt-fw-vars --inplace /w/$(basename "$B2VARS") --add-mok $guid /repo/components/c1-base/secureboot-test/db.crt \
-      --add-mok $guid /w/modtrust/keys/mok.crt --set-true MokListTrusted 2>&1 | grep -v '^INFO' || true
-    virt-fw-vars -i /w/$(basename "$B2VARS") -p 2>/dev/null | grep -E '^name=(MokList|MokListTrusted|db|KEK) ' -A20 | grep -E '^name=|subject|CN=' | cut -c1-120" \
-    | tee "$OUT/modtrust-b2-vars.txt"
+      --add-mok $guid /w/modtrust/keys/mok.crt --set-true MokListTrusted 2>&1 | grep -v '^INFO' || true"
   ACTION=$(action) VARS=$B2VARS boot "$B2DISK" "$OUT/modtrust-b2.log" >/dev/null
   { summary "$OUT/modtrust-b2.log"; fw_db "$B2VARS"; } | tee "$OUT/modtrust-b2.txt"
 }
