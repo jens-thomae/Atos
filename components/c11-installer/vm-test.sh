@@ -68,7 +68,9 @@ ImportCredential=atos.*
 StandardOutput=tty
 StandardError=tty
 TTYPath=/dev/'"$SERIAL"'
-ExecStart=/bin/sh -c "systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; systemctl poweroff --no-block"'
+# Through cat, so systemd tools see no terminal (no size queries or resets); sleep 1 lets the
+# serial port drain before poweroff (a report once lost its last lines).
+ExecStart=/bin/sh -c "{ systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; } 2>&1 | cat; sleep 1; systemctl poweroff --no-block"'
 
 # The unattended install: what a user does on tty1, minus the questions.
 INSTALL_UNIT="[Unit]
