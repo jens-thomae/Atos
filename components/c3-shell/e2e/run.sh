@@ -5,7 +5,8 @@
 # windows on the AT-SPI bus, that pressing the unfocused one through AT-SPI activates it, opens
 # and closes the launcher five times with `atos-shell --launcher` (the command atos-comp's launcher
 # shortcut runs) and logs each opening time, starts an app from the launcher through AT-SPI, and
-# measures the shell's idle RSS and CPU with the budgets harness (docs/budgets.md).
+# measures the shell's idle RSS and CPU with the budgets harness (docs/budgets.md) and keeps its
+# exit code in budgets.exit (run.sh itself does not fail on a breach; check.sh does).
 # Needs sway, grim, weston (its demo clients), dbus-run-session, busctl, python3-gi + gir1.2-atspi-2.0.
 # Usage: run.sh <atos-shell> <atos-comp> <budgets> <out dir>
 #   SHELL_RENDERER   sway renderer: pixman (default) or gles2 on /dev/dri/renderD128
@@ -71,7 +72,7 @@ if [ "${1:-}" = inner ]; then
   kill $SH; wait $SH 2>/dev/null || true
   # Idle RSS and CPU of a fresh shell process with the two windows in its dock.
   "$BUDGETS" "$SHELL_BIN" --cpu-window "$WINDOW" --json "$OUT/budgets.json" >"$OUT/budgets.md" 2>"$OUT/budgets.err" \
-    || echo "budgets harness exit $?" >>"$OUT/budgets.err"
+    && echo 0 >"$OUT/budgets.exit" || echo $? >"$OUT/budgets.exit"  # 1 = breach, 2 = no measurement; check.sh decides
   touch "$OUT/inner-done"
   exit 0
 fi
