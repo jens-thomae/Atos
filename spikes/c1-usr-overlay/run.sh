@@ -80,7 +80,7 @@ rm -rf /etc/atos-usro-etc /var/atos-usro-var'
 TRANSIENT_ACTION='P=ATOS-REPORT-USRO
 mem() { awk "/^(MemAvailable|Shmem):/{printf \"%s%s \",\$1,\$2}" /proc/meminfo; }
 echo "$P /usr before: $(findmnt -no TARGET,FSTYPE /usr || echo "no separate mount"); mem: $(mem)"
-if out=$(dnf -y -q --transient install strace 2>&1); then echo "$P dnf --transient install strace: OK"; else echo "$P dnf --transient install strace: FAILED: $(printf "%s" "$out" | tail -n 3 | tr "\n" " ")"; fi
+if out=$(dnf -y -q install --transient strace 2>&1); then echo "$P dnf --transient install strace: OK"; else echo "$P dnf --transient install strace: FAILED: $(printf "%s" "$out" | tail -n 3 | tr "\n" " ")"; fi
 echo "$P /usr after: $(findmnt -no TARGET,FSTYPE,OPTIONS /usr | cut -c1-200); mem: $(mem)"
 echo "$P strace: $(strace -V 2>&1 | head -n 1)"'
 # shellcheck disable=SC2016
