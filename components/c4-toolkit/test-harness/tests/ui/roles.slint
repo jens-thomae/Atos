@@ -1,5 +1,5 @@
 import "../../fonts/NotoSans-Regular.ttf";
-import { StandardTableView } from "std-widgets.slint";
+import { StandardTableView, StandardListView } from "std-widgets.slint";
 
 export component RolesTable inherits Window {
     width: 480px;
@@ -39,4 +39,22 @@ export component RolesDialog inherits Window {
         accessible-label: "Properties";
         Text { text: "Size: 2 KB"; }
     }
+}
+
+// 1000 items, only a few instantiated: every one must still report its place and the total.
+export component RolesList inherits Window {
+    // root is the window
+    width: 200px;
+    height: 100px;
+    default-font-family: "Noto Sans";
+    in property <[StandardListViewItem]> items;
+    StandardListView { model: root.items; }
+}
+
+export component RolesBigTable inherits Window {
+    width: 300px;
+    height: 150px;
+    default-font-family: "Noto Sans";
+    in property <[[StandardListViewItem]]> data;
+    StandardTableView { columns: [{ title: "N" }]; rows: root.data; }
 }
