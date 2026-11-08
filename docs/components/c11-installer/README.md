@@ -30,6 +30,10 @@ The image's trust policy rejects local `containers-storage` images (#150, [trust
 
 The installed system gets **no** `/etc/containers/policy.json`, so the image's `/usr/share/containers/policy.json` applies from the first boot. `bootc install` deploys the image's own `/etc`, not the container's; `atos-install` checks this after the install and fails if the file is there. The #100 dev-image spike (`spikes/c1-dev-image/run.sh`) uses the same file for its `bootc install`.
 
+**Results** (`c11-installer.yml`, KVM, 8 November 2026): with the published `c1-base:latest` the install took 105 s and both boots passed (Secure Boot on, sealed to PCR 7, TPM unlock). With a payload built from #150's branch (`containers-storage` → `reject` in the image policy; run by hand with the `c1-base-ref` input), 110 s, same boots. Some runs of both stopped at `no space left on device` in the live system's `/var/tmp` while bootc copied the image, after the policy had accepted it (#180).
+
+To test an unpublished c1-base: run the workflow by hand with `c1-base-ref` set to a branch, tag or commit. It builds that ref rootless as `c1-base.yml` does (a rootful build's UKI digest did not match its image) and checks the seal before building the ISO.
+
 ## Disk layout and unlock
 
 GPT with two partitions:
