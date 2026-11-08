@@ -57,13 +57,15 @@ jobs:
           TOKEN: ${{ github.token }}
           REF: ${{ inputs.c1-base-ref }}
         run: |
-          echo "$TOKEN" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
           if [ -z "$REF" ]; then
+            echo "$TOKEN" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
             sudo podman pull -q "$PAYLOAD"
+            sudo podman logout ghcr.io
           else
             # Built rootless exactly as c1-base.yml's pull request builds (a rootful build's UKI
             # composefs digest did not match its image), with their layer cache (read only). Tagged
-            # as the published image, so the installed system tracks the same reference.
+            # as the published image, so the installed system tracks the same reference. No sudo
+            # podman login here: it leaves root-owned files in the rootless run directory.
             echo "$TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
             podman build --pull=missing --cache-from ghcr.io/jens-thomae/atos/c1-base-cache --cache-ttl 168h \
               --build-context repo=payload-src -t "$PAYLOAD" payload-src/components/c1-base
@@ -74,7 +76,6 @@ jobs:
             podman rmi -q "$PAYLOAD"
             echo "Payload built from \`$REF\` ($(git -C payload-src rev-parse HEAD))" >> "$GITHUB_STEP_SUMMARY"
           fi
-          sudo podman logout ghcr.io
       - name: Build the ISO
         run: PAYLOAD="$PAYLOAD" OUTDIR="$HOME/c11" components/c11-installer/build-iso.sh
       - name: Check the ISO
