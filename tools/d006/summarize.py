@@ -5,8 +5,9 @@ import glob, json, os, re, statistics, sys
 
 root = sys.argv[1]
 LABELS = {"iced": "libcosmic default (tiny-skia)", "iced-wgpu": "libcosmic `wgpu`",
-          "slint": "Slint default (femtovg, GL)", "slint-sw": "Slint software renderer"}
-# Older results directories (#12) have only iced and slint.
+          "slint": "Slint default (femtovg, GL)", "slint-sw": "Slint software renderer",
+          "slint-fork": "Slint fork (GL), tree off", "slint-fork-a11y": "Slint fork (GL), tree on"}
+# Older results directories (#12) have only iced and slint; those before #97 have no fork variants.
 APPS = [(k, t) for k, t in LABELS.items() if glob.glob(f"{root}/m1-m4/{k}-small-*.rc")]
 SHELL_SHARE_MB, SHELL_N = 300, 1  # D-006 §4.1 G5: owner-confirmed share (spec §5 D-006), N = 1 process
 

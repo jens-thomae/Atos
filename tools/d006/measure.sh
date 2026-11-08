@@ -2,16 +2,20 @@
 # D-006 measurements M1–M7 (docs/decisions/D-006-prototype-brief.md §7) for both Files prototypes.
 # Needs: sway wtype wl-clipboard grim dbus-run-session at-spi2-core python3-gi gir1.2-atspi-2.0 eglinfo
 # Usage: measure.sh <bin-dir> <out-dir>
-#   <bin-dir> holds budgets, d006-iced, d006-iced-wgpu (libcosmic --features wgpu) and d006-slint.
-#   Four variants: iced, iced-wgpu, slint (femtovg on GL) and slint-sw (Slint software renderer,
-#   SLINT_BACKEND=winit-software).
+#   <bin-dir> holds budgets, d006-iced, d006-iced-wgpu (libcosmic --features wgpu), d006-slint and
+#   d006-slint-fork (the same spike built against our Slint fork, third_party/slint).
+#   Six variants: iced, iced-wgpu, slint (femtovg on GL), slint-sw (Slint software renderer,
+#   SLINT_BACKEND=winit-software), slint-fork (fork, GL) and slint-fork-a11y (fork, GL, accessibility
+#   tree on for M1–M5: AT-SPI announces a screen reader before launch, so AccessKit builds the tree;
+#   A8 in D-011 §5.2, card #97). Every other variant runs M1–M5 with the tree off.
 #   D006_RUNS         runs per number (default 5, the brief's minimum)
 #   D006_CPU_WINDOW   idle-CPU window in seconds, or `full` (5 min, §7; default)
 #   D006_RENDERER     sway's renderer: `pixman` (software, default) or `gles2` on the GPU's render node
 #                     (D006_RENDER_DEVICE, default /dev/dri/renderD128). Option A of D-006 §3.3.
 #   D006_COMPOSITOR   `existing`: do not start sway; use the running compositor (WAYLAND_DISPLAY,
 #                     SWAYSOCK). Option B: tools/d006/sway-drm.conf.
-#   D006_A11Y_VARIANTS  variants that get M6/M7 (default `iced slint`: the tree is renderer-independent)
+#   D006_A11Y_VARIANTS  variants that get M6/M7 (default `iced slint slint-fork`: the tree is
+#                       renderer-independent)
 set -euo pipefail
 
 # Own session bus: fresh AT-SPI bus, nothing leaks into or out of the host session.
@@ -22,7 +26,7 @@ BIN=$(realpath "$1"); BUDGETS="$BIN/budgets"
 mkdir -p "$2"; OUT=$(realpath "$2")
 RUNS=${D006_RUNS:-5}; WINDOW=${D006_CPU_WINDOW:-full}
 RENDERER=${D006_RENDERER:-pixman}; COMPOSITOR=${D006_COMPOSITOR:-own}
-A11Y=${D006_A11Y_VARIANTS:-iced slint}
+A11Y=${D006_A11Y_VARIANTS:-iced slint slint-fork}
 WORK=$(mktemp -d)
 # Own compositor: private runtime dir. Existing compositor: keep the real one (its socket lives there).
 [ "$COMPOSITOR" = existing ] || { export XDG_RUNTIME_DIR="$WORK/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"; }
@@ -35,7 +39,18 @@ variant iced "" d006-iced
 variant iced-wgpu "" d006-iced-wgpu
 variant slint "" d006-slint
 variant slint-sw "SLINT_BACKEND=winit-software" d006-slint
+variant slint-fork "" d006-slint-fork
+variant slint-fork-a11y "" d006-slint-fork
 APPS="iced:$WORK/v/iced iced-wgpu:$WORK/v/iced-wgpu slint:$WORK/v/slint slint-sw:$WORK/v/slint-sw"
+APPS="$APPS slint-fork:$WORK/v/slint-fork slint-fork-a11y:$WORK/v/slint-fork-a11y"
+# Accessibility tree for variant $1: on only for *-a11y (M1–M5) and for M6/M7. AccessKit follows
+# org.a11y.Status IsEnabled (accesskit_unix context.rs); ScreenReaderEnabled is what a screen reader sets.
+tree() {
+  local on=false; case "$1" in *-a11y|on) on=true ;; esac
+  for p in IsEnabled ScreenReaderEnabled; do
+    busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status "$p" b "$on"
+  done
+}
 
 # --- environment -------------------------------------------------------------
 {
@@ -50,7 +65,7 @@ APPS="iced:$WORK/v/iced iced-wgpu:$WORK/v/iced-wgpu slint:$WORK/v/slint slint-sw
   echo "mesa: $(dpkg -s libgl1-mesa-dri 2>/dev/null | sed -n 's/^Version: //p')"
   echo "runs: $RUNS  cpu_window: $WINDOW"
   echo "compositor: $COMPOSITOR  sway_renderer: $([ "$COMPOSITOR" = existing ] && echo '(existing compositor)' || echo "$RENDERER")"
-  for b in d006-iced d006-iced-wgpu d006-slint; do echo "$b: $(sha256sum "$BIN/$b" | cut -c1-16)"; done
+  for b in d006-iced d006-iced-wgpu d006-slint d006-slint-fork; do echo "$b: $(sha256sum "$BIN/$b" | cut -c1-16)"; done
 } >"$OUT/environment.txt"
 
 # --- compositor: own sway (headless; pixman or gles2) or the running one ------------
@@ -92,6 +107,7 @@ FX="$WORK/fx"; sh "$HERE/../../spikes/d006-fixture/make-fixture.sh" "$FX"
 mkdir -p "$OUT/m1-m4"
 for a in $APPS; do
   n=${a%%:*}; b=${a#*:}
+  tree "$n"
   for f in small 10k; do printf '#!/bin/sh\nexec %s %s\n' "$b" "$FX/$f" >"$WORK/$n-$f"; chmod +x "$WORK/$n-$f"; done
   for f in small 10k; do
     # M3 and M4 come from the `small` runs, which use the full window; 10k runs use 10 s.
@@ -111,6 +127,7 @@ mkdir -p "$OUT/m5"
 HZ=$(output_info | sed 's/.*@\([0-9]*\)Hz.*/\1/')
 for a in $APPS; do
   n=${a%%:*}; b=${a#*:}
+  tree "$n"
   for i in $(seq "$RUNS"); do
     rc=0
     D006_AUTOSCROLL=1 WAYLAND_DEBUG=client timeout 60 "$b" "$FX/10k" >"$OUT/m5/$n-$i.log" 2>&1 || rc=$?
@@ -129,6 +146,7 @@ done
 # the page cache or the shader cache before G1's first launch (§4.1). Same compositor, so the proof holds.
 for a in $APPS; do
   n=${a%%:*}; b=${a#*:}
+  tree "$n"
   D006_RENDERER_PROBE=1 "$b" "$FX/small" >/dev/null 2>"$OUT/renderer/$n.txt" & pid=$!
   for _ in $(seq 200); do grep -q '^D006_RENDERER:' "$OUT/renderer/$n.txt" && break; kill -0 $pid 2>/dev/null || break; sleep 0.1; done
   kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true
@@ -139,7 +157,7 @@ done
 
 # --- M6, M7: accessibility and keyboard, with the AT-SPI bus switched on -------------
 # AccessKit registers only when a screen reader is announced (see the iced README).
-busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status ScreenReaderEnabled b true
+tree on
 mkdir -p "$OUT/m6" "$OUT/m7"
 for a in $APPS; do
   n=${a%%:*}; b=${a#*:}
