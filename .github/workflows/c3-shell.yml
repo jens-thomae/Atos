@@ -185,6 +185,7 @@ jobs:
         shell: bash
         env:
           SHELL_OPEN_MS: 100
+          SHELL_GATE: 1  # a CPU or cold-start breach fails the job (#125); hosted stays advisory
         run: |
           if command -v weston-flower >/dev/null; then
             bundle/check.sh results | tee -a "$GITHUB_STEP_SUMMARY"

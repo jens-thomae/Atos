@@ -3,6 +3,8 @@
 # Acceptance checks of #63, #64 and #65 on one run.sh result dir. Usage: check.sh <out dir>
 #   SHELL_RSS_MB      the shell's share of idle memory (D-006: 300 MB)
 #   SHELL_CHECK_TREE  0 skips the checks that need client windows (weston's demo clients)
+#   SHELL_GATE        1 (the NUC job) fails on any budgets-harness breach: idle CPU and cold start as well
+#                     as RSS. Unset (hosted job): CPU and cold start are only reported as warnings.
 #   SHELL_OPEN_MS     if set, every launcher opening, the cold first one included, must be at most
 #                     this (§7 popover: 100 ms), timed from the start of `atos-shell --launcher`
 set -euo pipefail
@@ -47,8 +49,18 @@ if [ -n "${SHELL_OPEN_MS:-}" ]; then
 fi
 # The shell's portal backend answers with the light colour scheme (2) by default.
 grep -q "v u 2" "$R/portal-color-scheme.txt" || fail "portal Settings backend did not answer color-scheme 2 ($(cat "$R/portal-color-scheme.txt"))"
+# The harness' own verdict (idle CPU, cold start; RSS against §7's 800 MB). 2 = it could not
+# measure, always an error. 1 = a §7 breach: an error on the NUC, a warning on hosted runners
+# (llvmpipe, shared CPUs, short CPU window: indicative only).
+brc=$(cat "$R/budgets.exit" 2>/dev/null) || fail "budgets.exit missing: run.sh did not reach the budgets harness"
+[ "$brc" != 2 ] || fail "budgets harness could not measure ($(cat "$R/budgets.err"))"
 # Idle memory within the shell's share.
 rss=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(v for k,v in d.items() if "rss" in k))' "$R/budgets.json")
 python3 -c "import sys; sys.exit(0 if $rss <= ${SHELL_RSS_MB:-300} else 1)" || fail "idle RSS $rss MB over the ${SHELL_RSS_MB:-300} MB shell share"
 cat "$R/budgets.md"
+if [ "$brc" != 0 ]; then
+  msg="budget breach (cold start $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["cold_start_ms"])' "$R/budgets.json") ms, idle CPU $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["idle_cpu_percent"])' "$R/budgets.json") %), see budgets.md"
+  [ "${SHELL_GATE:-0}" = 1 ] && fail "$msg"
+  echo "::warning::$msg (advisory on this runner)"
+fi
 echo "checks passed (idle RSS $rss MB)"
