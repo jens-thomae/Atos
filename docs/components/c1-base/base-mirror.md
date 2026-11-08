@@ -44,6 +44,6 @@ To find which base a published image was built from: its `org.atos.source` label
 
 The spec does not yet define how long a published image is supported, so for now **every mirrored version is kept**. About 1 GB compressed per bump, shared layers counted once.
 
-## Owner step: public pulls
+## Public pulls
 
-A package first pushed from Actions starts private. While it is private, jobs that log in with their `GITHUB_TOKEN` should still read it (a package pushed by a workflow is linked to its repository), but local builds and the c11-installer build, which logs out of ghcr.io before building, need it public. After the first mirror run: GitHub → Packages → `atos/fedora-bootc` → Package settings → Change visibility → Public, as for `atos/c1-base` ([README](README.md)). This cannot be undone.
+The package was created by the first mirror run (2026-11-08, [run 42493833871](https://github.com/jens-thomae/Atos/actions/runs/42493833871)) and is public: an anonymous pull of the pinned digest succeeds, so local builds and the c11-installer build (which logs out of ghcr.io before building) need no account (D-005).
