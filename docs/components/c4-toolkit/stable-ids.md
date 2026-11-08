@@ -1,6 +1,6 @@
 # Stable element IDs (A7)
 
-Card: #96. Decision: D-006 §3.4 (A7), D-011 A7. Patch: `0005-a11y-derive-row-ids-…` in the [Slint queue](README.md#patch-queue).
+Card: #96. Decision: D-006 §3.4 (A7), D-011 A7. Patch: `0006-a11y-derive-row-ids-…` in the [Slint queue](README.md#patch-queue).
 
 ## Does AT-SPI get it? Yes, no fix needed
 

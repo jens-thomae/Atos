@@ -14,10 +14,10 @@ StandardListView items, StandardTableView rows and column headers get <id>/item-
  6 files changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/internal/backends/winit/accesskit.rs b/internal/backends/winit/accesskit.rs
-index 0e61e3d..25ea8ef 100644
+index b54c4d9..d8d604c 100644
 --- a/internal/backends/winit/accesskit.rs
 +++ b/internal/backends/winit/accesskit.rs
-@@ -826,7 +826,11 @@ fn build_node_without_children(
+@@ -839,7 +839,11 @@ fn build_node_without_children(
              node.set_description(description.to_string());
          }
  

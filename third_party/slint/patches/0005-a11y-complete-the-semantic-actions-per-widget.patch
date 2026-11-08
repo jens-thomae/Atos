@@ -1,0 +1,673 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Atos <atos@localhost>
+Date: Sun, 8 Nov 2026 16:19:16 +0100
+Subject: [PATCH] a11y: complete the semantic actions per widget
+
+ReplaceSelectedText: new accessible-action-replace-selected-text callback, TextInput.replace-selected-text(), wired in LineEdit and TextEdit of the fluent, cosmic, cupertino and material styles.
+ScrollIntoView and ShowContextMenu: offered on items inside a Flickable or a ContextMenuArea, handled by the winit backend through helpers in core.
+ComboBox answers Click like Expand. Switch and RadioButton can take focus.
+The testing backend gets accessible_actions() and invoke helpers.
+---
+ internal/backends/testing/search_api.rs       | 65 +++++++++++++++++++
+ internal/backends/winit/accesskit.rs          | 27 ++++++++
+ internal/compiler/builtin_elements.rs         |  3 +
+ internal/compiler/expression_tree.rs          |  6 +-
+ internal/compiler/generator/cpp.rs            | 12 ++++
+ internal/compiler/generator/rust.rs           | 15 +++++
+ .../llr/optim_passes/inline_expressions.rs    |  2 +-
+ .../compiler/passes/lower_accessibility.rs    | 11 ++++
+ internal/compiler/typeregister.rs             |  1 +
+ .../widgets/common/lineedit-base.slint        |  3 +
+ .../widgets/common/textedit-base.slint        |  3 +
+ .../compiler/widgets/cosmic/combobox.slint    |  1 +
+ .../compiler/widgets/cosmic/lineedit.slint    |  1 +
+ .../compiler/widgets/cosmic/textedit.slint    |  1 +
+ .../compiler/widgets/cupertino/combobox.slint |  1 +
+ .../compiler/widgets/cupertino/lineedit.slint |  1 +
+ .../compiler/widgets/cupertino/textedit.slint |  1 +
+ .../compiler/widgets/fluent/combobox.slint    |  1 +
+ .../compiler/widgets/fluent/lineedit.slint    |  1 +
+ .../compiler/widgets/fluent/textedit.slint    |  1 +
+ .../compiler/widgets/material/combobox.slint  |  1 +
+ .../compiler/widgets/material/lineedit.slint  |  1 +
+ .../compiler/widgets/material/textedit.slint  |  1 +
+ internal/core/accessibility.rs                | 46 ++++++++++++-
+ internal/core/item_tree.rs                    |  3 +-
+ internal/core/items/text.rs                   | 34 ++++++++++
+ internal/interpreter/eval.rs                  | 20 ++++++
+ 27 files changed, 257 insertions(+), 6 deletions(-)
+
+diff --git a/internal/backends/testing/search_api.rs b/internal/backends/testing/search_api.rs
+index 4a2f6e0..ad0f029 100644
+--- a/internal/backends/testing/search_api.rs
++++ b/internal/backends/testing/search_api.rs
+@@ -677,6 +677,71 @@ pub fn set_accessible_selection_offsets(&self, anchor: i32, focus: i32) {
+         }
+     }
+ 
++    /// Replaces the selected text, by invoking the element's `accessible-action-replace-selected-text`
++    /// callback. Note that you can only do this if that callback is declared in your Slint code.
++    pub fn replace_accessible_selected_text(&self, text: impl Into<SharedString>) {
++        if self.element_index != 0 {
++            return;
++        }
++        if let Some(item) = self.item.upgrade() {
++            item.accessible_action(&AccessibilityAction::ReplaceSelectedText(text.into()))
++        }
++    }
++
++    /// The accessibility actions the element supports, as AccessKit would be told.
++    /// `Click`, `Focus` and so on are reported by name.
++    pub fn accessible_actions(&self) -> Vec<&'static str> {
++        use i_slint_core::accessibility::{
++            SupportedAccessibilityAction as S, accessible_has_context_menu,
++            accessible_scroll_target,
++        };
++        if self.element_index != 0 {
++            return Default::default();
++        }
++        let Some(item) = self.item.upgrade() else { return Default::default() };
++        let supported = item.supported_accessibility_actions();
++        let mut actions = Vec::new();
++        for (flag, name) in [
++            (S::Default, "Click"),
++            (S::Decrement, "Decrement"),
++            (S::Increment, "Increment"),
++            (S::SetValue, "SetValue"),
++            (S::ReplaceSelectedText, "ReplaceSelectedText"),
++            (S::Expand, "Expand"),
++            (S::SetSelectionOffsets, "SetTextSelection"),
++        ] {
++            if supported.contains(flag) {
++                actions.push(name);
++            }
++        }
++        if accessible_scroll_target(&item) {
++            actions.push("ScrollIntoView");
++        }
++        if accessible_has_context_menu(&item) {
++            actions.push("ShowContextMenu");
++        }
++        actions
++    }
++
++    /// Opens the context menu around the element, as the `ShowContextMenu` action does.
++    /// Returns whether there is one.
++    pub fn invoke_accessible_show_context_menu(&self) -> bool {
++        self.element_index == 0
++            && self.item.upgrade().is_some_and(|item| {
++                i_slint_core::accessibility::accessible_show_context_menu(&item)
++            })
++    }
++
++    /// Scrolls the element into view, as the `ScrollIntoView` action does.
++    pub fn invoke_accessible_scroll_into_view(&self) {
++        if self.element_index != 0 {
++            return;
++        }
++        if let Some(item) = self.item.upgrade() {
++            item.try_scroll_into_visible()
++        }
++    }
++
+     /// Returns the value of the element's `accessible-value-maximum` property, if present.
+     pub fn accessible_value_maximum(&self) -> Option<f32> {
+         if self.element_index != 0 {
+diff --git a/internal/backends/winit/accesskit.rs b/internal/backends/winit/accesskit.rs
+index 0e61e3d..b54c4d9 100644
+--- a/internal/backends/winit/accesskit.rs
++++ b/internal/backends/winit/accesskit.rs
+@@ -12,6 +12,7 @@
+ use i_slint_core::SharedString;
+ use i_slint_core::accessibility::{
+     AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
++    accessible_has_context_menu, accessible_scroll_target, accessible_show_context_menu,
+     find_exposed_text_input, nearest_accessible_item,
+ };
+ use i_slint_core::api::Window;
+@@ -171,6 +172,18 @@ fn handle_request(&self, request: ActionRequest) -> Option<DeferredAccessKitActi
+                 _ => return None,
+             },
+             Action::Expand => AccessibilityAction::Expand,
++            Action::ScrollIntoView => {
++                return self
++                    .nodes
++                    .item_rc_for_node_id(request.target_node)
++                    .map(DeferredAccessKitAction::ScrollIntoView);
++            }
++            Action::ShowContextMenu => {
++                return self
++                    .nodes
++                    .item_rc_for_node_id(request.target_node)
++                    .map(DeferredAccessKitAction::ShowContextMenu);
++            }
+             Action::SetTextSelection => {
+                 let Some(accesskit::ActionData::SetTextSelection(sel)) = request.data.as_ref()
+                 else {
+@@ -852,6 +865,8 @@ fn build_node_without_children(
+                 | Role::SearchInput
+                 | Role::Slider
+                 | Role::SpinButton
++                | Role::Switch
++                | Role::RadioButton
+                 | Role::Tab
+                 | Role::TextInput
+         ) {
+@@ -965,6 +980,12 @@ fn build_node_without_children(
+         if supported.contains(SupportedAccessibilityAction::Expand) {
+             node.add_action(accesskit::Action::Expand);
+         }
++        if accessible_scroll_target(item) {
++            node.add_action(accesskit::Action::ScrollIntoView);
++        }
++        if accessible_has_context_menu(item) {
++            node.add_action(accesskit::Action::ShowContextMenu);
++        }
+ 
+         node
+     }
+@@ -1023,6 +1044,8 @@ fn from(value: accesskit_winit::Event) -> Self {
+ pub enum DeferredAccessKitAction {
+     SetFocus(ItemRc),
+     InvokeAccessibleAction(ItemRc, AccessibilityAction),
++    ScrollIntoView(ItemRc),
++    ShowContextMenu(ItemRc),
+ }
+ 
+ impl DeferredAccessKitAction {
+@@ -1035,6 +1058,10 @@ pub fn invoke(&self, window: &Window) {
+             DeferredAccessKitAction::InvokeAccessibleAction(item, accessibility_action) => {
+                 item.accessible_action(accessibility_action);
+             }
++            DeferredAccessKitAction::ScrollIntoView(item) => item.try_scroll_into_visible(),
++            DeferredAccessKitAction::ShowContextMenu(item) => {
++                accessible_show_context_menu(item);
++            }
+         }
+     }
+ }
+diff --git a/internal/compiler/builtin_elements.rs b/internal/compiler/builtin_elements.rs
+index 7704b98..b913fec 100644
+--- a/internal/compiler/builtin_elements.rs
++++ b/internal/compiler/builtin_elements.rs
+@@ -2330,6 +2330,9 @@ macro_rules! element {
+         /// so `focus` may precede `anchor` to select backwards.
+         /// Pass the same value for both to place the text cursor at that offset without selecting anything.
+         function set-selection-offsets(anchor: int, focus: int) { BuiltinFunction.SetSelectionOffsets }
++        /// Replaces the selected text with `text`, or inserts it at the cursor if nothing is selected.
++        /// An empty `text` deletes the selection. Does nothing if `read-only` is set.
++        function replace-selected-text(text: string) { BuiltinFunction.ReplaceSelectedText }
+         /// Selects all text.
+         function select-all() { }
+         /// Clears the selection.
+diff --git a/internal/compiler/expression_tree.rs b/internal/compiler/expression_tree.rs
+index 1b146b1..d40092b 100644
+--- a/internal/compiler/expression_tree.rs
++++ b/internal/compiler/expression_tree.rs
+@@ -67,6 +67,7 @@ pub enum BuiltinFunction {
+     /// The entries argument is an array of MenuEntry
+     ShowPopupMenuInternal,
+     SetSelectionOffsets,
++    ReplaceSelectedText,
+     ItemFontMetrics,
+     /// the "42".to_float()
+     StringToFloat,
+@@ -249,6 +250,7 @@ pub fn ty(&self, function: &BuiltinFunction) -> Arc<Function> {
+     ShowPopupMenu: (Type::ElementReference, Type::ElementReference, typeregister::logical_point_type().into()) -> Type::Void,
+     ShowPopupMenuInternal: (Type::ElementReference, Type::Model, typeregister::logical_point_type().into()) -> Type::Void,
+     SetSelectionOffsets: (Type::ElementReference, Type::Int32, Type::Int32) -> Type::Void,
++    ReplaceSelectedText: (Type::ElementReference, Type::String) -> Type::Void,
+     ItemFontMetrics: (Type::ElementReference) -> typeregister::font_metrics_type(),
+     StringToFloat: (Type::String) -> Type::Float32,
+     StringIsFloat: (Type::String) -> Type::Bool,
+@@ -411,7 +413,7 @@ fn is_const(&self, global_analysis: Option<&crate::passes::GlobalAnalysis>) -> b
+             | BuiltinFunction::ClosePopupWindow
+             | BuiltinFunction::ShowPopupMenu
+             | BuiltinFunction::ShowPopupMenuInternal => false,
+-            BuiltinFunction::SetSelectionOffsets => false,
++            BuiltinFunction::SetSelectionOffsets | BuiltinFunction::ReplaceSelectedText => false,
+             BuiltinFunction::ItemFontMetrics => false, // depends also on Window's font properties
+             BuiltinFunction::StringIsEmpty
+             | BuiltinFunction::StringCharacterCount
+@@ -513,7 +515,7 @@ pub fn is_pure(&self) -> bool {
+             | BuiltinFunction::ClosePopupWindow
+             | BuiltinFunction::ShowPopupMenu
+             | BuiltinFunction::ShowPopupMenuInternal => false,
+-            BuiltinFunction::SetSelectionOffsets => false,
++            BuiltinFunction::SetSelectionOffsets | BuiltinFunction::ReplaceSelectedText => false,
+             BuiltinFunction::ItemFontMetrics => true,
+             BuiltinFunction::StringToFloat
+             | BuiltinFunction::StringIsFloat
+diff --git a/internal/compiler/generator/cpp.rs b/internal/compiler/generator/cpp.rs
+index 5b7191a..ef0c1c0 100644
+--- a/internal/compiler/generator/cpp.rs
++++ b/internal/compiler/generator/cpp.rs
+@@ -5547,6 +5547,18 @@ fn compile_builtin_function_call(
+                 panic!("internal error: invalid args to set-selection-offsets {arguments:?}")
+             }
+         }
++        BuiltinFunction::ReplaceSelectedText => {
++            if let [llr::Expression::PropertyReference(pr), text_expr] = arguments {
++                let window = access_window_field(ctx);
++                let text = compile_expression(text_expr, ctx);
++                item_owner(pr).then(|owner| {
++                    let (item, item_rc) = native_item_from_owner(pr, ctx, owner);
++                    format!("slint_textinput_replace_selected_text(&{item}, &{window}.handle(), &{item_rc}, &{text})")
++                })
++            } else {
++                panic!("internal error: invalid args to replace-selected-text {arguments:?}")
++            }
++        }
+         BuiltinFunction::ItemFontMetrics => {
+             if let [llr::Expression::PropertyReference(pr)] = arguments {
+                 let window = access_window_field(ctx);
+diff --git a/internal/compiler/generator/rust.rs b/internal/compiler/generator/rust.rs
+index 603df1c..c6e2de1 100644
+--- a/internal/compiler/generator/rust.rs
++++ b/internal/compiler/generator/rust.rs
+@@ -4895,6 +4895,21 @@ fn compile_builtin_function_call(
+                 panic!("internal error: invalid args to set-selection-offsets {arguments:?}")
+             }
+         }
++        BuiltinFunction::ReplaceSelectedText => {
++            if let [llr::Expression::PropertyReference(pr), text_expr] = arguments {
++                let window_adapter_tokens = access_window_adapter_field(ctx);
++                let text = compile_expression(text_expr, ctx);
++
++                item_owner(pr).then(|owner| {
++                    let (item, item_rc) = native_item_from_owner(pr, ctx, &owner);
++                    quote!(
++                        #item.replace_selected_text(#window_adapter_tokens, &#item_rc, &#text)
++                    )
++                })
++            } else {
++                panic!("internal error: invalid args to replace-selected-text {arguments:?}")
++            }
++        }
+         BuiltinFunction::ItemFontMetrics => {
+             if let [Expression::PropertyReference(pr)] = arguments {
+                 let window_adapter_tokens = access_window_adapter_field(ctx);
+diff --git a/internal/compiler/llr/optim_passes/inline_expressions.rs b/internal/compiler/llr/optim_passes/inline_expressions.rs
+index 9a92dde..c6e2762 100644
+--- a/internal/compiler/llr/optim_passes/inline_expressions.rs
++++ b/internal/compiler/llr/optim_passes/inline_expressions.rs
+@@ -131,7 +131,7 @@ fn builtin_function_cost(function: &BuiltinFunction) -> isize {
+         | BuiltinFunction::ClosePopupWindow
+         | BuiltinFunction::ShowPopupMenu
+         | BuiltinFunction::ShowPopupMenuInternal => isize::MAX,
+-        BuiltinFunction::SetSelectionOffsets => isize::MAX,
++        BuiltinFunction::SetSelectionOffsets | BuiltinFunction::ReplaceSelectedText => isize::MAX,
+         BuiltinFunction::ItemFontMetrics => PROPERTY_ACCESS_COST,
+         BuiltinFunction::StringToFloat => 50,
+         BuiltinFunction::StringIsFloat => 50,
+diff --git a/internal/compiler/passes/lower_accessibility.rs b/internal/compiler/passes/lower_accessibility.rs
+index fbe9cf7..3e8b597 100644
+--- a/internal/compiler/passes/lower_accessibility.rs
++++ b/internal/compiler/passes/lower_accessibility.rs
+@@ -131,6 +131,17 @@ fn apply_builtin(e: &ElementRc) {
+                 },
+             );
+         }
++        e.borrow_mut().set_binding_if_not_set(
++            "accessible-action-replace-selected-text".into(),
++            || Expression::FunctionCall {
++                function: Callable::Builtin(BuiltinFunction::ReplaceSelectedText),
++                arguments: vec![
++                    Expression::ElementReference(Rc::downgrade(e)),
++                    Expression::FunctionParameterReference { index: 0, ty: Type::String },
++                ],
++                source_location: None,
++            },
++        );
+     } else if bty.name == "Dialog" {
+         e.borrow_mut().set_binding_if_not_set("accessible-role".into(), || {
+             let enum_ty = crate::typeregister::BUILTIN.enums.AccessibleRole.clone();
+diff --git a/internal/compiler/typeregister.rs b/internal/compiler/typeregister.rs
+index cb09f2f..39a19fb 100644
+--- a/internal/compiler/typeregister.rs
++++ b/internal/compiler/typeregister.rs
+@@ -291,6 +291,7 @@ pub fn reserved_accessibility_properties() -> impl Iterator<Item = (&'static str
+         ("accessible-action-set-value", strarg_callback_type()),
+         ("accessible-action-set-selection-offsets", set_selection_offsets_callback_type()),
+         ("accessible-action-expand", noarg_callback_type()),
++        ("accessible-action-replace-selected-text", strarg_callback_type()),
+         ("accessible-item-selectable", Type::Bool),
+         ("accessible-item-selected", Type::Bool),
+         ("accessible-item-index", Type::Int32),
+diff --git a/internal/compiler/widgets/common/lineedit-base.slint b/internal/compiler/widgets/common/lineedit-base.slint
+index 07ec24d..e65b7a2 100644
+--- a/internal/compiler/widgets/common/lineedit-base.slint
++++ b/internal/compiler/widgets/common/lineedit-base.slint
+@@ -44,6 +44,9 @@ export component LineEditBase inherits Rectangle {
+     public function set-selection-offsets(anchor: int, focus: int) {
+         text-input.set-selection-offsets(anchor, focus);
+     }
++    public function replace-selected-text(text: string) {
++        text-input.replace-selected-text(text);
++    }
+ 
+     public function select-all() {
+         text-input.select-all();
+diff --git a/internal/compiler/widgets/common/textedit-base.slint b/internal/compiler/widgets/common/textedit-base.slint
+index e8acddb..6c98ced 100644
+--- a/internal/compiler/widgets/common/textedit-base.slint
++++ b/internal/compiler/widgets/common/textedit-base.slint
+@@ -38,6 +38,9 @@ export component TextEditBase inherits Rectangle {
+     public function set-selection-offsets(anchor: int, focus: int) {
+         text-input.set-selection-offsets(anchor, focus);
+     }
++    public function replace-selected-text(text: string) {
++        text-input.replace-selected-text(text);
++    }
+ 
+     public function select-all() {
+         text-input.select-all();
+diff --git a/internal/compiler/widgets/cosmic/combobox.slint b/internal/compiler/widgets/cosmic/combobox.slint
+index 0533862..14088ee 100644
+--- a/internal/compiler/widgets/cosmic/combobox.slint
++++ b/internal/compiler/widgets/cosmic/combobox.slint
+@@ -30,6 +30,7 @@ export component ComboBox {
+     accessible-expanded: base.popup-has-focus;
+     accessible-value <=> root.current-value;
+     accessible-action-expand => { base.show-popup(); }
++    accessible-action-default => { base.show-popup(); }
+ 
+     states [
+         disabled when !root.enabled : {
+diff --git a/internal/compiler/widgets/cosmic/lineedit.slint b/internal/compiler/widgets/cosmic/lineedit.slint
+index 7072eba..857e663 100644
+--- a/internal/compiler/widgets/cosmic/lineedit.slint
++++ b/internal/compiler/widgets/cosmic/lineedit.slint
+@@ -16,6 +16,7 @@ export component LineEdit {
+     accessible-read-only: root.read-only;
+     accessible-action-set-value(v) => { text = v; edited(v); }
+     accessible-action-set-selection-offsets(anchor, focus) => { base.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { base.replace-selected-text(t); }
+ 
+     vertical-stretch: 0;
+     horizontal-stretch: 1;
+diff --git a/internal/compiler/widgets/cosmic/textedit.slint b/internal/compiler/widgets/cosmic/textedit.slint
+index ed5a149..88ffaea 100644
+--- a/internal/compiler/widgets/cosmic/textedit.slint
++++ b/internal/compiler/widgets/cosmic/textedit.slint
+@@ -39,6 +39,7 @@ export component TextEdit {
+     accessible-read-only: root.read-only;
+     accessible-action-set-value(v) => { text = v; edited(v); }
+     accessible-action-set-selection-offsets(anchor, focus) => { base.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { base.replace-selected-text(t); }
+ 
+     public function set-selection-offsets(anchor: int, focus: int) {
+         base.set-selection-offsets(anchor, focus);
+diff --git a/internal/compiler/widgets/cupertino/combobox.slint b/internal/compiler/widgets/cupertino/combobox.slint
+index 85e2d8b..8f4716b 100644
+--- a/internal/compiler/widgets/cupertino/combobox.slint
++++ b/internal/compiler/widgets/cupertino/combobox.slint
+@@ -31,6 +31,7 @@ export component ComboBox {
+     accessible-expanded: base.popup-has-focus;
+     accessible-value <=> root.current-value;
+     accessible-action-expand => { base.show-popup(); }
++    accessible-action-default => { base.show-popup(); }
+ 
+     states [
+         disabled when !root.enabled : {
+diff --git a/internal/compiler/widgets/cupertino/lineedit.slint b/internal/compiler/widgets/cupertino/lineedit.slint
+index 2c48b4f..01068b6 100644
+--- a/internal/compiler/widgets/cupertino/lineedit.slint
++++ b/internal/compiler/widgets/cupertino/lineedit.slint
+@@ -20,6 +20,7 @@ export component LineEdit {
+         edited(v);
+     }
+     accessible-action-set-selection-offsets(anchor, focus) => { base.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { base.replace-selected-text(t); }
+ 
+     vertical-stretch: 0;
+     horizontal-stretch: 1;
+diff --git a/internal/compiler/widgets/cupertino/textedit.slint b/internal/compiler/widgets/cupertino/textedit.slint
+index d1960e5..26896d6 100644
+--- a/internal/compiler/widgets/cupertino/textedit.slint
++++ b/internal/compiler/widgets/cupertino/textedit.slint
+@@ -93,6 +93,7 @@ export component TextEdit {
+     accessible-read-only: root.read-only;
+     accessible-action-set-value(v) => { text = v; edited(v); }
+     accessible-action-set-selection-offsets(anchor, focus) => { text-input.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { text-input.replace-selected-text(t); }
+ 
+     public function set-selection-offsets(anchor: int, focus: int) {
+         text-input.set-selection-offsets(anchor, focus);
+diff --git a/internal/compiler/widgets/fluent/combobox.slint b/internal/compiler/widgets/fluent/combobox.slint
+index 22898a6..b9bd172 100644
+--- a/internal/compiler/widgets/fluent/combobox.slint
++++ b/internal/compiler/widgets/fluent/combobox.slint
+@@ -31,6 +31,7 @@ export component ComboBox {
+     accessible-expanded: base.popup-has-focus;
+     accessible-value <=> root.current-value;
+     accessible-action-expand => { base.show-popup(); }
++    accessible-action-default => { base.show-popup(); }
+ 
+     states [
+         disabled when !root.enabled : {
+diff --git a/internal/compiler/widgets/fluent/lineedit.slint b/internal/compiler/widgets/fluent/lineedit.slint
+index b9c8272..f969791 100644
+--- a/internal/compiler/widgets/fluent/lineedit.slint
++++ b/internal/compiler/widgets/fluent/lineedit.slint
+@@ -16,6 +16,7 @@ export component LineEdit {
+     accessible-read-only: root.read-only;
+     accessible-action-set-value(v) => { text = v; edited(v); }
+     accessible-action-set-selection-offsets(anchor, focus) => { base.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { base.replace-selected-text(t); }
+ 
+     vertical-stretch: 0;
+     horizontal-stretch: 1;
+diff --git a/internal/compiler/widgets/fluent/textedit.slint b/internal/compiler/widgets/fluent/textedit.slint
+index dd908eb..b2bab1f 100644
+--- a/internal/compiler/widgets/fluent/textedit.slint
++++ b/internal/compiler/widgets/fluent/textedit.slint
+@@ -39,6 +39,7 @@ export component TextEdit {
+     accessible-read-only: root.read-only;
+     accessible-action-set-value(v) => { text = v; edited(v); }
+     accessible-action-set-selection-offsets(anchor, focus) => { base.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { base.replace-selected-text(t); }
+ 
+     public function set-selection-offsets(anchor: int, focus: int) {
+         base.set-selection-offsets(anchor, focus);
+diff --git a/internal/compiler/widgets/material/combobox.slint b/internal/compiler/widgets/material/combobox.slint
+index 609a3c1..581d8be 100644
+--- a/internal/compiler/widgets/material/combobox.slint
++++ b/internal/compiler/widgets/material/combobox.slint
+@@ -30,6 +30,7 @@ export component ComboBox {
+     accessible-expanded: base.popup-has-focus;
+     accessible-value <=> root.current-value;
+     accessible-action-expand => { base.show-popup(); }
++    accessible-action-default => { base.show-popup(); }
+ 
+     states [
+         disabled when !root.enabled : {
+diff --git a/internal/compiler/widgets/material/lineedit.slint b/internal/compiler/widgets/material/lineedit.slint
+index 836d083..f1b68f2 100644
+--- a/internal/compiler/widgets/material/lineedit.slint
++++ b/internal/compiler/widgets/material/lineedit.slint
+@@ -17,6 +17,7 @@ export component LineEdit {
+     accessible-read-only: root.read-only;
+     accessible-action-set-value(v) => { text = v; edited(v); }
+     accessible-action-set-selection-offsets(anchor, focus) => { base.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { base.replace-selected-text(t); }
+ 
+     min-width: max(120px, layout.min-width);
+     min-height: max(56px, layout.min-height);
+diff --git a/internal/compiler/widgets/material/textedit.slint b/internal/compiler/widgets/material/textedit.slint
+index c7aee98..7a53418 100644
+--- a/internal/compiler/widgets/material/textedit.slint
++++ b/internal/compiler/widgets/material/textedit.slint
+@@ -39,6 +39,7 @@ export component TextEdit {
+     accessible-read-only: root.read-only;
+     accessible-action-set-value(v) => { text = v; edited(v); }
+     accessible-action-set-selection-offsets(anchor, focus) => { base.set-selection-offsets(anchor, focus); }
++    accessible-action-replace-selected-text(t) => { base.replace-selected-text(t); }
+ 
+     public function set-selection-offsets(anchor: int, focus: int) {
+         base.set-selection-offsets(anchor, focus);
+diff --git a/internal/core/accessibility.rs b/internal/core/accessibility.rs
+index b8588c8..0e40aa2 100644
+--- a/internal/core/accessibility.rs
++++ b/internal/core/accessibility.rs
+@@ -6,7 +6,7 @@
+ use crate::{
+     SharedString,
+     item_tree::{ItemTreeVTable, ParentItemTraversalMode},
+-    items::{ItemRc, TextInput},
++    items::{ContextMenu, Flickable, ItemRc, TextInput},
+ };
+ use alloc::vec::Vec;
+ use bitflags::bitflags;
+@@ -54,7 +54,6 @@ pub enum AccessibilityAction {
+     Decrement,
+     Increment,
+     Expand,
+-    /// This is currently unused
+     ReplaceSelectedText(SharedString),
+     SetValue(SharedString),
+     /// Select the text between two UTF-8 offsets into the element's text: the first offset is the
+@@ -167,3 +166,46 @@ pub fn find_text_input_with_rc(
+     }
+     None
+ }
++
++/// The nearest enabled context menu around `item`, `item` included.
++fn enclosing_context_menu(item: &ItemRc) -> Option<ItemRc> {
++    let mut current = Some(item.clone());
++    while let Some(i) = current {
++        if i.downcast::<ContextMenu>().is_some_and(|m| m.as_pin_ref().enabled()) {
++            return Some(i);
++        }
++        current = i.parent_item(ParentItemTraversalMode::StopAtPopups);
++    }
++    None
++}
++
++/// Whether `item` is inside an enabled `ContextMenuArea`, so `ShowContextMenu` applies to it.
++pub fn accessible_has_context_menu(item: &ItemRc) -> bool {
++    enclosing_context_menu(item).is_some()
++}
++
++/// Opens the context menu around `item` at the center of `item`. Returns whether there is one.
++pub fn accessible_show_context_menu(item: &ItemRc) -> bool {
++    let Some(menu) = enclosing_context_menu(item) else { return false };
++    let size = item.geometry().size;
++    let center =
++        item.map_to_window(crate::lengths::LogicalPoint::new(size.width / 2.0, size.height / 2.0));
++    let origin = menu.map_to_window(Default::default());
++    let position = crate::api::LogicalPosition::new(center.x - origin.x, center.y - origin.y);
++    if let Some(context_menu) = menu.downcast::<ContextMenu>() {
++        context_menu.as_pin_ref().show.call(&(position,));
++    }
++    true
++}
++
++/// Whether `item` is inside a `Flickable` (not crossing popups), so `ScrollIntoView` applies to it.
++pub fn accessible_scroll_target(item: &ItemRc) -> bool {
++    let mut current = item.parent_item(ParentItemTraversalMode::StopAtPopups);
++    while let Some(i) = current {
++        if i.downcast::<Flickable>().is_some() {
++            return true;
++        }
++        current = i.parent_item(ParentItemTraversalMode::StopAtPopups);
++    }
++    false
++}
+diff --git a/internal/core/item_tree.rs b/internal/core/item_tree.rs
+index 8bc8d04..ffe8619 100644
+--- a/internal/core/item_tree.rs
++++ b/internal/core/item_tree.rs
+@@ -1056,7 +1056,8 @@ pub fn inverse_children_transform(&self) -> Option<ItemTransform> {
+             .and_then(|child_transform| child_transform.inverse())
+     }
+ 
+-    pub(crate) fn try_scroll_into_visible(&self) {
++    /// Scrolls every `Flickable` around this item so that the item is visible.
++    pub fn try_scroll_into_visible(&self) {
+         let mut parent = self.parent_item(ParentItemTraversalMode::StopAtPopups);
+         while let Some(item_rc) = parent.as_ref() {
+             let item_ref = item_rc.borrow();
+diff --git a/internal/core/items/text.rs b/internal/core/items/text.rs
+index 4115347..3323983 100644
+--- a/internal/core/items/text.rs
++++ b/internal/core/items/text.rs
+@@ -1987,6 +1987,24 @@ fn insert(
+         Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+     }
+ 
++    /// Replaces the selection (or inserts at the cursor if nothing is selected) with `text`.
++    /// An empty `text` deletes the selection. Used by the `ReplaceSelectedText` accessibility action.
++    pub fn replace_selected_text(
++        self: Pin<&Self>,
++        window_adapter: &Rc<dyn WindowAdapter>,
++        self_rc: &ItemRc,
++        text: &str,
++    ) {
++        if self.read_only() {
++            return;
++        }
++        if text.is_empty() {
++            self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
++        } else {
++            self.insert(text, window_adapter, self_rc);
++        }
++    }
++
+     pub fn cut(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+         self.copy(window_adapter, self_rc);
+         self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
+@@ -2470,6 +2488,22 @@ fn next_word_boundary(text: &str, last_cursor_pos: usize) -> usize {
+         .map_or(text.len(), |(offset, slice)| offset + slice.len())
+ }
+ 
++#[cfg(feature = "ffi")]
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn slint_textinput_replace_selected_text(
++    text_input: Pin<&TextInput>,
++    window_adapter: *const crate::window::ffi::WindowAdapterRcOpaque,
++    self_component: &vtable::VRc<crate::item_tree::ItemTreeVTable>,
++    self_index: u32,
++    text: &SharedString,
++) {
++    unsafe {
++        let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
++        let self_rc = ItemRc::new(self_component.clone(), self_index);
++        text_input.replace_selected_text(window_adapter, &self_rc, text);
++    }
++}
++
+ #[cfg(feature = "ffi")]
+ #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn slint_textinput_set_selection_offsets(
+diff --git a/internal/interpreter/eval.rs b/internal/interpreter/eval.rs
+index 555b87a..89b4684 100644
+--- a/internal/interpreter/eval.rs
++++ b/internal/interpreter/eval.rs
+@@ -2358,6 +2358,26 @@ fn call_builtin_function(
+             }
+             Value::Void
+         }
++        BuiltinFunction::ReplaceSelectedText => {
++            // (item_ref, text) -> applied to a TextInput.
++            use i_slint_core::items::TextInput;
++            let [Expression::PropertyReference(mr), text_expr] = arguments else {
++                return Value::Void;
++            };
++            let text: SharedString = eval_expression(ctx, text_expr).try_into().unwrap_or_default();
++            let Some((parent_inst, flat_idx)) = resolve_item_rc_from_ref(ctx, mr) else {
++                return Value::Void;
++            };
++            let Some(adapter) = parent_inst.window_adapter_or_default() else {
++                return Value::Void;
++            };
++            let parent_dyn = vtable::VRc::into_dyn(parent_inst);
++            let item_rc = i_slint_core::items::ItemRc::new(parent_dyn, flat_idx as u32);
++            if let Some(text_input) = vtable::VRef::downcast_pin::<TextInput>(item_rc.borrow()) {
++                text_input.replace_selected_text(&adapter, &item_rc, &text);
++            }
++            Value::Void
++        }
+         BuiltinFunction::RegisterCustomFontByPath => {
+             if let Value::String(s) = eval_expression(ctx, &arguments[0])
+                 && let Some(root) = find_root_instance(ctx)
