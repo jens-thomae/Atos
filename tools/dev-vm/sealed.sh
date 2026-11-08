@@ -54,7 +54,7 @@
 # QEMU runs without KVM (Apple M1 has no nested virtualisation): a boot takes minutes.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE=localhost/c1-base
 WORK=~/sealed
 OUT="$HERE/out/sealed"
@@ -435,6 +435,8 @@ trust_stage() {
 trust_apply() { VARS=$TVARS boot "$TDISK" "$OUT/trust-apply.log"; }
 trust_previous() { VARS=$TVARS MENU=1 boot "$TDISK" "$OUT/trust-previous.log"; }
 
+# Sourced (spikes/c1-dev-image/run.sh reuses boot() and the registry): stop before the steps.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 case "${1:-}" in
   build|disk|boot) "step_$1" ;;
   tamper) step_tamper "${2:-}" ;;

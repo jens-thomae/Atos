@@ -1,0 +1,47 @@
+# Spike #100 (docs/components/c1-base/dev-image-spike.md): a developer image built FROM the release
+# image, sealed and signed with a developer key instead of the Atos db key. Not a product file: the
+# developer build tool (developer-mode.md §6 card 4) replaces it.
+# Build (run.sh images does this):
+#   podman build --build-context repo=. --secret id=devkey,src=dev.key --secret id=devcrt,src=dev.crt \
+#     --build-arg RELEASE=<release image> -f spikes/c1-dev-image/Containerfile spikes/c1-dev-image
+ARG RELEASE=localhost/c1-base:devrel
+FROM ${RELEASE} AS release
+
+# Signing tools, never in the final image. The release image no longer carries a kernel or an
+# initramfs (they live only inside its UKI, #111), so they are taken out of the release UKI, after
+# checking that UKI against the Atos db cert (here the committed TEST cert).
+FROM release AS kernel
+RUN dnf -y install --setopt=install_weak_deps=False systemd-ukify sbsigntools
+RUN --mount=type=bind,from=repo,source=components/c1-base/secureboot-test/db.crt,target=/release-db.crt \
+    set -eu; uki=$(ls /boot/EFI/Linux/*.efi); kver=$(basename "$uki" .efi); \
+    sbverify --cert /release-db.crt "$uki"; \
+    mkdir -p "/kernel/$kver"; \
+    python3 -c 'import pefile, sys; pe = pefile.PE(sys.argv[1]); out = {".linux": "vmlinuz", ".initrd": "initramfs.img"}; \
+[open(sys.argv[2] + "/" + out[n], "wb").write(s.get_data()[:s.Misc_VirtualSize]) for s in pe.sections if (n := s.Name.rstrip(b"\0").decode()) in out]' \
+      "$uki" "/kernel/$kver"; \
+    test -s "/kernel/$kver/vmlinuz" && test -s "/kernel/$kver/initramfs.img"
+
+# The developer's changes. Stand-in: one package from the Fedora repositories and a marker.
+FROM release AS rootfs
+ARG DEV_MARKER=devimage
+RUN dnf -y install --setopt=install_weak_deps=False strace \
+    && echo "IMAGE_VERSION=$DEV_MARKER" >> /usr/lib/os-release \
+    && rm -rf /run/dnf /var/lib/dnf /var/cache/* /var/log/*
+# The release UKI goes (the developer UKI replaces it), and, as in components/c1-base/Containerfile,
+# directory mtimes go to the epoch in the last layer before sealing.
+RUN rm -f /boot/EFI/Linux/*.efi \
+    && find / -xdev -type d -newermt @0 ! -path /proc ! -path /sys ! -path /dev -exec touch -h -d @0 {} + \
+    && bootc container lint --fatal-warnings
+
+# Composefs digest of `rootfs` into the command line, UKI signed with the developer key. The key
+# comes in as a build secret, so no layer carries it.
+FROM kernel AS uki
+RUN --mount=type=bind,from=rootfs,target=/target \
+    --mount=type=secret,id=devkey --mount=type=secret,id=devcrt \
+    kver=$(ls /kernel) && mkdir /out && \
+    bootc container ukify --rootfs /target --kernel-dir "/kernel/$kver" -- \
+      --output "/out/$kver.efi" --signtool sbsign \
+      --secureboot-private-key /run/secrets/devkey --secureboot-certificate /run/secrets/devcrt
+
+FROM rootfs
+COPY --from=uki /out/ /boot/EFI/Linux/
