@@ -1,0 +1,32 @@
+# Base image mirror (#117, docs/components/c1-base/base-mirror.md): copies every pinned fedora-bootc index
+# that ghcr.io/jens-thomae/atos/fedora-bootc lacks from quay.io, by digest, and checks the copy.
+# Run by hand on the branch that bumps the pin (`gh workflow run base-mirror.yml --ref <branch>`), before its
+# PR build, which pulls the base from the mirror. Idempotent: an already mirrored digest is only checked.
+name: Base image mirror
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: base-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Push the copy to ghcr.io/jens-thomae/atos/fedora-bootc; the GITHUB_TOKEN gets nothing else.
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - run: bash tools/ci/mirror-base.sh --copy | tee -a "$GITHUB_STEP_SUMMARY"

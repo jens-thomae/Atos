@@ -64,6 +64,9 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      # The base pin is our mirror of the recorded quay.io digest, and the mirror holds it (#117). Same login, read only.
+      - name: Base image is mirrored
+        run: bash tools/ci/mirror-base.sh
       # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL

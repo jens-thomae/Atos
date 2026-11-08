@@ -6,12 +6,12 @@ The Atos base image is a bootc container image (D-008): a **sealed composefs ima
 
 | | |
 | --- | --- |
-| Image | `quay.io/fedora/fedora-bootc:45` |
-| Pinned digest | `sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29` (multi-arch index) |
+| Image | `quay.io/fedora/fedora-bootc:45`, built from our mirror `ghcr.io/jens-thomae/atos/fedora-bootc:45.20261108.0` ([base-mirror.md](base-mirror.md)) |
+| Pinned digest | `sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29` (multi-arch index, same in both) |
 | Version label | `45.20261108.0` (kernel not re-checked after the bump) |
 | Size | 65 layers, about 1.04 GB compressed (amd64) |
 
-The digest changes only through a reviewed change to the `FROM` line. CI builds amd64 only.
+The digest changes only through a reviewed change to the `ARG BASE=` and `# upstream:` lines; a bump also needs a run of the mirror workflow ([base-mirror.md](base-mirror.md#bumping-the-base)). CI builds amd64 only.
 
 ## Our layers
 
@@ -283,7 +283,7 @@ Not measured: a change under `components/c2-compositor` rebuilds the compositor 
 
 Trust boundary: **the signed `publish` job never reads the cache** (`--cache-to` only), so every published and signed image is built from scratch, about 16 min per code merge. Pull requests read it (`--cache-from`). `packages: read` in the PR job is not a boundary: a pull request from a branch in this repo runs its own copy of the workflow and can raise its token to `packages: write` and push layers to the cache. buildah reuses a layer by its step key and never checks how it was made. That costs nothing, because a PR build is never published. `publish` still writes the cache from its from-scratch build to keep it warm for PRs. The warm row above is therefore a pull request number; a merge to `main` stays cold. `--cache-ttl 168h` limits how long cached `dnf` layers hide Fedora updates in PR builds.
 
-ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded. The base pull from quay.io (about 1 GB) happens on every run.
+ghcr.io keeps layers it already has, so after the first push only our small layer is uploaded. The base pull from the mirror (about 1 GB) happens on every run.
 
 ## Developer mode
 
