@@ -3,8 +3,8 @@ use crate::{
     utils::prelude::OutputExt,
 };
 use anyhow::{Context, Result};
-use atos_comp_config::output::comp::OutputState;
 use calloop::{InsertError, LoopHandle, stream::StreamSource};
+use atos_comp_config::output::comp::OutputState;
 use std::{
     cell::{RefCell, RefMut},
     collections::HashMap,

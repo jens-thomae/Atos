@@ -32,8 +32,8 @@ use crate::{
     xwayland::XWaylandState,
 };
 use anyhow::Context;
-use atos_comp_config::output::comp::{OutputConfig, OutputState};
 use calloop::RegistrationToken;
+use atos_comp_config::output::comp::{OutputConfig, OutputState};
 use i18n_embed::{
     DesktopLanguageRequester,
     fluent::{FluentLanguageLoader, fluent_language_loader},

@@ -6,8 +6,8 @@ use crate::{
         prelude::*,
     },
 };
-use atos_comp_config::AppearanceConfig;
 use calloop::LoopHandle;
+use atos_comp_config::AppearanceConfig;
 use id_tree::NodeId;
 use smithay::{
     backend::{

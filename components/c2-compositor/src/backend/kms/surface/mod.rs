@@ -18,8 +18,8 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
-use atos_comp_config::output::comp::AdaptiveSync;
 use calloop::channel::Channel;
+use atos_comp_config::output::comp::AdaptiveSync;
 use smithay::{
     backend::{
         allocator::{

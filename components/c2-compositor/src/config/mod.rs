@@ -47,6 +47,7 @@ mod input_config;
 pub mod key_bindings;
 mod types;
 
+use cosmic::config::CosmicTk;
 pub use atos_comp_config::EdidProduct;
 use atos_comp_config::{
     ActivationPolicy, AppearanceConfig, CosmicCompConfig, CursorHideConfig, DecorationPreference,
@@ -57,7 +58,6 @@ use atos_comp_config::{
     },
     workspace::WorkspaceConfig,
 };
-use cosmic::config::CosmicTk;
 pub use key_bindings::{Action, PrivateAction};
 use types::WlXkbConfig;
 

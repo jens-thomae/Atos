@@ -1,11 +1,13 @@
-use atos_comp::hooks::{Decorations, Hooks};
-use atos_comp::shell::element::stack::{DefaultDecorations as DefaultStackDecorations, TAB_HEIGHT};
-use atos_comp::shell::element::window::{
-    DefaultDecorations as DefaultWindowDecorations, SSD_HEIGHT,
-};
 use cosmic::iced::{Color, Rectangle, Size};
 use cosmic::widget;
 use cosmic::widget::canvas;
+use atos_comp::hooks::{Decorations, Hooks};
+use atos_comp::shell::element::stack::{
+    DefaultDecorations as DefaultStackDecorations, TAB_HEIGHT,
+};
+use atos_comp::shell::element::window::{
+    DefaultDecorations as DefaultWindowDecorations, SSD_HEIGHT,
+};
 use std::sync::Arc;
 
 /// The struct implementing Decorations hook

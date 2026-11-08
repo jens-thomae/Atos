@@ -1,6 +1,5 @@
 use std::{sync::Mutex, time::Instant};
 
-use atos_comp_config::{ZoomConfig, ZoomMovement};
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
@@ -8,6 +7,7 @@ use cosmic::{
     theme,
     widget::{self, icon::Named},
 };
+use atos_comp_config::{ZoomConfig, ZoomMovement};
 use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::Linear};
 use smithay::{

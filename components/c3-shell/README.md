@@ -12,7 +12,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `ui/launcher.slint` | The launcher. Token values only; panel, field and rows after the command palette mockup (there is no launcher mockup yet) |
 | `src/launcher.rs` | Opens and closes the launcher, the `--launcher` socket, starts the chosen app |
 | `src/apps.rs` | Installed apps from desktop entries, `Exec=` parsing, search by name |
-| `data/system_actions.ron` | atos-comp's command for its `System(Launcher)` shortcut, for the image to install |
+| `data/system_actions.ron` | unused since #131 (atos-comp has the launcher command built in); the image does not install it |
 | `src/platform.rs` | Slint platform on wlr-layer-shell: the #59 spike's backend ([layer-shell-spike.md](../../docs/components/c4-toolkit/layer-shell-spike.md)) without its popups, popup pool and timing hooks, plus one layer surface per output, output hotplug, overlay placement and re-showing a hidden window (#64). Replaced by the C4 backend crate (spike section 6, card 1) |
 | `src/accesskit.rs` | The spike's AccessKit port (modified copy of a Slint file, GPL-3.0-only, D-013) |
 | `src/toplevels.rs` | Running windows: `ext-foreign-toplevel-list-v1` for the list, atos-comp's `zcosmic_toplevel_info_v1` (v2+) for the activated state, `zcosmic_toplevel_manager_v1.activate` on click |
@@ -36,7 +36,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 
 - Opens from the dock's first button ("Open launcher") or with `atos-shell --launcher`, which toggles the launcher of the shell on the same Wayland display through `$XDG_RUNTIME_DIR/atos-shell-$WAYLAND_DISPLAY.sock`.
 - **Shortcut:** atos-comp's `System(Launcher)` action, bound by default to Super and Super+/. Bindings and the command (`atos-shell --launcher`) come from atos-comp itself, so neither the COSMIC shortcuts file nor `data/system_actions.ron` is needed for it (#131). atos-comp turns its shortcuts off when started with a kiosk command, so the session must start the shell another way.
-- **Rebinding:** in `~/.config/atos/shortcuts.toml` (D-010; read when atos-comp starts, no live reload yet): `[shortcuts]` then `launcher = ["Super+l"]`. A missing key, a broken file or an unparsable binding gives the default.
+- **Rebinding:** in `~/.config/atos/shortcuts.toml` (D-010; read when atos-comp starts and when its COSMIC shortcuts config changes, no file watch yet): `[shortcuts]` then `launcher = ["Super+l"]`. A missing key, a broken file or an unparsable binding gives the default.
 - A full-output overlay layer surface on the focused output: scrim, centred panel with the search field and the apps. Exclusive keyboard while open. A click on the scrim or Escape closes it.
 - **Apps:** desktop entries in `applications/` of `$XDG_DATA_HOME`, Flatpak's user and system export directories and `$XDG_DATA_DIRS`; the first directory with a desktop file ID wins. Left out: `NoDisplay`, `Hidden`, `OnlyShowIn`/`NotShowIn` against `$XDG_CURRENT_DESKTOP`, a missing `TryExec`, `Terminal=true` (no terminal app yet). The list is read at start and again on every opening, off the event loop.
 - **Search:** case-insensitive on the name; names that start with the query first, then a word that starts with it, then anywhere.

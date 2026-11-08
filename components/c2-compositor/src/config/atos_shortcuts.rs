@@ -7,7 +7,8 @@
 //! launcher = ["Super", "Super+slash"]   # the default; "Super+space" etc. rebinds it
 //! ```
 //!
-//! Read once at start-up (ponytail: no live reload; add a file watch when Settings edits it).
+//! Read at start-up and again when the COSMIC shortcuts config changes (no file watch of its own;
+//! add one when Settings edits it). An empty list gives the defaults: it cannot turn the launcher off.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -92,27 +93,34 @@ pub fn load_and_apply(shortcuts: &mut Shortcuts, system_actions: &mut SystemActi
 mod tests {
     use super::*;
 
+    fn sorted(keys: impl Iterator<Item = String>) -> Vec<String> {
+        let mut k: Vec<_> = keys.collect();
+        k.sort();
+        k
+    }
+
+    fn want(keys: &[&str]) -> Vec<String> {
+        sorted(
+            keys.iter()
+                .map(|k| Binding::from_str(k).unwrap().to_string()),
+        )
+    }
+
     fn launcher_keys(text: Option<&str>) -> Vec<String> {
         let mut s = Shortcuts::default();
         let mut a = SystemActions::new();
         apply(&mut s, &mut a, launcher_bindings(text));
-        let mut keys: Vec<_> = s
-            .shortcuts(&Action::System(System::Launcher))
-            .map(|b| b.to_string())
-            .collect();
-        keys.sort();
-        keys
+        sorted(
+            s.shortcuts(&Action::System(System::Launcher))
+                .map(|b| b.to_string()),
+        )
     }
 
     #[test]
     fn default_is_super_and_super_slash() {
-        let want = launcher_bindings(Some(""))
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(want.len(), 2);
-        assert_eq!(launcher_keys(None).len(), 2);
-        assert_eq!(launcher_keys(Some("[shortcuts]\n")).len(), 2);
+        let default = want(&["Super", "Super+slash"]);
+        assert_eq!(launcher_keys(None), default);
+        assert_eq!(launcher_keys(Some("[shortcuts]\n")), default);
     }
 
     #[test]
@@ -128,23 +136,22 @@ mod tests {
             &mut a,
             launcher_bindings(Some("[shortcuts]\nlauncher = [\"Super+space\"]\n")),
         );
-        let keys: Vec<_> = s
-            .shortcuts(&Action::System(System::Launcher))
-            .map(|b| b.to_string())
-            .collect();
-        assert_eq!(
-            keys,
-            [Binding::from_str("Super+space").unwrap().to_string()]
+        let keys = sorted(
+            s.shortcuts(&Action::System(System::Launcher))
+                .map(|b| b.to_string()),
         );
+        assert_eq!(keys, want(&["Super+space"]));
         assert_eq!(a[&System::Launcher], LAUNCHER_COMMAND);
     }
 
     #[test]
     fn broken_file_or_binding_falls_back_to_default() {
-        assert_eq!(launcher_keys(Some("not = [toml")).len(), 2);
+        let default = want(&["Super", "Super+slash"]);
+        assert_eq!(launcher_keys(Some("not = [toml")), default);
         assert_eq!(
-            launcher_keys(Some("[shortcuts]\nlauncher = [\"Super+nosuchkey\"]\n")).len(),
-            2
+            launcher_keys(Some("[shortcuts]\nlauncher = [\"Super+nosuchkey\"]\n")),
+            default
         );
+        assert_eq!(launcher_keys(Some("[shortcuts]\nlauncher = []\n")), default);
     }
 }

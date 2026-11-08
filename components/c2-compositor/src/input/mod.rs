@@ -35,11 +35,11 @@ use crate::{
         xwayland_keyboard_grab::XWaylandGrabSeat,
     },
 };
-use atos_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use calloop::{
     RegistrationToken,
     timer::{TimeoutAction, Timer},
 };
+use atos_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
 #[cfg(feature = "logind")]
