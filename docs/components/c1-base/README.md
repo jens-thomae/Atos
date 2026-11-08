@@ -288,3 +288,5 @@ ghcr.io keeps layers it already has, so after the first push only our small laye
 ## Developer mode
 
 Design write-up, not built: [developer-mode.md](developer-mode.md) (card #68, every choice *Proposed*).
+
+Spike #100 built a developer image `FROM` the release image in the dev VM, sealed it, signed it with a second (developer) key next to the TEST db cert, switched to it from `containers-storage` and booted it with Secure Boot on. The build takes about a minute. `ukify` with `systemd-sbsign` and the `tpm2` OpenSSL provider signs with a TPM-resident key; `sbsign` cannot (OpenSSL 4). Writing the developer cert into db from the running system was refused by the VM's firmware, which is still open. Findings and the script (`spikes/c1-dev-image/run.sh`): [dev-image-spike.md](dev-image-spike.md).
