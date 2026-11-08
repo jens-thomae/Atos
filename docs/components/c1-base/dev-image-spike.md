@@ -1,6 +1,6 @@
 # Spike: locally sealed and signed developer image (D-015)
 
-Card: #100 · Run: 2026-11-08 in the `atos-c100` dev VM (aarch64), on fedora-bootc 45.20261107.0 (main moved to 45.20261108.0 during the run; not rerun) · Script: [`spikes/c1-dev-image/run.sh`](../../../spikes/c1-dev-image/run.sh)
+Card: #100 · Run: 2026-11-08 in the `atos-c100` dev VM (aarch64), on fedora-bootc 45.20261108.0 (the base on `main`); every result below comes from one clean run of the committed script · Script: [`spikes/c1-dev-image/run.sh`](../../../spikes/c1-dev-image/run.sh)
 
 This spike decides nothing. It checks item 2 of [developer-mode.md §6](developer-mode.md#6-implementation-cards-it-implies): can a developer build an image `FROM` the release image, seal it with `bootc container ukify`, sign it with a second (developer) key that sits next to the TEST db cert, `bootc switch` to it from `containers-storage` and boot it? It also checks whether the signing tools work with a TPM-resident key (developer-mode.md 2.2.2).
 
@@ -8,7 +8,7 @@ This spike decides nothing. It checks item 2 of [developer-mode.md §6](develope
 
 ## Result in one paragraph
 
-**The developer image works.** `podman build` `FROM` the release image takes about one minute. The release image no longer carries a kernel or an initramfs (#111), so the build takes them from the release UKI after verifying that UKI against the Atos db cert. It then seals the image with `bootc container ukify` and signs the UKI with the developer key. `bootc switch --transport containers-storage localhost/atos-dev:current` stages it. The firmware refuses that UKI (`Access denied`) until the developer cert is in db. With the TEST db cert and the developer cert in db, it boots sealed with `Secure Boot: enabled (user)`, `verity=require`, and the health check (#56) passes. **TPM-resident signing works**: on Fedora 45, `ukify` signs both the UKI (through `systemd-sbsign`) and the PCR11 policy (through `systemd-measure`) with a non-exportable TPM key, via the `tpm2` OpenSSL provider. `sbsign` cannot: OpenSSL 4 has no engines. **One open problem:** in this VM's firmware, writing the developer cert into db from the running system with the KEK was refused (`EACCES`, i.e. `EFI_SECURITY_VIOLATION`), with two signing tools and with both append and full writes. The developer boot above therefore used a db enrolled in setup mode. Whether the runtime write works on real firmware is the first question for card #101 (section 4).
+**The developer image works.** `podman build` `FROM` the release image takes about one minute (49–64 s). The release image no longer carries a kernel or an initramfs (#111), so the build takes them from the release UKI after verifying that UKI against the Atos db cert. It then seals the image with `bootc container ukify` and signs the UKI with the developer key. `bootc switch --transport containers-storage localhost/atos-dev:current` stages it. The firmware refuses that UKI (`Access denied`) until the developer cert is in db; after three refused tries, boot counting (#56) falls back to the release entry by itself. With the TEST db cert and the developer cert in db, it boots sealed with `Secure Boot: enabled (user)`, `verity=require`, and the health check (#56) passes. **TPM-resident signing works**: on Fedora 45, `ukify` signs both the UKI (through `systemd-sbsign`) and the PCR11 policy (through `systemd-measure`) with a non-exportable TPM key, via the `tpm2` OpenSSL provider. `sbsign` cannot: OpenSSL 4 has no engines. **One open problem:** in this VM's firmware, writing the developer cert into db from the running system with the KEK was refused (`EACCES`, i.e. `EFI_SECURITY_VIOLATION`), with two signing tools and with both append and full writes. The developer boot above therefore used a db enrolled in setup mode. Whether the runtime write works on real firmware is the first question for card #101 (section 4).
 
 ## 1. What was run
 
@@ -16,12 +16,12 @@ This spike decides nothing. It checks item 2 of [developer-mode.md §6](develope
 
 | Step | Does | Result |
 | --- | --- | --- |
-| `images` | Builds the release image (`components/c1-base`, labelled `20261108.0`), then the developer image `FROM` it ([`Containerfile`](../../../spikes/c1-dev-image/Containerfile)), timed, once cold and once as a rebuild. Checks that the developer UKI verifies with the developer cert and **not** with the release db cert | Cold build 60 s, rebuild 68 s (section 2). Image 3.0 GB; it inherits the release version label |
+| `images` | Builds the release image (`components/c1-base`, labelled `20261108.0`), then the developer image `FROM` it ([`Containerfile`](../../../spikes/c1-dev-image/Containerfile)), timed, once cold and once as a rebuild. Checks that the developer UKI verifies with the developer cert and **not** with the release db cert | Cold build 64 s, rebuild 49 s (section 2). Image 3.0 GB; it inherits the release version label |
 | `install` | `bootc install to-disk` of the release image; replaces the key set on the ESP with the VM's PK, its KEK and a db holding only the TEST db cert | Installed |
 | `switch` | Fresh firmware variables (setup mode): systemd-boot enrols, resets, boots release. In the guest, the developer image is copied into `containers-storage` (stand-in for a build in the guest), then `bootc switch --transport containers-storage localhost/atos-dev:current` | Enrolled; `Secure Boot: enabled (user)`. `ATOS-DEV switch staged`; `bootc status` shows it staged with `transport: containers-storage` |
-| `refused` | Boots the default entry: the staged developer UKI, whose cert is not in db | **Refused by firmware**: `Error loading EFI binary \EFI\Linux\bootc\bootc_composefs-0674….efi: Access denied` |
-| `enrol` | Boots release, writes the developer cert into db through efivarfs, signed with the KEK (no firmware step, as D-015 plans) | **Refused**: `dd: error writing '/sys/firmware/efi/efivars/db-…': Permission denied` for every candidate (section 4) |
-| `enrol-setup` | Fallback: db = TEST db cert + developer cert, KEK-signed, enrolled by systemd-boot with fresh firmware variables (setup mode). Re-arms the developer entry's counter (`+3`) | Enrolled. **The developer image boots**: `Secure Boot: enabled (user)`, db lists `Atos TEST db` and `Atos TEST dev (dev VM)`, `IMAGE_VERSION=devimage`, `strace` (the developer layer) present, `composefs.digest=v1-sha512-12:0674…` on the command line, overlay `verity=require`, `missingVerityAllowed: false`, `bootType: Uki`, `atos-session-check.service` passed |
+| `refused` | Boots the default entry, the staged developer UKI whose cert is not in db, and lets the machine keep rebooting (QEMU stops only on a hang, panic or emergency mode) | **Refused by firmware three times**: `Error loading EFI binary \EFI\Linux\bootc\bootc_composefs-a19d….efi: Access denied`, `Failed to start boot entry. Rebooting in 5s.` Then systemd-boot booted the **release entry by itself**. `bootctl list` there: release `(default) (selected)`, developer entry `tries: 0 left; 3 done` |
+| `enrol` | Boots the default entry (release, after `refused`). Control: writes a plain test variable through efivarfs. Then writes the developer cert into db the same way, signed with the KEK (no firmware step, as D-015 plans) | Control: `plain variable write ok, reads back: hello`. db writes **refused**: `dd: error writing '/sys/firmware/efi/efivars/db-…': Permission denied` for every candidate (section 4) |
+| `enrol-setup` | Fallback: db = TEST db cert + developer cert, KEK-signed, enrolled by systemd-boot with fresh firmware variables (setup mode). Re-arms the developer entry's counter by hand (`+3`; `refused` used it up) | Enrolled. **The developer image boots**: `Secure Boot: enabled (user)`, db lists `Atos TEST db` and `Atos TEST dev (dev VM)`, `IMAGE_VERSION=devimage`, `strace` (the developer layer) present, `composefs:a19d…` with the digest from the UKI's command line, overlay `verity=require`, `missingVerityAllowed: false`, `bootType: Uki`, `atos-session-check.service` passed |
 | `boot` | Boots the default entry again, with the firmware variables kept | Boots the developer image again; its entry was marked good ([below](#boot-step)) |
 | `tpm` | [`tpm.sh`](../../../spikes/c1-dev-image/tpm.sh) in a fedora-bootc 45 container with a software TPM (swtpm) | Section 3 |
 
@@ -29,8 +29,9 @@ This spike decides nothing. It checks item 2 of [developer-mode.md §6](develope
 
 ```
 spec.image:   localhost/atos-dev:current, transport: containers-storage
-booted:       localhost/atos-dev:current (containers-storage), imageDigest sha256:f93cebe8…
-composefs:    verity 067411fc…, bootType: Uki
+booted:       localhost/atos-dev:current (containers-storage), imageDigest sha256:bc5eb568…
+composefs:    verity a19d715f…, bootType: Uki
+rollback:     the release image, imageDigest sha256:0b4227f3…, verity 1a2ca7d5…
 ```
 
 `bootc upgrade --check` on the developer image: `No changes in: ostree-unverified-image:containers-storage:localhost/atos-dev:current`. So once switched, the machine follows the local reference and **no longer sees release updates**, as developer-mode.md 2.2 expected (the reason for the rebuild service, card #103).
@@ -43,10 +44,10 @@ Measured in the dev VM (Lima, 4 vCPU, 7 GiB, aarch64 on an M1 Max, native speed;
 
 | Build | Time |
 | --- | --- |
-| Cold (`--no-cache`): installs `systemd-ukify` and `sbsigntools` in a throwaway stage, extracts and verifies the kernel and initramfs from the release UKI, runs the developer's layer (`dnf install strace`), normalises directory mtimes, `bootc container lint`, computes the composefs digest, builds and signs the UKI | **60 s** |
-| Rebuild with only the developer's layer changed (stage with the signing tools cached) | **68 s** |
+| Cold (`--no-cache`): installs `systemd-ukify` and `sbsigntools` in a throwaway stage, extracts and verifies the kernel and initramfs from the release UKI, runs the developer's layer (`dnf install strace`), normalises directory mtimes, `bootc container lint`, computes the composefs digest, builds and signs the UKI | **64 s** |
+| Rebuild with only the developer's layer changed (stage with the signing tools cached) | **49 s** |
 
-Both are dominated by `dnf` (metadata download and install), not by sealing. The rebuild is no faster because the developer's `dnf` layer runs again and the digest and UKI have to be recomputed anyway. A real developer layer costs whatever it costs on top. Pulling and verifying a new release image (about 1 GB of layers) is not included; the rebuild service (card #103) pays that per release. The final image is 3.0 GB, the same order as the release image.
+Both are dominated by `dnf` (metadata download and install), not by sealing. The rebuild saves only the tools stage: the developer's `dnf` layer runs again, and the digest and UKI have to be recomputed anyway. Network speed moves both numbers; an earlier run of the same script measured 60 s cold and 68 s for the rebuild. A real developer layer costs whatever it costs on top. Pulling and verifying a new release image (about 1 GB of layers) is not included; the rebuild service (card #103) pays that per release. The final image is 3.0 GB, the same order as the release image.
 
 Not timed in a way that applies to real hardware: copying the image into the guest (22 min) and `bootc switch` (3 min). Both ran in the nested QEMU guest without KVM.
 
@@ -57,7 +58,7 @@ Fedora 45: systemd 262.1, systemd-ukify 262.1, sbsigntools 0.9.5, tpm2-openssl 1
 | Check | Result |
 | --- | --- |
 | Self-signed X.509 cert for the TPM key (`openssl req -provider tpm2 -key handle:…`) | ok |
-| Export the private key (`openssl pkey -out`) | not possible (`fixedtpm`, `fixedparent`) |
+| Can the private key leave the TPM? | No. The TPM enforces it: `fixedtpm` and `fixedparent` are set (checked). What the provider writes for the key is a `TSS2 PRIVATE KEY` blob that plain OpenSSL cannot load (checked), i.e. a reference wrapped for this TPM. `TPM2_Duplicate` is refused too, but with `0x124` (*authorization handle is not correct*), a policy-session error that comes before the attribute check, so the run logs it and does not count it as evidence |
 | `ukify build --signtool systemd-sbsign --signing-provider tpm2 --secureboot-private-key handle:… --pcr-private-key handle:… --pcr-certificate dev.crt` | ok; `sbverify --cert dev.crt` passes; the UKI has a `.pcrsig` section |
 | The same through `bootc container ukify … -- <ukify args>` (as our Containerfile calls it) | ok; `sbverify` passes |
 | `systemd-measure sign --private-key-source=provider:tpm2 --certificate=dev.crt` (PCR11 policy alone) | ok |
@@ -87,7 +88,7 @@ What was ruled out:
 - **Wrong KEK.** PK and KEK print back as the VM's own (`Atos TEST KEK (dev VM)`).
 - **Lockdown.** `integrity`, which does not restrict efivarfs.
 - **SELinux.** No AVC for efivarfs.
-- **Runtime variable writes in general.** A plain, non-authenticated test variable written the same way lands and reads back.
+- **Runtime variable writes in general.** `enrol` first writes a plain, non-authenticated test variable the same way (efivarfs, one `write()`). It lands and reads back (`hello`).
 
 efivarfs returns `EACCES` for `EFI_SECURITY_VIOLATION`, so the firmware itself rejects the authenticated write. Two signers agreeing suggests the cause is this firmware build, or something both tools do the same way, rather than one tool's bug. **Not found in this session.** Note that the setup-mode enrolment in `install`/`switch` does not prove these signatures valid: in setup mode the firmware does not check them.
 
@@ -105,7 +106,7 @@ The fallback in `enrol-setup` (re-entering setup mode) is a VM-only shortcut, no
 - **Directory mtimes.** The developer's layers change directories, so the epoch normalisation from our Containerfile must also be the last layer of a developer build. Otherwise the digest in the UKI does not match what bootc computes at switch (README, "Directory mtimes"). The spike's Containerfile does this. The build tool (card #102) must too, after any developer layer.
 - **The trust policy accepts any `containers-storage` image today.** `policy.json` names only the `docker` transport for the Atos repository. Its default is `insecureAcceptAnything`, so `bootc switch --transport containers-storage <anything>` passes the policy and the version floor: same label, as the developer image inherits it. On a machine **without** developer mode, Secure Boot still stops it (`refused` above), so this is not a hole in the boot chain. But D-015's "allowed in the trust policy only while developer mode is on" needs a policy entry that does not exist yet: a `containers-storage` rule that rejects by default, with the one fixed reference allowed only while developer mode is on (card #102). Filed as #150.
 - **Labels.** The developer image inherits the release image's `org.opencontainers.image.version`, so the version floor (#75) sees it as the same version as release.
-- **Rollback.** After the first switch, the second boot entry is the release image. Boot counting covered the refused developer UKI: each refused attempt used a try, and after the last one the release entry became the default. This is the "Previous version" exit developer-mode.md 2.2 relies on.
+- **Rollback.** After the first switch, the second boot entry is the release image. Boot counting covers a developer UKI the firmware refuses: `refused` shows three refused tries, then the release entry booting by itself with the developer entry at `tries: 0 left; 3 done`. This is the "Previous version" exit developer-mode.md 2.2 relies on. It applies equally to a developer key later removed from db while a developer entry is still installed.
 - **Boot entry label.** The developer entry has the release entry's title (`Fedora Linux 45 (Forty Five) 45`). The label that cannot be hidden (D-015) is card #105's.
 
 ## Sources
