@@ -4,7 +4,9 @@
 use std::path::{Path, PathBuf};
 
 pub use i_slint_backend_testing::AccessibleRole;
-use i_slint_backend_testing::{ElementHandle, ElementQuery, TestingBackend, TestingBackendOptions};
+use i_slint_backend_testing::{
+    ElementHandle, ElementQuery, ElementRoot, TestingBackend, TestingBackendOptions,
+};
 use slint::ComponentHandle;
 
 /// Largest allowed difference per colour channel (0-255) before a pixel counts as different.
@@ -147,4 +149,14 @@ pub fn elements_with_role(root: &impl ComponentHandle, role: AccessibleRole) -> 
     ElementQuery::from_root(root)
         .match_predicate(move |e| e.accessible_role() == Some(role))
         .find_all()
+}
+
+/// Accessible role and label of the root element (the window itself), which the queries skip.
+pub fn root_accessibility(root: &impl ComponentHandle) -> (Option<AccessibleRole>, String) {
+    root.show().expect("show");
+    let e = root.root_element();
+    (
+        e.accessible_role(),
+        e.accessible_label().unwrap_or_default().to_string(),
+    )
 }

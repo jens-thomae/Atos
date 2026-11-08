@@ -12,7 +12,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `ui/launcher.slint` | The launcher. Token values only; panel, field and rows after the command palette mockup (there is no launcher mockup yet) |
 | `src/launcher.rs` | Opens and closes the launcher, the `--launcher` socket, starts the chosen app |
 | `src/apps.rs` | Installed apps from desktop entries, `Exec=` parsing, search by name |
-| `data/system_actions.ron` | atos-comp's command for its `System(Launcher)` shortcut, for the image to install |
+| `data/system_actions.ron` | unused since #131 (atos-comp has the launcher command built in); the image does not install it |
 | `src/platform.rs` | Slint platform on wlr-layer-shell: the #59 spike's backend ([layer-shell-spike.md](../../docs/components/c4-toolkit/layer-shell-spike.md)) without its popups, popup pool and timing hooks, plus one layer surface per output, output hotplug, overlay placement and re-showing a hidden window (#64). Replaced by the C4 backend crate (spike section 6, card 1) |
 | `src/accesskit.rs` | The spike's AccessKit port (modified copy of a Slint file, GPL-3.0-only, D-013) |
 | `src/toplevels.rs` | Running windows: `ext-foreign-toplevel-list-v1` for the list, atos-comp's `zcosmic_toplevel_info_v1` (v2+) for the activated state, `zcosmic_toplevel_manager_v1.activate` on click |
@@ -21,6 +21,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `src/control_centre.rs` | Opens, closes and feeds the panel; Settings launch by desktop-entry id |
 | `src/services.rs`, `src/audio.rs`, `src/portal.rs` | D-Bus services (NetworkManager, BlueZ, power-profiles-daemon, logind), the PipeWire client, and the xdg-desktop-portal Settings backend for dark mode |
 | `src/control.rs`, `src/config.rs` | The six tiles as data and the privacy-chip trait; the shell config file (D-010 TOML) |
+| `ui/notice.slint`, `src/notice.rs`, `src/notice_ui.rs` | The disk-not-sealed notice (#138), see below |
 | `tests/` | Screenshot and accessibility-tree tests with the C4 harness ([screenshot-tests.md](../../docs/components/c4-toolkit/screenshot-tests.md)) |
 | `e2e/` | End-to-end run on atos-comp (nested in headless sway) and its checks, used by CI |
 
@@ -35,8 +36,8 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 ## Launcher behaviour (#64)
 
 - Opens from the dock's first button ("Open launcher") or with `atos-shell --launcher`, which toggles the launcher of the shell on the same Wayland display through `$XDG_RUNTIME_DIR/atos-shell-$WAYLAND_DISPLAY.sock`.
-- **Shortcut:** atos-comp's existing `System(Launcher)` action, bound to Super and Super+/ in `components/c2-compositor/data/keybindings.ron`. It runs the command in `system_actions`; `data/system_actions.ron` sets it to `atos-shell --launcher`, and the image installs it as `/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions` (#120). atos-comp turns its shortcuts off when started with a kiosk command, so the session must start the shell another way.
-- **Rebinding:** add a binding to `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom` (RON; atos-comp reloads it live), for example `{ (modifiers: [Super], key: "l"): System(Launcher), (modifiers: [Super]): Disable }`.
+- **Shortcut:** atos-comp's `System(Launcher)` action, bound by default to Super and Super+/. Bindings and the command (`atos-shell --launcher`) come from atos-comp itself, so neither the COSMIC shortcuts file nor `data/system_actions.ron` is needed for it (#131). atos-comp turns its shortcuts off when started with a kiosk command, so the session must start the shell another way.
+- **Rebinding:** in `~/.config/atos/shortcuts.toml` (D-010; read when atos-comp starts and when its COSMIC shortcuts config changes, no file watch yet): `[shortcuts]` then `launcher = ["Super+l"]`. A missing key, a broken file or an unparsable binding gives the default.
 - A full-output overlay layer surface on the focused output: scrim, centred panel with the search field and the apps. Exclusive keyboard while open. A click on the scrim or Escape closes it.
 - **Apps:** desktop entries in `applications/` of `$XDG_DATA_HOME`, Flatpak's user and system export directories and `$XDG_DATA_DIRS`; the first directory with a desktop file ID wins. Left out: `NoDisplay`, `Hidden`, `OnlyShowIn`/`NotShowIn` against `$XDG_CURRENT_DESKTOP`, a missing `TryExec`, `Terminal=true` (no terminal app yet). The list is read at start and again on every opening, off the event loop.
 - **Search:** case-insensitive on the name; names that start with the query first, then a word that starts with it, then anywhere.
@@ -64,6 +65,10 @@ Contents agreed with the owner on the card. Opened by the dock's rightmost butto
 `CONTROL_CENTRE_OPEN_MS` in the shell's output is the time from the open request to the first frame shown; `e2e/` opens the panel five times and `check.sh` fails above `SHELL_OPEN_MS` (100 ms on the NUC, §7).
 
 A tile whose service is missing is shown disabled ("Unavailable"). While the panel is open the services are read again every 3 s; closed, nothing polls. The window is made at start-up, rendered once while hidden (after the shell's first frame, like the launcher's warm-up) and shown and hidden on each use.
+
+## Disk-not-sealed notice (#138)
+
+When `/run/atos/disk-unsealed` exists (written by C11's `atos-tpm-seal` while the install-time no-PCR TPM2 slot is still the unlock; interface in the [C11 README](../../docs/components/c11-installer/README.md)), the shell shows a card in the top right corner of one output: "Your disk is not protected from other systems", what that means in plain words, and to turn on Secure Boot in the firmware settings. **Learn more** opens the C11 page with `xdg-open`. **Dismiss** hides it until the shell restarts, so it is back at the next login while the file lasts. The shell looks at start-up and every 5 s for a minute afterwards (the seal unit may finish after the session starts); after a successful seal the file is gone and nothing shows. Do not disturb does not silence it: it is a security warning. It takes no exclusive zone and no keyboard grab. The shell does not read the LUKS header.
 
 ## Build and test
 

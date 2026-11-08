@@ -7,8 +7,8 @@ The Atos base image is a bootc container image (D-008): a **sealed composefs ima
 | | |
 | --- | --- |
 | Image | `quay.io/fedora/fedora-bootc:45` |
-| Pinned digest | `sha256:451894faadba48a53c4449efa8b872a1c004b80d8bb3dab71c4c93f631129d59` (multi-arch index) |
-| Version label | `45.20261107.0`, kernel `7.2.15-300.fc45` (amd64) |
+| Pinned digest | `sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29` (multi-arch index) |
+| Version label | `45.20261108.0` (kernel not re-checked after the bump) |
 | Size | 65 layers, about 1.04 GB compressed (amd64) |
 
 The digest changes only through a reviewed change to the `FROM` line. CI builds amd64 only.
@@ -290,3 +290,5 @@ ghcr.io keeps layers it already has, so after the first push only our small laye
 Design write-up, not built: [developer-mode.md](developer-mode.md) (card #68, every choice *Proposed*).
 
 Spike #100 built a developer image `FROM` the release image in the dev VM, sealed it, signed it with a second (developer) key next to the TEST db cert, switched to it from `containers-storage` and booted it with Secure Boot on. The build takes about a minute. `ukify` with `systemd-sbsign` and the `tpm2` OpenSSL provider signs with a TPM-resident key; `sbsign` cannot (OpenSSL 4). Writing the developer cert into db from the running system was refused by the VM's firmware, which is still open. Findings and the script (`spikes/c1-dev-image/run.sh`): [dev-image-spike.md](dev-image-spike.md).
+
+Turning Secure Boot off and on, and what it does to the disk: [secure-boot-off-and-on.md](secure-boot-off-and-on.md) (card #107).

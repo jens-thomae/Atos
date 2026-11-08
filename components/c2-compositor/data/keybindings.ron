@@ -104,6 +104,7 @@
 
     (modifiers: [Super], key: "a"): System(AppLibrary),
     (modifiers: [Super], key: "w"): System(WorkspaceOverview),
+    // The launcher's bindings are overridden from ~/.config/atos/shortcuts.toml (#131); edit them there.
     (modifiers: [Super], key: "slash"): System(Launcher),
     (modifiers: [Super]): System(Launcher),
     (modifiers: [Alt], key: "Tab"): System(WindowSwitcher),

@@ -17,11 +17,15 @@ warn() {
   echo "atos-tpm-seal: $*" >&2
   # Shown at the console login too, until sealing succeeds.
   printf 'Disk encryption is not yet bound to Secure Boot: %s\n' "$*" > /run/issue.d/50-atos-tpm-seal.issue
+  # The interface to the shell (C3, #138): this file exists while the no-PCR slot is kept. /run is
+  # empty at every boot, so it is gone once the seal has run (this script then never runs again).
+  printf '%s\n' "$*" > /run/atos/disk-unsealed
   exit 0
 }
-mkdir -p /run/issue.d
+mkdir -p /run/issue.d /run/atos
+chmod 755 /run/atos
 
-# ponytail: console and /run/issue.d only; greetd autologin hides both (README, Known gaps).
+# greetd autologin hides the console and /run/issue.d; the shell shows /run/atos/disk-unsealed.
 [ "$(efi_byte SecureBoot)" = 1 ] || warn "Secure Boot is off. Anyone who can boot this machine, from any OS or USB stick, can read the disk without a password."
 [ "$(efi_byte SetupMode)" = 0 ] || warn "the firmware is in setup mode. Anyone who can boot this machine, from any OS or USB stick, can read the disk without a password."
 
@@ -33,6 +37,7 @@ pcrs=7
 # The new slot is never wiped by --wipe-slot; the install-time TPM2 slot is.
 systemd-cryptenroll --unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs="$pcrs" \
   --wipe-slot=tpm2 "$dev"
+rm -f /run/atos/disk-unsealed /run/issue.d/50-atos-tpm-seal.issue
 echo "atos-tpm-seal: $dev bound to the TPM with PCR $pcrs"
 
 rm -f /etc/systemd/system/multi-user.target.wants/atos-tpm-seal.service \

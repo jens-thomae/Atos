@@ -84,6 +84,11 @@ jobs:
           tar -xzf nextest.tar.gz -C ~/.cargo/bin
           rm nextest.tar.gz
 
+      # Unit tests of our patches inside the winit backend (card #95): they run on the checkout.
+      - name: Winit backend accessibility unit tests
+        working-directory: third_party/slint/src
+        run: cargo test -p i-slint-backend-winit --features accessibility,renderer-software --lib accesskit
+
       - name: Screenshot tests
         working-directory: components/c4-toolkit/test-harness
         env:
