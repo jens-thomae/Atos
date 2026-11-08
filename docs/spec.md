@@ -185,6 +185,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 ### C11 Installer and first run
 
 - Installation in under 10 minutes with encryption on by default.
+- Dual boot with Windows is supported: install into free space next to an existing Windows; Windows appears in the boot menu and keeps booting with Secure Boot and BitLocker unchanged.
 - First run: language, Wi-Fi, layout preset, accent colour, optional import of Windows user folders. No account required.
 
 ### C12 Agent integration
