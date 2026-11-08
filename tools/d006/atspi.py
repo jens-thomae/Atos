@@ -224,8 +224,11 @@ def m7():
     def no_selection(nodes, text):
         """No selected row is visible through AT-SPI: either none selected, or rows are not exposed at all."""
         s = selected_row(nodes)
-        return chk(text, "none", s) if s else {"check": text, "result": "unverifiable",
-                                                "expected": "none", "observed": "rows or selection not exposed"}
+        if s:
+            return chk(text, "none", s)
+        if any(r == "table row" for _, r, _, _ in nodes):  # rows exposed (fork, A2/A3): none selected is checkable
+            return {"check": text, "result": "pass", "expected": "none", "observed": "none"}
+        return {"check": text, "result": "unverifiable", "expected": "none", "observed": "rows or selection not exposed"}
 
     # 1
     n0 = app.nodes()

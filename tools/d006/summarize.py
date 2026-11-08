@@ -156,6 +156,7 @@ print("### M6: accessibility tree\n")
 for a, t in APPS:
     if not os.path.isdir(f"{root}/m6/{a}"):
         continue
+    t = t.replace(", tree off", "")  # M6/M7 always run with the tree on
     j = load(f"{root}/m6/{a}/m6.json")
     if not j:
         print(f"**{t}**: no result\n")
@@ -172,6 +173,7 @@ print("`pass`/`fail` come from AT-SPI, stdout or the clipboard; `unverifiable` m
 for a, t in APPS:
     if not os.path.isdir(f"{root}/m7/{a}"):
         continue
+    t = t.replace(", tree off", "")  # M6/M7 always run with the tree on
     j = load(f"{root}/m7/{a}/m7.json")
     if not j:
         print(f"**{t}**: no result\n")
