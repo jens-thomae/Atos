@@ -82,25 +82,6 @@ jobs:
           components/c1-base/check-seal.sh c1-base
       - name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
         run: components/c1-base/nvidia/check.sh c1-base
-      # TEMPORARY (#162 review): amd64 image size against the published latest; removed once reported.
-      - name: Image size against latest (temporary, #162)
-        run: |
-          podman image inspect --format 'uncompressed {{.Size}}' c1-base
-          podman pull -q ghcr.io/jens-thomae/atos/c1-base:latest >/dev/null
-          podman image inspect --format 'latest uncompressed {{.Size}}' ghcr.io/jens-thomae/atos/c1-base:latest
-          for i in c1-base ghcr.io/jens-thomae/atos/c1-base:latest; do
-            d="$RUNNER_TEMP/oci-$RANDOM"; podman push -q --compression-format gzip "$i" "oci:$d"
-            python3 - "$d" "$i" <<'PY'
-          import json, sys, os
-          d = sys.argv[1]
-          idx = json.load(open(os.path.join(d, "index.json")))
-          dg = idx["manifests"][0]["digest"].split(":")[1]
-          m = json.load(open(os.path.join(d, "blobs", "sha256", dg)))
-          l = [x["size"] for x in m["layers"]]
-          print(sys.argv[2], len(l), "layers", round(sum(l) / 1e6, 1), "MB compressed; largest of ours:", sorted(round(x / 1e6, 1) for x in l[60:])[-4:])
-          PY
-            rm -rf "$d"
-          done
 
   publish:
     needs: changes

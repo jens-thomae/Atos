@@ -134,14 +134,16 @@ A copy with one byte appended to `libnvidia-glcore.so.615.78.08` fails it (`S.5�
 
 The kernel checks the signature before a module's init runs, and `nvidia.ko`'s init ran and reported that it found no GPU. So under Secure Boot with lockdown, the kernel accepted the module signed with the db key. A rejected signature would have stopped at `Key was rejected by service` (#158 showed that path).
 
-**Image size** (aarch64, compressed layer sizes in the VM's registry, as measured for #111):
+**Image size.** Compressed sizes are the sum of gzip layer sizes, the form clients download.
 
-| | Before (`main` at e846e3a) | After |
-| --- | --- | --- |
-| Compressed | 80 layers, 1390.2 MB | 81 layers, 1877.0 MB (**+486.8 MB**, one layer) |
-| Uncompressed | 2.84 GB | 4.06 GB (+1.21 GB) |
+| | Before | After | Growth |
+| --- | --- | --- | --- |
+| **amd64** (what users get). CI run 42516285557 on f448ae1 plus a temporary size step; before = the published `c1-base:latest` from `main`; both with `podman push --compression-format gzip` | 80 layers, 1475.1 MB compressed; 2.80 GB uncompressed | 81 layers, 2012.3 MB; 4.18 GB | **+537 MB compressed** (the NVIDIA layer is 534.6 MB), +1.37 GB uncompressed |
+| aarch64 (dev VM `atos-c1`, VM registry as for #111; before = `main` at e846e3a) | 80 layers, 1390.2 MB; 2.84 GB | 81 layers, 1877.0 MB; 4.06 GB | +487 MB compressed, +1.21 GB uncompressed |
 
-Installed size by package: `xorg-x11-drv-nvidia-cuda-libs` 497 MB, `-libs` 306 MB, `xorg-x11-drv-nvidia` (GSP firmware, profiles) 186 MB, `mesa-vulkan-drivers` (NVK and the other Mesa Vulkan drivers) 131 MB, `-cuda` 8 MB, `-power` 5 MB, the four modules 28 MB. The UKI does not change, because no NVIDIA module is in the initramfs. **Updates:** the publish job builds every image from scratch (no layer cache, #86), so the NVIDIA layer gets a new digest in every published image. Clients then download it again with each update, as they already do the 221 MB session package layer. Splitting the layer would not help until builds are reproducible. amd64 sizes were not measured. The amd64 packages are of similar size, and the write-up estimated 300–450 MB compressed.
+The first amd64 CI build (review of 1021aac) also installed RPM Fusion's i686 libraries and a 59-package 32-bit Fedora userland (421 MiB installed). The build now downloads the native architecture only and fails on any i686 package. The numbers above are without them.
+
+Installed size by package (aarch64): `xorg-x11-drv-nvidia-cuda-libs` 497 MB, `-libs` 306 MB, `xorg-x11-drv-nvidia` (GSP firmware, profiles) 186 MB, `mesa-vulkan-drivers` (NVK and the other Mesa Vulkan drivers) 131 MB, `-cuda` 8 MB, `-power` 5 MB, the four modules 28 MB. The UKI does not change, because no NVIDIA module is in the initramfs. **Updates:** the publish job builds every image from scratch (no layer cache, #86), so the NVIDIA layer gets a new digest in every published image. Clients then download it again with each update, as they already do the 221 MB session package layer. Splitting the layer would not help until builds are reproducible. The write-up estimated 300–450 MB compressed.
 
 **Not covered here:** a real NVIDIA GPU (rendering, suspend, monitors): the smoke test below. amd64 and real firmware: CI builds and checks amd64, but nothing boots it with Secure Boot.
 
