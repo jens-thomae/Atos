@@ -256,7 +256,7 @@ cosign verify --key components/c1-base/cosign.pub --insecure-ignore-tlog --new-b
 
 `--insecure-ignore-tlog` is needed because the test key signs without a transparency log entry.
 
-The image ships the policy that checks it (card #75): pulls of the Atos image need a signature by the pinned key, and `bootc upgrade` or `bootc switch` refuse an unsigned or wrongly signed image and an image older than the booted one. Files, release key slot, version floor and the VM demo: [trust-policy.md](trust-policy.md).
+The image ships the policy that checks it (card #75): pulls of the Atos image need a signature by the pinned key, and `bootc upgrade` or `bootc switch` refuse an unsigned or wrongly signed image and an image older than the booted one. Local images (`containers-storage`) are refused too, except one developer reference while developer mode is on (#150). Files, release key slot, version floor and the VM demo: [trust-policy.md](trust-policy.md).
 
 ## Hosted CI minutes (Free plan, docs/ci.md)
 

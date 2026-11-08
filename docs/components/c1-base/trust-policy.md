@@ -8,7 +8,7 @@ All of them are in `/usr`, so they are inside the sealed composefs digest. Fedor
 
 | File (source in `components/c1-base/`) | Does |
 | --- | --- |
-| [`usr/share/containers/policy.json`](../../../components/c1-base/usr/share/containers/policy.json) | Fedora's policy plus one scope: `docker` → `ghcr.io/jens-thomae/atos/c1-base` requires `sigstoreSigned` with `keyPaths` and `signedIdentity: matchRepository` |
+| [`usr/share/containers/policy.json`](../../../components/c1-base/usr/share/containers/policy.json) | Fedora's policy plus one scope: `docker` → `ghcr.io/jens-thomae/atos/c1-base` requires `sigstoreSigned` with `keyPaths` and `signedIdentity: matchRepository`; `containers-storage` → `""` is `reject` (#150, [below](#local-images-containers-storage)) |
 | `/usr/share/pki/containers/atos-c1-base-test.pub` | The **TEST** cosign public key, copied from [`cosign.pub`](../../../components/c1-base/cosign.pub) by the [`Containerfile`](../../../components/c1-base/Containerfile) (one file, so it cannot drift from the key CI signs with) |
 | [`usr/share/containers/registries.d/atos.yaml`](../../../components/c1-base/usr/share/containers/registries.d/atos.yaml) | `use-sigstore-attachments: true` for the Atos image; without it the signature is not looked up |
 | [`usr/lib/bootc/install/85-atos-sigpolicy.toml`](../../../components/c1-base/usr/lib/bootc/install/85-atos-sigpolicy.toml) | `enforce-container-sigpolicy = true`: `bootc install` behaves as if `--enforce-container-sigpolicy` were passed |
@@ -21,6 +21,32 @@ The lookup order is `containers-policy.json(5)`'s: `$HOME/.config/containers/pol
 ## How bootc applies it
 
 `--enforce-container-sigpolicy` is an ostree-backend concept: it records `ostree-image-signed:` in the deployment's origin and refuses a policy whose default is `insecureAcceptAnything`. **Our backend is composefs (D-008), and there bootc 1.17.1 does not use it**: it accepts the flag, but always writes `ostree-unverified-image:` into the origin (upstream `TODO` in `bootc_composefs/state.rs`) and never passes `--insecure-policy` to skopeo. So on composefs the policy is enforced on **every** pull, with or without the flag, by `skopeo experimental-image-proxy` reading `policy.json` (checked in source: `bootc_composefs/repo.rs`, `status.rs`; shown in the VM below). The install config and the flag in the demo are kept so that the setting is already right if bootc starts honouring it on composefs.
+
+## Local images (`containers-storage`)
+
+Card #150 (D-015: local images are allowed in the trust policy only while developer mode is on). The policy's `containers-storage` transport has one scope, `""` → `reject`, so `bootc switch --transport containers-storage <any local image>` is refused before anything is copied, on every machine. Secure Boot already refused such an image's UKI on a machine without developer mode ([dev-image-spike.md §5](dev-image-spike.md#5-other-findings-for-the-follow-up-cards)); the policy now refuses it one step earlier, as D-015 says.
+
+**Where bootc checks it** (bootc 1.17.1 and composefs-rs v0.9.2, the pinned versions; shown in the VM below). Every composefs `bootc switch` and `bootc upgrade` first opens the target through `skopeo experimental-image-proxy` to read its manifest and config (`is_image_pulled` → `get_container_manifest_and_config`), without `--insecure-policy`. The proxy checks `policy.json` at `OpenImage` for every transport, so a local target is refused there, before either pull path. The default (direct) pull opens it through the proxy again. The opt-in unified path (`--unified-storage-exp`, or when the image is already in bootc's own storage) copies with `podman image push`, which ignores the policy for local storage, and then imports without skopeo; it only runs after that first check.
+
+**Other users of local storage.** The policy applies to every program that copies **from** local storage, not only bootc. podman and buildah override it for `podman build` and `podman push`, so those keep working. `podman save`, `podman image scp` and `podman manifest push` of a local image are refused (see the VM results). Rootless podman reads `~/.config/containers/policy.json` first, so a user can restore them for their own storage without root. Pulling into local storage, `podman run` and Flatpak are not affected.
+
+### Allowing the developer reference (for #102 and #104)
+
+D-015 allows **one fixed reference** while developer mode is on. For the transport, a policy scope names the store as well as the image: `[driver@graph-root]image` (`containers-policy.json(5)`). On Atos, root's store is `overlay@/var/lib/containers/storage`, so the scope for `containers-storage:localhost/atos-dev:current` is:
+
+```json
+"containers-storage": {
+    "[overlay@/var/lib/containers/storage]localhost/atos-dev:current": [{ "type": "insecureAcceptAnything" }],
+    "": [{ "type": "reject" }]
+}
+```
+
+- **`insecureAcceptAnything`** because a local build carries no container signature. What protects it is the developer key on its UKI and the authenticated build (D-015), not the policy.
+- **Where.** `/usr` is sealed, and the policy is one file with no drop-ins: the first of `$HOME/.config/containers/policy.json`, `/etc/containers/policy.json`, `/usr/share/containers/policy.json` wins outright. So turning developer mode on writes `/etc/containers/policy.json` as a **copy of `/usr/share/containers/policy.json` plus that one scope**, root-owned, mode 0644, and turning it off deletes the file. The VM test does exactly this.
+- **Keep the copy current.** While the file exists, it hides any newer `/usr` policy, including a key rotation (Key rotation, below): the rebuild service's verified pulls would use the copy's old `keyPaths`. One way, for #102/#104 to decide (not decided or built here): regenerate the copy from the booted `/usr` policy on every boot while developer mode is on.
+- **Leaving.** developer-mode.md 2.2 step 1 removes the exception first. Without the file, `bootc upgrade` on a machine that follows the local reference is refused at the same check, so nothing new is staged from local storage.
+
+**Other stores.** A reference that names another store (`containers-storage:[vfs@/some/root]image`) falls under `""` and is refused; only the exact scope above is allowed. An administrator can still write any policy to `/etc` (above); that is a root action.
 
 ## Release key slot
 
