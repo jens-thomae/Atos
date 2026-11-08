@@ -288,3 +288,5 @@ ghcr.io keeps layers it already has, so after the first push only our small laye
 ## Developer mode
 
 Design write-up, not built: [developer-mode.md](developer-mode.md) (card #68, every choice *Proposed*).
+
+Turning Secure Boot off and on, and what it does to the disk: [secure-boot-off-and-on.md](secure-boot-off-and-on.md) (card #107).
