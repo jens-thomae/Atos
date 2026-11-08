@@ -1,8 +1,8 @@
 # Turning Secure Boot off and on
 
-User guide for card #107 (D-014, D-015). It describes what the installer and `atos-tpm-seal` do **today** (card #66, [installer docs](../c11-installer/README.md)). Where behaviour is not built yet, the text says so.
+User guide for card #107 (D-014, D-015). *Last checked against `main` on 2026-11-08; revisit when #122 and #123 land.* It describes what the installer and `atos-tpm-seal` do **today** (card #66, [installer docs](../c11-installer/README.md)). Where behaviour is not built yet, the text says so.
 
-Atos does not offer a switch for this. Secure Boot is a firmware setting, and Atos discards the Platform Key after enrolment (D-014), so the OS cannot change it. Turning it off is your choice in the firmware setup (D-015). This is "option C" in [developer-mode.md](developer-mode.md) §2.3. If you want your own builds, developer mode (D-015) keeps Secure Boot on and is the better route.
+Atos does not offer a switch for this. Secure Boot is a firmware setting, so the OS cannot change it. (D-014's design also discards the Platform Key after enrolment; no enrolment exists on real hardware until #123.) Turning it off is your choice in the firmware setup (D-015). This is "option C" in [developer-mode.md](developer-mode.md) §2.3. If you want your own builds, developer mode (D-015) keeps Secure Boot on and is the better route.
 
 ## What turning it off means
 
@@ -11,8 +11,8 @@ Atos does not offer a switch for this. Secure Boot is a firmware setting, and At
 
 | Your state | Secure Boot off | Effect on the disk |
 | --- | --- | --- |
-| **Sealed already** (first boot with Secure Boot on has run; slot bound to PCR7, or PCR7+14 on shim+MOK machines) | Turned off later | PCR7 changes, the TPM refuses to release the key, and the initrd asks for the **recovery key**. Atos stays protected: nobody else can read the disk without it. |
-| **Never sealed** (Secure Boot has been off since install, which is every install on real hardware until key enrolment at install, #123, lands) | Stays off | `atos-tpm-seal` fails closed and **never seals**. The install-time TPM2 slot, bound to **no PCRs**, stays. The disk opens without a prompt for **any OS booted on that machine**, including a live USB stick. It is protected only when taken out of the machine. |
+| **Sealed already** (first boot with Secure Boot on has run; slot bound to PCR7, or PCR7+14 once B2 (D-016, shim+MOK) is built; `atos-tpm-seal` already does this when it sees `mok-variables`) | Turned off later | PCR7 changes, the TPM refuses to release the key, and the initrd asks for the **recovery key**. Nobody who just boots something else can read the disk without the key. **But you now type the recovery key on every boot, into a boot chain that nothing authenticates.** Anyone who could write to the ESP or the UKI while Secure Boot was off can replace it with one that captures the key. Keep Secure Boot-off periods short. After turning it back on, consider replacing the recovery key (not tested; no tool or procedure for this exists in Atos yet). |
+| **Never sealed** (Secure Boot has been off since install, which is every install on real hardware until key enrolment at install, #123, lands, unless you enrolled the Atos keys in the firmware yourself) | Stays off | `atos-tpm-seal` fails closed and **never seals**. The install-time TPM2 slot, bound to **no PCRs**, stays. The disk opens without a prompt for **any OS booted on that machine**, including a live USB stick. It is protected only when taken out of the machine. |
 
 - **Warnings are easy to miss.** On a never-sealed machine, the warning goes only to the boot console and `/run/issue.d/`. The image's autologin hides both, and there is no warning in the session yet.
 - **Release updates keep working** (`bootc upgrade`, same signature policy), but with Secure Boot off the policy no longer protects the boot chain: anyone with root, or physical access, can change what boots.
@@ -38,14 +38,16 @@ Atos does not offer a switch for this. Secure Boot is a firmware setting, and At
 Which case you land in:
 
 - **Sealed before, keys unchanged:** PCR7 returns to the sealed value, so the TPM unlocks the disk with no prompt, as before. Nothing to re-enrol.
-- **Sealed before, but db, KEK, PK or the signing authority changed in between** (a firmware reset, a Microsoft dbx or db update, a different signing key): PCR7 is different. The initrd asks for the recovery key, and the disk is not sealed to the new value. `atos-tpm-seal` has already removed itself, so it will **not** rebind automatically. Today, rebinding is manual, as root, and type the recovery key when it asks for a passphrase:
+- **Sealed before, but db, KEK, PK or the signing authority changed in between** (a firmware reset, an Atos dbx update (not built yet) or release-key rotation, a different signing key; on B2 machines (D-016, not built) also a Microsoft db or dbx update. On D-014 machines there is no Microsoft KEK, so Microsoft cannot change db or dbx): PCR7 is different. The initrd asks for the recovery key, and the disk is not sealed to the new value. `atos-tpm-seal` has already removed itself, so it will **not** rebind automatically. Today, rebinding is manual, as root, and type the recovery key when it asks for a passphrase:
 
   ```bash
   systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 --wipe-slot=tpm2 \
     /dev/disk/by-designator/root-luks
   ```
 
-  This is the call `atos-tpm-seal` makes, except that it unlocks with the recovery key instead of the old TPM slot (add `+14` on shim+MOK machines, D-016). Only do this with Secure Boot on and out of setup mode, or you seal to a PCR7 that is about to change. If the Atos keys are no longer in db, there is no supported way to restore them yet: key enrolment at install (#123) is not done, and the installer's re-run path does not exist. Reinstalling is the fallback.
+  **Untested:** this command has not been run on a machine. It does not touch the recovery slot, so if it fails the recovery key still works. `--wipe-slot=tpm2` removes the old TPM slot, which is safe because it is bound to the old PCR7 and no longer unlocks anyway. On B2 machines use `--tpm2-pcrs=7+14`.
+
+  This is the call `atos-tpm-seal` makes, except that it unlocks with the recovery key instead of the old TPM slot. Only do this with Secure Boot on and out of setup mode, or you seal to a PCR7 that is about to change. If the Atos keys are no longer in db, there is no supported way to restore them yet: key enrolment at install (#123) is not done, and the installer's re-run path does not exist. Reinstalling is the fallback.
 - **Never sealed:** if Secure Boot was off since install, and the firmware db now trusts the Atos signing key, the first boot with Secure Boot on (and not in setup mode) lets `atos-tpm-seal` bind the disk to PCR7 and wipe the no-PCR slot, which ends the exposed window. On stock firmware with only Microsoft keys, the Atos-signed boot chain does not start with Secure Boot on until #123 lands, so there is nothing to turn back on to yet.
 
 ## Do not "fix" the prompt by removing PCR7
@@ -59,4 +61,4 @@ Other OSes boot freely with Secure Boot off, and on a never-sealed machine they 
 ## Not covered here
 
 - Developer mode (D-015) enrols its own key and keeps Secure Boot on: [developer-mode.md](developer-mode.md).
-- Machines using shim and MOK (D-016): [shim-mok-spike.md](shim-mok-spike.md). PCR14 is also bound; the same rules apply.
+- B2 (shim and MOK, D-016) is not built yet; see [shim-mok-spike.md](shim-mok-spike.md). Once it is, PCR14 is bound too and the same rules apply.
