@@ -29,9 +29,18 @@ P=(-provider tpm2 -provider default)
 r cert openssl req "${P[@]}" -new -x509 -sha256 -days 3650 -key handle:$H \
   -subj '/CN=Atos TEST developer key (TPM) - not for release/' -out dev.crt
 openssl pkey "${P[@]}" -in handle:$H -pubout -out dev.pub.pem
-# Can the private part be exported? It must not.
-if openssl pkey "${P[@]}" -in handle:$H -out exported.pem 2>/dev/null && grep -q 'BEGIN PRIVATE KEY' exported.pem; then
-  echo "ATOS-TPM no-export FAIL"; else echo "ATOS-TPM no-export ok"; fi
+# Can the private part leave the TPM? It must not. (1) The TPM enforces it: fixedtpm and fixedparent
+# are set. (2) Whatever the provider writes for the key cannot be loaded without this TPM.
+# (3) TPM2_Duplicate, the TPM's only way to move a key out, is refused (logged, not asserted: the
+# error may come from the missing policy session before the attribute check).
+attrs=$(tpm2_readpublic -c $H | grep -A1 attributes)
+if grep -q fixedtpm <<<"$attrs" && grep -q fixedparent <<<"$attrs"; then echo "ATOS-TPM fixed-attributes ok"
+else echo "ATOS-TPM fixed-attributes FAIL"; fi
+openssl pkey "${P[@]}" -in handle:$H -out exported.pem 2>/dev/null; echo "provider wrote: $(head -1 exported.pem 2>/dev/null || echo nothing)"
+if openssl pkey -in exported.pem -noout 2>/dev/null; then echo "ATOS-TPM no-plain-key FAIL"; else echo "ATOS-TPM no-plain-key ok"; fi
+if tpm2_duplicate -c $H -C null -G null -r dup.priv -s dup.seed >dup.log 2>&1; then echo "ATOS-TPM duplicate ACCEPTED"
+else echo "ATOS-TPM duplicate refused: $(grep -E '^ERROR: Esys_Duplicate' dup.log || tail -n 1 dup.log)"; fi
+tpm2_flushcontext -t 2>/dev/null
 
 k=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 | head -1)
 # 1. Secure Boot signature through the provider (systemd-sbsign), the UKI's PCR11 policy too (systemd-measure).

@@ -11,10 +11,16 @@
 #   install   installs the release image; systemd-boot will enrol the VM's PK/KEK and that db
 #   switch    boots release, copies the developer image into the guest's containers-storage and runs
 #             `bootc switch --transport containers-storage localhost/atos-dev:current`
-#   refused   boots the default entry (the developer UKI): the firmware must refuse it
-#   enrol     picks the release entry from the menu and appends the developer cert to db with the
-#             KEK, from the running system (no firmware step)
-#   boot      boots the default entry: the developer image, with Secure Boot on
+#   refused   boots the default entry (the developer UKI) and lets the machine keep rebooting: the
+#             firmware must refuse it on every try, until its boot counter (#56) runs out and
+#             systemd-boot boots the release entry by itself
+#   enrol     boots the default entry (release, after `refused`); a plain runtime variable write as
+#             the control, then writes the developer cert into db with the KEK, from the running
+#             system (no firmware step), trying three signed updates (keys())
+#   enrol-setup  fallback while `enrol` is refused: db = TEST db cert + developer cert, enrolled in
+#             setup mode (fresh firmware variables); re-arms the developer entry's counter by hand;
+#             boots the developer image, with Secure Boot on
+#   boot      boots the default entry again, firmware variables kept: the developer image
 #   tpm       ukify, sbsign, systemd-sbsign and systemd-measure with a TPM-resident key (tpm.sh)
 # Logs: tools/dev-vm/out/sealed/devimage-*.
 set -euo pipefail
@@ -107,6 +113,10 @@ dev_install() {
 DB='for v in PK-8be4df61-93ca-11d2-aa0d-00e098032b8c KEK-8be4df61-93ca-11d2-aa0d-00e098032b8c db-d719b2cb-3d3a-4596-a3bc-dad00e67656f; do
   echo "ATOS-DEV ${v%%-*}: $(grep -ao "Atos TEST [A-Za-z ()-]*" /sys/firmware/efi/efivars/$v | sort -u | tr "\n" ";")"; done'
 
+# The boot entries as systemd-boot sees them, with their boot counters, and what booted.
+# shellcheck disable=SC2016 # expands in the guest
+ENTRIES='bootctl list --no-pager 2>/dev/null | grep -E "^ *(title|id|tries):" | sed "s/^ */ATOS-DEV entry: /"
+echo "ATOS-DEV booted: $(sed -n s/^IMAGE_VERSION=//p /usr/lib/os-release | grep . || echo release)"'
 # shellcheck disable=SC2016 # expands in the guest
 SWITCH_ACTION="$DB"'
 printf "[[registry]]\nlocation = \"10.0.2.2:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/50-atos-dev.conf
@@ -117,12 +127,29 @@ if out=$(bootc switch --transport containers-storage localhost/atos-dev:current 
 else echo "ATOS-DEV switch refused: $(printf "%s" "$out" | tail -n 3 | tr "\n" " ")"; fi
 bootc status'
 dev_switch() { registry_up; VARS=$DVARS NET=1 ACTION=$SWITCH_ACTION boot "$DDISK" "$OUT/devimage-switch.log" fresh; }
-dev_refused() { VARS=$DVARS boot "$DDISK" "$OUT/devimage-refused.log"; }
+# Only a hang, a panic or emergency mode stop QEMU here: a refused UKI makes systemd-boot reboot
+# after 5 s, and each try uses one of the entry's tries until the release entry is the default.
+dev_refused() {
+  local log=$OUT/devimage-refused.log n
+  VARS=$DVARS HALT='Freezing execution|Entering emergency mode|Kernel panic' ACTION=$ENTRIES boot "$DDISK" "$log"
+  n=$(tr -d '\r' < "$log" | grep -ac 'Error loading EFI binary.*Access denied' || true)
+  if [ "$n" -ge 1 ] && grep -aq 'ATOS-DEV booted: release' "$log"; then
+    echo "ATOS-DEV refused: developer UKI refused $n times, then the release entry booted by itself"
+  else
+    echo "ATOS-DEV refused: UNEXPECTED ($n refusals, release booted: $(grep -ac 'ATOS-DEV booted: release' "$log"))" >&2; exit 1
+  fi
+}
 dev_enrol() { # tries each candidate until db holds the developer cert
   keys
   local action c
-  action="$DB
+  # Control first: a plain (non-authenticated) variable, written the same way, must land.
+  action="$ENTRIES
+$DB
 echo ATOS-DEV lockdown: \$(cat /sys/kernel/security/lockdown 2>&1), selinux: \$(getenforce)
+t=/sys/firmware/efi/efivars/AtosTest-4a3d6e0b-5f2c-4b7e-9a51-7465737400a7
+printf '\\x07\\x00\\x00\\x00hello' > /run/plain.var
+dd if=/run/plain.var of=\$t bs=64k status=none && echo \"ATOS-DEV plain variable write ok, reads back: \$(tail -c 5 \$t)\" || echo 'ATOS-DEV plain variable write FAILED'
+chattr -i \$t; rm -f \$t
 chattr -i $EFI_DB"
   for c in sbvarsign-append efitools-append efitools-full; do
     action+="
@@ -132,10 +159,11 @@ grep -aq 'Atos TEST dev' $EFI_DB || { echo $(base64 -w0 "$DKEYS/$c.var") | base6
   action+="
 journalctl -b -k --no-pager | grep -iE 'efivar|avc.*efi' | tail -n 5 | sed 's/^/ATOS-DEV kernel: /'
 $DB"
-  VARS=$DVARS MENU=1 ACTION=$action boot "$DDISK" "$OUT/devimage-enrol.log"
+  VARS=$DVARS ACTION=$action boot "$DDISK" "$OUT/devimage-enrol.log"
 }
 # shellcheck disable=SC2016 # expands in the guest
-BOOT_ACTION="$DB"'
+BOOT_ACTION="$ENTRIES
+$DB"'
 command -v strace >/dev/null && echo "ATOS-DEV strace present (developer layer)"
 bootc upgrade --check 2>&1 | tail -n 3 | sed "s/^/ATOS-DEV upgrade --check: /"'
 # Fallback while the runtime write above is refused (see the spike report): db = TEST db cert +
