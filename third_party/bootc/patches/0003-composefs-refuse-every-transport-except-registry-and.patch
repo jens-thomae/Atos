@@ -1,0 +1,79 @@
+From 00944924d7243fe60d07b680eac11b3466c0ac5b Mon Sep 17 00:00:00 2001
+From: Jens Thomae <jens.thomae@proton.me>
+Date: Mon, 9 Nov 2026 14:50:30 +0100
+Subject: [PATCH] composefs: refuse every transport except registry and
+ containers-storage
+
+Atos carried patch (#185). composefs switch and upgrade accept a target
+only from a registry, where containers-policy.json checks its signature,
+or from local container storage, which the policy refuses except for the
+developer reference (D-015). oci, oci-archive, docker-archive, dir,
+docker-daemon and any transport added later are refused in every mode,
+in is_image_pulled, before the image is opened, so the policy is never
+consulted for them and podman keeps using them.
+---
+ crates/lib/src/bootc_composefs/update.rs | 41 ++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/crates/lib/src/bootc_composefs/update.rs b/crates/lib/src/bootc_composefs/update.rs
+index f2527c8..e548b73 100644
+--- a/crates/lib/src/bootc_composefs/update.rs
++++ b/crates/lib/src/bootc_composefs/update.rs
+@@ -65,6 +65,8 @@ pub(crate) async fn is_image_pulled(
+     repo: &ComposefsRepository,
+     imgref: &ImageReference,
+ ) -> Result<(Option<Sha512HashValue>, ImgConfigManifest)> {
++    // Atos (#185): before the image is opened, so nothing is read from the source.
++    check_transport(imgref)?;
+     let imgref_repr = imgref.to_image_proxy_ref()?;
+     let img_config_manifest = get_container_manifest_and_config(&imgref_repr).await?;
+ 
+@@ -79,6 +81,45 @@ pub(crate) async fn is_image_pulled(
+     Ok((container_pulled, img_config_manifest))
+ }
+ 
++/// Atos carried patch (#185): composefs `switch` and `upgrade` accept only images from a registry
++/// (checked by the signature policy) or from local container storage (refused by the policy
++/// except for the developer reference, D-015). Every other transport is refused in every mode.
++pub(crate) fn check_transport(imgref: &ImageReference) -> Result<()> {
++    use ostree_ext::container::Transport;
++    match imgref.transport() {
++        Ok(Transport::Registry | Transport::ContainerStorage) => Ok(()),
++        _ => anyhow::bail!(
++            "Refusing image {} from transport '{}': only registry and containers-storage are allowed",
++            imgref.image,
++            imgref.transport
++        ),
++    }
++}
++
++#[cfg(test)]
++mod transport_tests {
++    use super::check_transport;
++    use crate::spec::ImageReference;
++
++    fn imgref(transport: &str) -> ImageReference {
++        ImageReference {
++            image: "/var/tmp/x".into(),
++            transport: transport.into(),
++            signature: None,
++        }
++    }
++
++    #[test]
++    fn allowed_transports() {
++        for t in ["registry", "containers-storage"] {
++            assert!(check_transport(&imgref(t)).is_ok(), "{t}");
++        }
++        for t in ["oci", "oci-archive", "docker-archive", "dir", "docker-daemon", "", "bogus"] {
++            assert!(check_transport(&imgref(t)).is_err(), "{t}");
++        }
++    }
++}
++
+ fn rm_staged_type1_ent(boot_dir: &Dir) -> Result<()> {
+     if boot_dir.exists(TYPE1_ENT_PATH_STAGED) {
+         boot_dir
+-- 
+2.50.1 (Apple Git-155)
+
