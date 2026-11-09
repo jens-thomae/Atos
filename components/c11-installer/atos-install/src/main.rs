@@ -20,6 +20,10 @@ const MAPPER: &str = "atos-root";
 const TARGET: &str = "/run/atos-install/target";
 const KEYFILE: &str = "/run/atos-install/install.key";
 const STORAGE_CONF: &str = "/run/atos-install/storage.conf";
+/// Install-only trust policy (#176), shipped on the ISO (`install-policy.json`). The image's own
+/// policy rejects local `containers-storage` images (#150), but `bootc install` reads its own image
+/// from local storage. Only the install container gets this file; the installed system has none.
+const INSTALL_POLICY: &str = "/usr/share/atos-install/install-policy.json";
 const STORAGE_CONF_TOML: &str = r#"[storage]
 driver = "overlay"
 graphroot = "/run/atos-install/storage"
@@ -251,6 +255,8 @@ fn install(a: &Args) -> Result<(), String> {
         "/var/lib/containers:/var/lib/containers",
         "-v",
         &format!("{TARGET}:/target"),
+        "-v",
+        &format!("{INSTALL_POLICY}:/etc/containers/policy.json:ro"),
         "--pull=never",
         &a.target_imgref,
         "bootc",
@@ -264,6 +270,11 @@ fn install(a: &Args) -> Result<(), String> {
     ])?;
     // bootc leaves the root mounted read-only when it is done.
     sh(&["mount", "-o", "remount,rw", TARGET])?;
+    // The install policy must not reach the installed system: there the image's /usr policy applies.
+    let leaked = deployment_etc(Path::new(TARGET))?.join("containers/policy.json");
+    if leaked.exists() {
+        return Err(format!("{} exists after the install", leaked.display()));
+    }
     install_seal_unit(Path::new(TARGET))?;
 
     sh(&["umount", &boot])?;
@@ -373,6 +384,16 @@ mod tests {
         assert_eq!(a.disk.as_deref(), Some("/dev/vdb"));
         assert!(a.yes);
         assert_eq!(a.target_imgref, "ghcr.io/jens-thomae/atos/c1-base:latest");
+    }
+
+    #[test]
+    fn install_policy_accepts_only_the_payload_store() {
+        let p = include_str!("../../install-policy.json");
+        assert!(p.contains(r#""default": [{ "type": "reject" }]"#));
+        assert!(p.contains(
+            r#""[overlay@/var/lib/containers/storage]": [{ "type": "insecureAcceptAnything" }]"#
+        ));
+        assert_eq!(p.matches("insecureAcceptAnything").count(), 1);
     }
 
     #[test]
