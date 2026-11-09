@@ -1,13 +1,17 @@
 #!/bin/sh
-# Boot health check (#56): a boot is good once the desktop session runs. Passes when atos-comp runs
-# as `atos`, has its Wayland socket and is still running 10 s later; fails as soon as greetd fell
-# back to its text login (the session ended). The unit's TimeoutStartSec= bounds the wait.
-uid=$(id -u atos) || exit 1
+# Boot health check (#56; rule A1, owner decision on #187): a boot is good once greetd shows its login
+# prompt, that is greetd is active and the same agreety process has been waiting for 10 s. A desktop
+# session that already runs (someone logged in within those 10 s) counts as well. The compositor and
+# Mesa start only after login, so this check does not cover them: "Previous version" in the boot menu
+# is the way back from an update that breaks them. Fails as soon as greetd has failed; the unit's
+# TimeoutStartSec= bounds the wait.
 while :; do
-  if pgrep -u atos -x atos-comp >/dev/null && ls /run/user/"$uid"/wayland-[0-9] >/dev/null 2>&1; then
+  systemctl -q is-failed greetd.service && { echo "greetd failed: boot is bad"; exit 1; }
+  if p=$(pgrep -x agreety); then
     sleep 10
-    pgrep -u atos -x atos-comp >/dev/null && { echo "session up: boot is good"; exit 0; }
+    [ "$(pgrep -x agreety)" = "$p" ] && systemctl -q is-active greetd.service \
+      && { echo "login prompt up: boot is good"; exit 0; }
   fi
-  pgrep -x agreety >/dev/null && { echo "session ended: boot is bad"; exit 1; }
+  pgrep -u atos -x atos-comp >/dev/null && { echo "session up: boot is good"; exit 0; }
   sleep 1
 done

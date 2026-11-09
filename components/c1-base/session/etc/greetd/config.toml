@@ -1,12 +1,10 @@
-# Autologin straight into the compositor (docs/components/c1-base/README.md, "Session").
-# default_session only runs if the initial session ends; it shows a text login on tty1 as a fallback.
+# Login on tty1, then the compositor (docs/components/c1-base/README.md, "Session"). No autologin
+# (owner decision A on #187): the disk unlocks silently through the TPM (D-015), so the user's
+# password is what protects the session. agreety asks for user and password and starts atos-comp;
+# when the session ends it asks again. A graphical greeter can replace it here (C3/C11).
 [terminal]
 vt = 1
 
 [default_session]
-command = "agreety --cmd /bin/bash"
+command = "agreety --cmd atos-comp"
 user = "greetd"
-
-[initial_session]
-command = "atos-comp"
-user = "atos"

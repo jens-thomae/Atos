@@ -151,7 +151,7 @@ Installed size by package (aarch64): `xorg-x11-drv-nvidia-cuda-libs` 497 MB, `-l
 
 D-017: a kernel or driver update ships only after this passes on the owner's machine. Install or `bootc switch` to the candidate image with Secure Boot on, then:
 
-1. **Boot to the desktop.** `bootctl status | grep 'Secure Boot'` shows `enabled (user)`.
+1. **Boot and log in** (tty1, `atos` and the install password; #187). `bootctl status | grep 'Secure Boot'` shows `enabled (user)`.
 2. **The right driver is bound.** `lsmod | grep -E '^(nvidia|nouveau)'` lists `nvidia_drm`, `nvidia_modeset`, `nvidia_uvm`, `nvidia`, and `nouveau` with use count 0. `cat /proc/driver/nvidia/version` shows `Open Kernel Module` and the pinned version. `journalctl -k -b | grep -iE 'NVRM|nvidia'` has no errors or `taint` warnings other than the out-of-tree note.
 3. **Options are applied.** `cat /sys/module/nvidia_drm/parameters/{modeset,fbdev}` prints `Y` twice. `grep -E 'PreserveVideoMemoryAllocations|TemporaryFilePath' /proc/driver/nvidia/params` shows `1` and `"/var/tmp"`. `ls /sys/class/drm/` has no simpledrm card left.
 4. **`nvidia-smi`** shows the RTX 4070 Ti, driver 615.78.08 and a sensible temperature and power draw at idle.

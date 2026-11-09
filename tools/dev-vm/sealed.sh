@@ -29,7 +29,7 @@
 #            `update <step>` runs one step; `update` runs all of them in order
 #   counting automatic rollback through boot counting (#56), on its own disk ~/sealed/counting.raw:
 #            images      as for `update`, plus four images that fail on a counted boot: dev-bad
-#                        (atos-comp exits), dev-hang (atos-comp never opens its socket), dev-panic
+#                        (the login prompt exits at once), dev-hang (greetd never starts it), dev-panic
 #                        (the kernel panics) and dev-emerg (the initrd enters emergency mode)
 #            install     installs dev-1, as `update install` does
 #            stage-good  boots dev-1, stages dev-2 (`bootc upgrade` writes its entry with `+3`)
@@ -131,7 +131,7 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
   [ -z "${MENU:-}" ] || serial=(-chardev socket,id=s0,path="$sock",server=on,wait=off,logfile="$log" -serial chardev:s0)
   echo "booting $disk, serial log: $log"
   rm -f "$log" "$sock"
-  # virtio-gpu: atos-comp needs a DRM device for the session the health check (#56) waits for.
+  # virtio-gpu: atos-comp needs a DRM device once someone logs in (the health check, #56, needs only the prompt).
   timeout "${TIMEOUT:-45m}" qemu-system-aarch64 -machine virt -cpu max -smp 4 -m 4G -display none \
     -device virtio-gpu-pci "${nic[@]}" \
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.secboot.fd \
@@ -324,9 +324,10 @@ update_rollback() { VARS=$UVARS ACTION='bootc rollback && bootc status' boot "$U
 update_back() { VARS=$UVARS boot "$UDISK" "$OUT/update-back.log"; }
 
 # Boot counting (#56). Each failing image is dev-2 plus one or two lines, from a copy of the
-# Containerfile: dev-bad's compositor exits at once (the session never comes up), dev-hang's never
-# opens its socket (the check times out), dev-panic's kernel panics (rdinit exits) and dev-emerg's
-# initrd goes to emergency mode. The last two fail before switch-root.
+# Containerfile: dev-bad's login prompt (agreety) exits at once, so greetd fails; dev-hang's greetd
+# never starts one (the check times out); the check needs only the prompt (A1 on #187).
+# dev-panic's kernel panics (rdinit exits) and dev-emerg's initrd goes to emergency mode. The last
+# two fail before switch-root.
 CDISK=$WORK/counting.raw CVARS=$WORK/counting-vars.fd
 # Printed after the report: the boot entries, with their counters.
 ENTRIES_ACTION='bootctl list --no-pager 2>&1 | grep -E "title|id:|tries" || true
@@ -345,9 +346,10 @@ variant() { # <name> <RUN line>...: builds dev-<name> and pushes it to the regis
 }
 counting_images() {
   update_images
-  variant bad 'ln -sf false /usr/bin/atos-comp'
-  variant hang "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > /usr/bin/atos-comp"
-  variant hang-target "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > /usr/bin/atos-comp"
+  # shellcheck disable=SC2016 # expands in the image build
+  variant bad 'ln -sf false "$(command -v agreety)"'
+  variant hang "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > \"\$(command -v greetd)\""
+  variant hang-target "printf '#!/bin/sh\\\\nsleep infinity\\\\n' > \"\$(command -v greetd)\""
   variant panic "echo 'kargs = [\"rdinit=/usr/bin/true\"]' > /usr/lib/bootc/kargs.d/90-dev-panic.toml"
   variant emerg "echo 'kargs = [\"rd.systemd.unit=emergency.target\"]' > /usr/lib/bootc/kargs.d/90-dev-emerg.toml"
 }
