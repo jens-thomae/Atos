@@ -47,6 +47,8 @@
 #                      trust-wrong (1.30, signed with the wrong key), trust-old (1.0, signed) and
 #                      trust-mid (1.20, signed: newer than trust-1, older than trust-2)
 #            install   installs trust-1, tracking :latest, which points at trust-1
+#            local     on a copy of that disk: `bootc switch --transport containers-storage` refused
+#                      (#150); with the developer-mode policy in /etc only the fixed reference passes
 #            stage     points :latest at trust-2, boots trust-1, tries `bootc switch` to the
 #                      unsigned, wrongly signed and old images (all refused), then `bootc upgrade`
 #                      stages trust-2; then the guest points :latest at trust-mid (refused: the
@@ -64,6 +66,9 @@ IMAGE=localhost/c1-base
 WORK=~/sealed
 OUT="$HERE/out/sealed"
 mkdir -p "$WORK" "$OUT"
+# The image's policy refuses local images (#150), and `bootc install` reads its own image from
+# local storage. So the install container alone gets the installer's install-only policy (#176).
+INSTALL_POLICY=$HERE/../../components/c11-installer/install-policy.json
 
 # Once startup has finished: prints Secure Boot state, `bootc status`, the mounts, the image's
 # IMAGE_VERSION and boot time, runs the optional `atos.action` credential (ACTION=<script>),
@@ -154,6 +159,7 @@ step_disk() {
   rm -f "$WORK/disk.raw" && truncate -s 20G "$WORK/disk.raw"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE" bootc install to-disk --generic-image --via-loopback /out/disk.raw
 }
 
@@ -292,6 +298,7 @@ update_install() { # [disk]
   rm -f "$disk" && truncate -s 20G "$disk"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE:dev-1" bootc install to-disk --generic-image --via-loopback \
     --target-imgref "$GUEST_REG:latest" "/out/$(basename "$disk")"
 }
@@ -413,6 +420,7 @@ trust_install() {
   rm -f "$TDISK" && truncate -s 20G "$TDISK"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE:trust-1" bootc install to-disk --generic-image --via-loopback \
     --target-imgref "$GUEST_REG:latest" "/out/$(basename "$TDISK")"
 }
@@ -443,7 +451,44 @@ bootc status'
 trust_stage() {
   registry_up
   sudo podman push -q --tls-verify=false "$IMAGE:trust-2" "docker://$REG:latest"
-  VARS=$TVARS NET=1 ACTION=$TRUST_ACTION boot "$TDISK" "$OUT/trust-stage.log" fresh
+  # Four pulls of a 3 GB image under emulation: more than the default 45 min (2026-11-08).
+  VARS=$TVARS NET=1 TIMEOUT=${TIMEOUT:-90m} ACTION=$TRUST_ACTION boot "$TDISK" "$OUT/trust-stage.log" fresh
+}
+# Local images (#150), in the guest: refused by default; with the developer-mode exception in
+# /etc (trust-policy.md, "Local images"), only the fixed reference passes; without it, refused again.
+# shellcheck disable=SC2016 # expands in the guest
+LOCAL_ACTION='printf "[[registry]]\nlocation = \"10.0.2.2:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/50-atos-dev.conf
+until curl -sf http://10.0.2.2:5000/v2/ >/dev/null; do sleep 2; done
+echo "ATOS-LOCAL /etc policy after install: $(ls /etc/containers/policy.json 2>&1)"
+echo "ATOS-LOCAL store: $(podman info --format "{{.Store.GraphDriverName}}@{{.Store.GraphRoot}}")"
+skopeo copy -q docker://10.0.2.2:5000/atos/c1-base:trust-2 containers-storage:localhost/atos-dev:current && podman tag localhost/atos-dev:current localhost/other:test && echo "ATOS-LOCAL copied"
+switch() { # <label> <local ref>
+  if out=$(bootc switch --transport containers-storage "$2" 2>&1); then echo "ATOS-LOCAL $1 $2 ACCEPTED"
+  else echo "ATOS-LOCAL $1 $2 refused: $(printf "%s" "$out" | tail -n 2 | tr "\n" " ")"; fi
+}
+switch default localhost/other:test
+switch default localhost/atos-dev:current
+# Other users of local storage: build and push override the policy, save does not.
+printf "FROM localhost/other:test\nLABEL atos.test=1\n" > /var/tmp/Containerfile.local
+podman build -q -f /var/tmp/Containerfile.local -t localhost/built:test /var/tmp >/dev/null && echo "ATOS-LOCAL podman build ok" || echo "ATOS-LOCAL podman build refused"
+podman push -q --tls-verify=false localhost/built:test docker://10.0.2.2:5000/atos/local-push:test && echo "ATOS-LOCAL podman push ok" || echo "ATOS-LOCAL podman push refused"
+podman save -q -o /var/tmp/built.tar localhost/built:test 2>&1 | tail -n 1 | sed "s/^/ATOS-LOCAL podman save: /"; [ ! -s /var/tmp/built.tar ] || echo "ATOS-LOCAL podman save ok"
+# Developer mode on: the image policy plus one scope, written to /etc (which wins over /usr).
+sed "s#^\( *\)\"containers-storage\": {#&\n\1    \"[overlay@/var/lib/containers/storage]localhost/atos-dev:current\": [{ \"type\": \"insecureAcceptAnything\" }],#" /usr/share/containers/policy.json > /etc/containers/policy.json
+grep -A3 "\"containers-storage\"" /etc/containers/policy.json
+switch devmode localhost/other:test
+switch devmode localhost/atos-dev:current
+echo "ATOS-LOCAL staged entries: $(ls /boot/loader/entries.staged 2>/dev/null | tr "\n" " ")"
+# Developer mode off: the file goes, the default applies again.
+rm /etc/containers/policy.json
+switch off localhost/other:test
+if out=$(bootc upgrade --check 2>&1); then echo "ATOS-LOCAL off upgrade --check ACCEPTED"; else echo "ATOS-LOCAL off upgrade --check refused: $(printf "%s" "$out" | tail -n 1)"; fi
+bootc status'
+# On a copy of the freshly installed disk, so the other steps are unaffected.
+trust_local() {
+  registry_up
+  cp --sparse=always "$TDISK" "$WORK/trust-local.raw"
+  VARS=$WORK/trust-local-vars.fd NET=1 TIMEOUT=90m ACTION=$LOCAL_ACTION boot "$WORK/trust-local.raw" "$OUT/trust-local.log" fresh
 }
 trust_apply() { VARS=$TVARS boot "$TDISK" "$OUT/trust-apply.log"; }
 trust_previous() { VARS=$TVARS MENU=1 boot "$TDISK" "$OUT/trust-previous.log"; }
@@ -456,6 +501,6 @@ case "${1:-}" in
   all) step_build; step_disk; step_boot; step_tamper ;;
   update) for s in ${2:-images install stage apply previous rollback back}; do "update_$s"; done ;;
   counting) for s in ${2:-images install stage-good good bad hang hang-target panic emerg}; do "counting_$s"; done ;;
-  trust) for s in ${2:-images install stage apply previous}; do "trust_$s"; done ;;
-  *) sed -n '2,58p' "$0" >&2; exit 2 ;;
+  trust) for s in ${2:-images install local stage apply previous}; do "trust_$s"; done ;;
+  *) sed -n '2,60p' "$0" >&2; exit 2 ;;
 esac
