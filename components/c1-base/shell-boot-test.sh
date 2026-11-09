@@ -69,6 +69,12 @@ echo "ATOS-SHELL-RSS-KB $(ps -u atos -o rss=,comm= | awk "\$2 == \"atos-shell\" 
 echo "ATOS-USED-MB $(awk "/MemTotal/ { t = \$2 } /MemAvailable/ { a = \$2 } END { print int((t - a) / 1024) }" /proc/meminfo)"
 echo "ATOS-MEM $(grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|Slab|SUnreclaim|AnonPages|KernelStack|PageTables):" /proc/meminfo | tr -s " " | tr "\n" ";")"
 ps -eo rss,comm --sort=-rss | head -15 | sed "s/^/ATOS-PS /"
+# PSS (shared pages divided among their users) per process, summed, plus unreclaimable slab: what the running
+# processes and the kernel hold, without the page cache MemAvailable only half discounts. Breakdown, not a gate.
+for d in /proc/[0-9]*; do
+  p=$(awk "/^Pss:/ { print \$2 }" $d/smaps_rollup 2>/dev/null); [ -n "$p" ] && echo "$p $(cat $d/comm)"
+done | sort -rn | awk "{ t += \$1; n[\$2] += \$1; if (\$2 == \"atos-shell\") sh = \$1 } END { for (k in n) if (n[k] > 20000) print \"ATOS-PSS-PROC\", n[k], k; print \"ATOS-PSS-TOTAL-KB\", t; print \"ATOS-PSS-SHELL-KB\", sh }"
+echo "ATOS-SUNRECLAIM-KB $(awk "/^SUnreclaim:/ { print \$2 }" /proc/meminfo)"
 # The shortcut itself: the host presses Super through the QEMU monitor (atos-comp'"'"'s default binding), which runs
 # `atos-shell --launcher` from atos-comp. Nothing here calls the shell.
 echo ATOS-PRESS-SUPER
