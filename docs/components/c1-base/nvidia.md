@@ -151,7 +151,7 @@ Installed size by package (aarch64): `xorg-x11-drv-nvidia-cuda-libs` 497 MB, `-l
 
 D-017: a kernel or driver update ships only after this passes on the owner's machine. Install or `bootc switch` to the candidate image with Secure Boot on, then:
 
-1. **Boot to the desktop.** `bootctl status | grep 'Secure Boot'` shows `enabled (user)`.
+1. **Boot and log in** (tty1, `atos` and the install password; #187). `bootctl status | grep 'Secure Boot'` shows `enabled (user)`.
 2. **The right driver is bound.** `lsmod | grep -E '^(nvidia|nouveau)'` lists `nvidia_drm`, `nvidia_modeset`, `nvidia_uvm`, `nvidia`, and `nouveau` with use count 0. `cat /proc/driver/nvidia/version` shows `Open Kernel Module` and the pinned version. `journalctl -k -b | grep -iE 'NVRM|nvidia'` has no errors or `taint` warnings other than the out-of-tree note.
 3. **Options are applied.** `cat /sys/module/nvidia_drm/parameters/{modeset,fbdev}` prints `Y` twice. `grep -E 'PreserveVideoMemoryAllocations|TemporaryFilePath' /proc/driver/nvidia/params` shows `1` and `"/var/tmp"`. `ls /sys/class/drm/` has no simpledrm card left.
 4. **`nvidia-smi`** shows the RTX 4070 Ti, driver 615.78.08 and a sensible temperature and power draw at idle.
@@ -163,3 +163,12 @@ D-017: a kernel or driver update ships only after this passes on the owner's mac
 10. **NGX updater off.** `ls ~/.config/nvidia-ngx-conf.json /usr/share/nvidia/nvidia-ngx-conf.json` finds nothing.
 
 A failure in steps 1–4, 6, 7 or 9 holds the update. Record the result on the release card.
+
+**What the image provides for this test** (checked for #187, 2026-11-09, against the image, not on the RTX 4070 Ti):
+
+- **A terminal.** `xterm` from the launcher once the shell is in the image (#186), or a text login on Ctrl+Alt+F2 as `atos` with the password set at install. Until #186 merges, only the VT login.
+- **Root.** `atos` is in `wheel`; `sudo` asks for the install password. Steps 1–4, 7 and 10 run as `atos` (`journalctl -k` reads the journal through the `wheel` ACL, or use `sudo`); step 9 needs `sudo`.
+- **`nvidia-smi`** (step 4) comes with `xorg-x11-drv-nvidia-cuda`.
+- **Steam** (step 8): `flatpak install flathub com.valvesoftware.Steam` works with no setup. The NVIDIA GL runtime extension flatpak adds for the running driver (`org.freedesktop.Platform.GL.nvidia-615-78-08`, plus `GL32` for 32-bit games) has to exist on Flathub for that exact version; without it the sandbox has no NVIDIA GL driver and step 8 fails. Portals are not in the image (C10), so file pickers and opening links from Steam may not work.
+
+**Still impossible from the image:** step 5. The `budgets` binary is not in the image; run it from a build of `tools/budgets` (copied to `/var/home/atos`, which is outside the sealed `/usr`).

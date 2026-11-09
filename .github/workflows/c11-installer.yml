@@ -94,7 +94,7 @@ jobs:
         env:
           TARGET_IMGREF: ${{ env.PAYLOAD }}
         run: |
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf swtpm swtpm-tools python3-virt-firmware > /dev/null
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf swtpm swtpm-tools python3-virt-firmware socat > /dev/null
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
           v=components/c11-installer/vm-test.sh out=components/c11-installer/out
@@ -107,6 +107,14 @@ jobs:
           $v boot
           grep -aq 'Secure Boot: enabled (user)' $out/boot.log
           grep -aq 'bound to the TPM with PCR 7' $out/boot.log
+          # #187: the administrator account works with the typed password, and only with it.
+          for m in ADMIN-PASSWORD-YESCRYPT ADMIN-SUDO-OK ADMIN-SUDO-WRONG-REFUSED; do grep -aq "ATOS-$m" $out/boot.log; done
+          # Flatpak, Flathub and the password login (no autologin) come with c1-base (#187); the published
+          # image has them only once that has merged and published, so this check is skipped for older payloads.
+          if sudo podman run --rm "$TARGET_IMGREF" rpm -q flatpak >/dev/null; then
+            for m in 'FLATPAK-REMOTE flathub' 'FLATPAK-OS-INFO false' TERMINAL-ENTRY 'SESSION-CHECK-OK login prompt up: boot is good' LOGIN-READY LOGIN-OK; do grep -aq "ATOS-$m" $out/boot.log; done
+            if grep -aq ATOS-LOGIN-AUTOLOGIN-FOUND $out/boot.log; then echo "::error::autologin is still on"; exit 1; fi
+          fi
           $v reboot
           grep -aq ATOS-REPORT-END $out/reboot.log
       # The unattended install prints its recovery key to the serial log. It belongs to a throwaway VM

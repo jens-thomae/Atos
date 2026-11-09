@@ -5,10 +5,11 @@
 //! systemd-gpt-auto-generator finds and unlocks it. Keyslots at the end of the install:
 //! a recovery key, shown once, and a TPM2 slot bound to no PCRs (this machine's TPM only).
 //! On first boot `atos-tpm-seal` replaces that slot with one bound to PCR7 (+PCR14 on B2).
+//! The session user `atos` gets the password asked for here and is an administrator (#187).
 //! Docs: docs/components/c11-installer/README.md.
 
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::time::Instant;
@@ -43,7 +44,8 @@ fn usage() -> ! {
         "usage: atos-install [--disk DEVICE] [--yes] [--target-imgref IMGREF]\n\
          \n\
          Erases DEVICE and installs Atos, encrypted. Without --disk, asks which disk.\n\
-         --yes            do not ask anything (tests only)\n\
+         Always reads the administrator password twice, from standard input.\n\
+         --yes            do not ask anything else (tests only)\n\
          --target-imgref  image to install and update from; the ISO carries it offline"
     );
     std::process::exit(2)
@@ -154,6 +156,69 @@ fn choose_disk() -> Result<String, String> {
         .ok_or_else(|| format!("no disk {i}"))
 }
 
+/// The session user (session/usr/lib/sysusers.d/atos.conf in c1-base, which greetd logs in).
+const ADMIN: &str = "atos";
+
+/// The administrator password, typed twice. It is never echoed or logged and exists only in
+/// memory and on chpasswd's standard input. Without a terminal (the KVM test) the lines are read
+/// as they come; end of input fails rather than looping.
+fn ask_password(input: &mut impl BufRead, tty: bool) -> Result<String, String> {
+    for _ in 0..3 {
+        let first = read_secret(
+            input,
+            tty,
+            &format!("Password for the administrator account \"{ADMIN}\": "),
+        )?;
+        let again = read_secret(input, tty, "Type the password again: ")?;
+        let ok = !first.is_empty() && first == again;
+        wipe(again);
+        if ok {
+            return Ok(first);
+        }
+        println!(
+            "{}",
+            if first.is_empty() {
+                "The password must not be empty."
+            } else {
+                "The passwords do not match."
+            }
+        );
+        wipe(first);
+    }
+    Err("no password set, nothing changed".into())
+}
+
+fn read_secret(input: &mut impl BufRead, tty: bool, prompt: &str) -> Result<String, String> {
+    print!("{prompt}");
+    io::stdout().flush().ok();
+    if tty {
+        sh(&["stty", "-echo"])?;
+    }
+    let mut s = String::new();
+    let read = input.read_line(&mut s);
+    if tty {
+        sh(&["stty", "echo"])?;
+        println!();
+    }
+    match read {
+        Ok(0) => Err("no password given (end of input), nothing changed".into()),
+        Ok(_) => {
+            // Only the line ending: spaces are part of the password.
+            let end = s.trim_end_matches(['\n', '\r']).len();
+            s.truncate(end);
+            Ok(s)
+        }
+        Err(e) => Err(format!("reading the password: {e}")),
+    }
+}
+
+/// ponytail: best effort; earlier buffer copies from read_line can remain in freed memory.
+fn wipe(s: String) {
+    let mut b = s.into_bytes();
+    b.fill(0);
+    std::hint::black_box(&b);
+}
+
 fn install(a: &Args) -> Result<(), String> {
     let arch = std::env::consts::ARCH;
     let root_type = root_type(arch).ok_or_else(|| format!("unsupported architecture {arch}"))?;
@@ -168,6 +233,7 @@ fn install(a: &Args) -> Result<(), String> {
     {
         return Err("cancelled, nothing changed".into());
     }
+    let password = ask_password(&mut io::stdin().lock(), io::stdin().is_terminal())?;
     let start = Instant::now();
     let (esp, root) = (partition(&disk, 1), partition(&disk, 2));
     let mapped = format!("/dev/mapper/{MAPPER}");
@@ -288,6 +354,9 @@ fn install(a: &Args) -> Result<(), String> {
     if leaked.exists() {
         return Err(format!("{} exists after the install", leaked.display()));
     }
+    println!("Creating the administrator account \"{ADMIN}\"");
+    create_admin(Path::new(TARGET), &password)?;
+    wipe(password);
     install_seal_unit(Path::new(TARGET))?;
 
     sh(&["umount", &boot])?;
@@ -341,6 +410,80 @@ fn install_seal_unit(target: &Path) -> Result<(), String> {
     label(&unit_dir, &wants)?;
     label(&unit_dir, &unit_dir.join("atos-tpm-seal.service"))?;
     label(&unit_dir, &link)
+}
+
+/// Adds the session user to the deployment's /etc as a member of `wheel` (sudo and polkit admin
+/// on Fedora) with `password`, hashed by chpasswd as login.defs says (yescrypt). sysusers.d then
+/// finds the user on first boot and changes nothing; tmpfiles.d creates the home directory.
+fn create_admin(target: &Path, password: &str) -> Result<(), String> {
+    let etc = deployment_etc(target)?;
+    let root = etc.parent().ok_or("deployment root")?.to_string_lossy();
+    let root = root.as_ref();
+    // useradd and chpasswd replace these files, which drops their labels (shadow_t etc.). Keep the
+    // deployment's labels and set them again below. Not setfiles with the deployment's file_contexts:
+    // the live system's kernel policy rejects contexts it lacks (flatpak's), so it refuses them all.
+    let files = ["passwd", "group", "shadow", "gshadow", "subuid", "subgid"];
+    let mut labels = vec![];
+    for name in files {
+        let f = etc.join(name);
+        let out = Command::new("stat")
+            .args(["-c", "%C"])
+            .arg(&f)
+            .output()
+            .map_err(|e| e.to_string())?;
+        out.status
+            .success()
+            .then_some(())
+            .ok_or_else(|| format!("no label on {}", f.display()))?;
+        labels.push(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    }
+    sh(&[
+        "useradd",
+        "--prefix",
+        root,
+        "--no-create-home",
+        "--home-dir",
+        "/var/home/atos",
+        "--shell",
+        "/bin/bash",
+        "--comment",
+        "Atos user",
+        "--groups",
+        "wheel",
+        ADMIN,
+    ])?;
+    let mut chpasswd = Command::new("chpasswd")
+        .args(["--prefix", root])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let mut stdin = chpasswd.stdin.take().ok_or("chpasswd stdin")?;
+    // Written in pieces so no further copy of the password is made.
+    [
+        ADMIN.as_bytes(),
+        b":".as_slice(),
+        password.as_bytes(),
+        b"\n".as_slice(),
+    ]
+    .iter()
+    .try_for_each(|b| stdin.write_all(b))
+    .map_err(|e| format!("chpasswd: {e}"))?;
+    drop(stdin);
+    let st = chpasswd.wait().map_err(|e| e.to_string())?;
+    st.success().then_some(()).ok_or("chpasswd failed")?;
+    for (name, label) in files.iter().zip(&labels) {
+        for f in [etc.join(name), etc.join(format!("{name}-"))] {
+            if f.exists() {
+                sh(&["chcon", label, f.to_str().ok_or("path")?])?;
+            }
+        }
+    }
+    // Fedora's file_contexts gives the lock file the passwd label.
+    let lock = etc.join(".pwd.lock");
+    if lock.exists() {
+        sh(&["chcon", &labels[0], lock.to_str().ok_or("path")?])?;
+    }
+    Ok(())
 }
 
 /// The composefs backend keeps each deployment's /etc in `state/deploy/<id>/etc`.
@@ -407,6 +550,17 @@ mod tests {
             r#""[overlay@/var/lib/containers/storage]": [{ "type": "insecureAcceptAnything" }]"#
         ));
         assert_eq!(p.matches("insecureAcceptAnything").count(), 1);
+    }
+
+    #[test]
+    fn password_twice_spaces_kept_mismatch_retried_eof_fails() {
+        let ask = |s: &str| ask_password(&mut s.as_bytes(), false);
+        assert_eq!(ask(" a b: \n a b: \n").unwrap(), " a b: ");
+        assert_eq!(ask("x\r\nx\r\n").unwrap(), "x");
+        assert_eq!(ask("a\nb\n\n\nc\nc\n").unwrap(), "c");
+        assert!(ask("a\nb\n").is_err());
+        assert!(ask("a\nb\na\nb\na\nb\nc\nc\n").is_err());
+        assert!(ask("").is_err());
     }
 
     #[test]

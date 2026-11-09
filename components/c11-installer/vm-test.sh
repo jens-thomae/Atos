@@ -34,18 +34,24 @@ build_arg=()
 [ -z "${BASE:-}" ] || build_arg=(--build-arg "BASE=$BASE")
 # The image the installed system tracks; CI sets it to the published image.
 TARGET_IMGREF=${TARGET_IMGREF:-$GUEST_REG:latest}
+# The administrator password the unattended install types (#187); a test value for a throwaway disk.
+# Spaces and a colon check that it reaches chpasswd unchanged.
+TEST_PASSWORD='Atos test: 1'
+# The QEMU monitor, for typing at the login prompt (#187).
 
 # The dev VM is aarch64 under emulation; CI is x86_64 with KVM.
 case "$(uname -m)" in
   aarch64)
     QEMU=(qemu-system-aarch64 -machine virt) F=/usr/share/AAVMF
     CODE_SB=$F/AAVMF_CODE.secboot.fd CODE_NOSB=$F/AAVMF_CODE.no-secboot.fd VARS0=$F/AAVMF_VARS.fd
-    TPMDEV=tpm-tis-device SERIAL=ttyAMA0 ;;
+    # virt has no keyboard; the login (#187) types on this one. q35 has PS/2, and QEMU sends a key to
+    # every keyboard, so x86_64 gets no second one (it would type each key twice).
+    TPMDEV=tpm-tis-device SERIAL=ttyAMA0 KBD=(-device qemu-xhci -device usb-kbd) ;;
   x86_64)
     # shellcheck disable=SC2054 # commas are QEMU option syntax
     QEMU=(qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on) F=/usr/share/OVMF
     CODE_SB=$F/OVMF_CODE_4M.secboot.fd CODE_NOSB=$F/OVMF_CODE_4M.fd VARS0=$F/OVMF_VARS_4M.fd
-    TPMDEV=tpm-tis SERIAL=ttyS0 ;;
+    TPMDEV=tpm-tis SERIAL=ttyS0 KBD=() ;;
   *) echo "unsupported architecture" >&2; exit 1 ;;
 esac
 # Per QEMU run; with KVM a prompt hidden on tty0 then fails in minutes, not after an hour.
@@ -70,7 +76,7 @@ StandardError=tty
 TTYPath=/dev/'"$SERIAL"'
 # Through cat, so systemd tools see no terminal (no size queries or resets); sleep 1 lets the
 # serial port drain before poweroff (a report once lost its last lines).
-ExecStart=/bin/sh -c "{ systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; } 2>&1 | cat; sleep 1; systemctl poweroff --no-block"'
+ExecStart=/bin/sh -c "{ systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; sh $$CREDENTIALS_DIRECTORY/atos.check; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; } 2>&1 | cat; sleep 1; systemctl poweroff --no-block"'
 
 # The unattended install: what a user does on tty1, minus the questions.
 INSTALL_UNIT="[Unit]
@@ -82,12 +88,40 @@ Type=exec
 StandardOutput=tty
 StandardError=tty
 TTYPath=/dev/$SERIAL
-ExecStart=/bin/sh -c 'atos-install --disk /dev/vda --yes --target-imgref $TARGET_IMGREF && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
+ExecStart=/bin/sh -c '{ echo \"$TEST_PASSWORD\"; echo \"$TEST_PASSWORD\"; } | atos-install --disk /dev/vda --yes --target-imgref $TARGET_IMGREF && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
 
 swtpm_up() {
   mkdir -p "$TPM"
   swtpm socket --tpm2 --tpmstate dir="$TPM" --ctrl type=unixio,path="$WORK/swtpm.sock" \
     --flags startup-clear --daemon --pid file="$WORK/swtpm.pid"
+}
+
+# mon <command>: one QEMU monitor command, one connection (as in c1-base's shell-boot-test.sh; a
+# single long-lived connection lost the typing, run 42681998225).
+mon() { echo "$1" | socat - UNIX-CONNECT:"$WORK/mon.sock" >/dev/null; }
+# type_keys <text>: types <text> and Enter on the guest's keyboard through the QEMU monitor.
+type_keys() {
+  local s=$1 c k i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case $c in
+      [a-z0-9]) k=$c ;;
+      [A-Z]) k=shift-${c,,} ;;
+      ' ') k=spc ;;
+      :) k=shift-semicolon ;;
+      *) echo "type_keys: no key for '$c'" >&2; return 1 ;;
+    esac
+    mon "sendkey $k"
+  done
+  mon "sendkey ret"
+}
+
+# The login on tty1 (#187): what a user types at greetd's prompt, once the report says it is up.
+login_tty1() {
+  type_keys atos
+  sleep 2
+  type_keys "$TEST_PASSWORD"
+  echo "login typed on tty1"
 }
 
 # qemu_run <log> <extra qemu args...>; env CODE=<firmware code> (default: Secure Boot capable).
@@ -103,20 +137,46 @@ qemu_run() {
     -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
     -device "$TPMDEV",tpmdev=tpm0 \
     -drive if=none,id=hd,format=raw,file="$DISK" -device virtio-blk-pci,drive=hd,bootindex=1 \
+    -monitor unix:"$WORK/mon.sock",server=on,wait=off "${KBD[@]}" \
     -serial file:"$log" "$@" &
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
-  local pid=$!
+  local pid=$! typed=
   local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
     m=$(tr -d '\r' < "$log" 2>/dev/null | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
     [ -z "$m" ] || { echo "HALT on: $m"; kill "$pid"; break; }
+    if [ -z "$typed" ] && grep -aq ATOS-LOGIN-READY "$log"; then login_tty1 && typed=1; fi
     sleep 5
   done
   wait "$pid" || true
   tr -d '\r' < "$log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -av 'EFI Internal Shell' \
-    | grep -aE "atos-install|atos-tpm-seal|ATOS-|Secure Boot|Setup Mode|SLOT|^ *[0-9]+ (recovery|tpm2|password)|LUKS|crypt|booted|staged|IMAGE_VERSION|Startup finished|recovery key|Installing|Partitioning|Encrypting|installed on|$halt" || true
+    | grep -aE "atos-install|atos-tpm-seal|ATOS-|Secure Boot|Setup Mode|SLOT|^ *[0-9]+ (recovery|tpm2|password)|LUKS|crypt|booted|staged|IMAGE_VERSION|uid=|Startup finished|recovery key|Installing|Partitioning|Encrypting|installed on|$halt" || true
 }
+
+# The administrator account and the apps setup (#187), checked on every boot. sudo checks the
+# password through PAM (pam_unix, unix_chkpwd: shadow labels matter under enforcing SELinux).
+# shellcheck disable=SC2016 # expands in the guest
+ADMIN_CHECK='pw=$(cat "$CREDENTIALS_DIRECTORY/atos.test-password")
+dmesg -n 1 # kernel audit lines on the serial console split the markers (run 42687015461)
+# No autologin (#187): greetd waits at its prompt; the host types user and password on tty1. First,
+# before runuser below opens sessions of its own. s: the user'"'"'s logind sessions on tty1.
+s() { loginctl list-sessions --no-legend | grep -E " atos .*tty1"; }
+s >/dev/null && echo ATOS-LOGIN-AUTOLOGIN-FOUND
+# The boot health check (rule A1) once, before anyone has typed: it must call the waiting prompt good.
+r=$(timeout 120 /usr/libexec/atos/session-check 2>&1) && echo "ATOS-SESSION-CHECK-OK $r" || echo "ATOS-SESSION-CHECK-FAIL $r"
+pgrep -x agreety >/dev/null && echo ATOS-LOGIN-READY
+i=0; until s >/dev/null || [ $i -ge 120 ]; do sleep 1; i=$((i + 1)); done
+s && echo ATOS-LOGIN-OK
+sleep 5; pgrep -u atos -x atos-comp >/dev/null && echo ATOS-LOGIN-COMPOSITOR-RUNS
+id atos
+ls -Z /etc/passwd /etc/group /etc/shadow /etc/gshadow
+grep -q "^atos:[$]y[$]" /etc/shadow && echo ATOS-ADMIN-PASSWORD-YESCRYPT
+printf "%s\n" "$pw" | runuser -u atos -- sudo -S -k -p "" true && echo ATOS-ADMIN-SUDO-OK
+printf "wrong\n" | runuser -u atos -- sudo -S -k -p "" true 2>/dev/null || echo ATOS-ADMIN-SUDO-WRONG-REFUSED
+flatpak remotes --system --columns=name,url 2>&1 | sed "s/^/ATOS-FLATPAK-REMOTE /"
+echo "ATOS-FLATPAK-OS-INFO $(flatpak config --system --get report-os-info 2>&1)"
+grep -q "^Exec=xterm" /usr/share/applications/xterm.desktop && echo ATOS-TERMINAL-ENTRY'
 
 # boot <log>: boots the installed disk with the report unit (env ACTION, NET=1).
 boot() {
@@ -129,6 +189,8 @@ boot() {
     # Without KVM, udev in the initrd needs longer than the default 45 s to find the root.
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot\x2dluks.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
+    cred atos.check "$ADMIN_CHECK"
+    cred atos.test-password "$TEST_PASSWORD"
     [ -z "${ACTION:-}" ] || cred atos.action "$ACTION")
   # shellcheck disable=SC2054
   [ -z "${NET:-}" ] || nic=(-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile=)
@@ -181,6 +243,8 @@ step_install() {
     -device virtio-scsi-pci,id=scsi0 -drive if=none,id=cd,format=raw,media=cdrom,readonly=on,file="$ISO" \
     -device scsi-cd,drive=cd,bootindex=0 "${creds[@]}"
   grep -aq ATOS-INSTALL-OK "$OUT/install.log"
+  grep -aq 'Password for the administrator account' "$OUT/install.log"
+  ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" || { echo "the password is in the install log" >&2; exit 1; }
   echo "ATOS-INSTALL-TIME qemu_start_to_poweroff=$(( $(date +%s) - t0 ))s"
 }
 

@@ -2,8 +2,9 @@
 # Boots the built image and checks the shell (#186): installs it with `bootc install to-disk` (as
 # tools/dev-vm/sealed.sh `disk`), boots it under QEMU/KVM with OVMF Secure Boot (the TEST keys are
 # enrolled from outside, as components/c11-installer/vm-test.sh `enrol` does) and a virtio GPU, and
-# lets a one-off systemd unit (a credential: the image carries no test hook) check, as the logged-in
-# session: the dock draws its first frame, the launcher opens when the host presses the shortcut
+# lets a one-off systemd unit (a credential: the image carries no test hook) check, after the host
+# logged in at greetd's prompt on tty1 (#187: no autologin; `atos` gets a test password through
+# systemd-sysusers' first-boot credential, typed through the QEMU monitor), as the logged-in session: the dock draws its first frame, the launcher opens when the host presses the shortcut
 # (Super, sent through the QEMU monitor), a killed shell comes back while atos-comp keeps running, and the
 # shell's RSS and the idle desktop's RAM are within §7. QEMU's screendump keeps a picture of the
 # dock and of the open launcher; the picture is checked too (the dock's strip is not the plain
@@ -15,6 +16,8 @@ IMAGE=$1; OUT=$(mkdir -p "$2" && realpath "$2")
 HERE="$(cd "$(dirname "$0")" && pwd)"
 W=$(mktemp -d); trap 'sudo rm -rf "$W"' EXIT
 F=/usr/share/OVMF
+# The test user's password on this throwaway disk (#187).
+PW='atos shell test 1'
 
 # Root's storage: through a compressed OCI layout, like a registry pull (c11-installer.yml, #180).
 podman push -q "$IMAGE" "oci:$W/oci:latest"
@@ -54,7 +57,11 @@ CHECK='
 uid=$(id -u atos); rt=/run/user/$uid
 log() { journalctl -b -t atos-shell -o cat --no-pager; }
 wait_for() { for _ in $(seq 240); do eval "$1" && return 0; sleep 0.5; done; return 1; }   # 2 min
-wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 1 ]" || { echo ATOS-CHECK-FAIL no dock frame; log | tail -20; systemctl poweroff --no-block; exit 0; }
+# No autologin (#187): the host types user and password at the prompt once it is up.
+wait_for "pgrep -x agreety >/dev/null" && echo ATOS-LOGIN-READY || { echo ATOS-CHECK-FAIL no login prompt; systemctl poweroff --no-block; exit 0; }
+# What the login left behind (#187), for a failed login: no password text, only its status.
+login_diag() { passwd -S atos; loginctl list-sessions --no-legend; systemctl show -p ImportCredential systemd-sysusers.service; journalctl -b -o cat --no-pager -u greetd -u systemd-sysusers -t agreety -t greetd | tail -30; }
+wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 1 ]" || { log | tail -20; login_diag 2>&1 | sed "s/^/ATOS-DIAG /"; echo ATOS-CHECK-FAIL no dock frame; systemctl poweroff --no-block; exit 0; }
 # Login to desktop: from the compositor process start to the shell'"'"'s first frame (VM, KVM: indicative, §7 is reference hardware).
 comp=$(pgrep -u atos -x atos-comp | head -1)
 t0=$(awk "{ printf \"%.2f\", \$22 / 100 }" /proc/$comp/stat)
@@ -109,7 +116,11 @@ mapfile -d '' creds < <(
   cred systemd.unit-dropin.multi-user.target~atos-shell-check $'[Unit]\nWants=atos-shell-check.service'
   # The serial getty would hang up the tty the unit writes to.
   cred 'systemd.unit-dropin.serial-getty@ttyS0.service~test' $'[Unit]\nConditionPathExists=/nonexistent'
-  cred atos.check "$CHECK")
+  cred atos.check "$CHECK"
+  # The locked image user gets this password when systemd-sysusers creates it on first boot (#187).
+  # Fedora's systemd-sysusers.service imports only root's password credentials, hence the drop-in.
+  cred systemd.unit-dropin.systemd-sysusers.service~test $'[Service]\nImportCredential=passwd.plaintext-password.atos'
+  cred passwd.plaintext-password.atos "$PW")
 
 if [ -w /dev/kvm ]; then acc=(-accel kvm -cpu host) tmo=15m; else acc=(-cpu max) tmo=60m; fi
 rm -f "$W/mon.sock"
@@ -121,13 +132,24 @@ timeout "$tmo" qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash0
   -drive if=virtio,format=raw,file="$W/disk.raw" \
   -monitor unix:"$W/mon.sock",server=on,wait=off -serial file:"$OUT/boot.log" "${creds[@]}" &
 pid=$!
+# type_keys <text>: types it and Enter through the monitor (US layout; letters, digits, space).
+type_keys() {
+  local s=$1 c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case $c in [a-z0-9]) mon "sendkey $c" ;; ' ') mon "sendkey spc" ;; *) echo "type_keys: no key for '$c'" >&2; return 1 ;; esac
+    sleep 0.1
+  done
+  mon "sendkey ret"
+}
 shots=(); halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|ATOS-CHECK-FAIL'
 mon() { echo "$1" | socat - UNIX-CONNECT:"$W/mon.sock" >/dev/null; }
 shot() { mon "screendump $W/$1.ppm"; shots+=("$1"); }
-pressed=
+pressed='' typed=''
 while kill -0 "$pid" 2>/dev/null; do
   [ -f "$OUT/boot.log" ] || { sleep 1; continue; }
   l=$(tr -d '\r' <"$OUT/boot.log" | grep -a ATOS- || true)
+  [ -n "$typed" ] || { grep -q ATOS-LOGIN-READY <<<"$l" && { type_keys atos; sleep 2; type_keys "$PW"; typed=1; sleep 3; shot login; }; }
   [ -n "$pressed" ] || { grep -q ATOS-PRESS-SUPER <<<"$l" && { mon "sendkey meta_l"; pressed=1; }; }
   [[ " ${shots[*]} " == *" dock "* ]] || { grep -q ATOS-DOCK-UP <<<"$l" && { sleep 3; shot dock; }; }
   [[ " ${shots[*]} " == *" launcher "* ]] || { grep -q ATOS-LAUNCHER-OPEN <<<"$l" && { sleep 3; shot launcher; }; }
@@ -137,7 +159,7 @@ done
 wait "$pid" || true
 tr -d '\r' <"$OUT/boot.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS-|Secure Boot|session-check|boot is (good|bad)' || true
 
-for s in dock launcher; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
+for s in login dock launcher; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
 fail() { echo "::error::$*"; exit 1; }
 for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING; do
   grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the serial log"
