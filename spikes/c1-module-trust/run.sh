@@ -25,7 +25,7 @@
 # Logs: tools/dev-vm/out/sealed/modtrust-*.
 set -euo pipefail
 SPIKE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=/dev/null # boot, WORK, OUT, IMAGE come from sealed.sh
+# shellcheck source=/dev/null # boot, WORK, OUT, IMAGE, INSTALL_POLICY come from sealed.sh
 source "$SPIKE/../../tools/dev-vm/sealed.sh"
 REPO="$SPIKE/../.."
 M=$WORK/modtrust K=$WORK/modtrust/keys
@@ -149,6 +149,7 @@ step_install() {
   rm -f "$B1DISK" && truncate -s 20G "$B1DISK"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE" bootc install to-disk --generic-image --via-loopback "/out/$(basename "$B1DISK")"
   cp --sparse=always "$B1DISK" "$B2DISK"
   # B1: the VM's PK and KEK, and the db above, instead of the committed set.

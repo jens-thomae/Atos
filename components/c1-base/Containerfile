@@ -71,7 +71,7 @@ RUN set -eux; . /src/UPSTREAM; \
     test "$(git -C /src/bootc rev-parse HEAD)" = "$commit"; \
     cd /src/bootc && git apply /src/patches/*.patch \
     && cargo build --release --locked --bin bootc \
-    && cargo test --release --locked -p bootc-lib -- boot_count version_floor \
+    && cargo test --release --locked -p bootc-lib -- boot_count version_floor allowed_transports \
     && strip -o /bootc target/release/bootc && rm -rf target /opt/cargo
 
 # NVIDIA's open kernel modules (D-017, #162; docs/components/c1-base/nvidia.md), not shipped. Built

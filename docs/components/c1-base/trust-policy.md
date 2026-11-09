@@ -13,6 +13,7 @@ All of them are in `/usr`, so they are inside the sealed composefs digest. Fedor
 | [`usr/share/containers/registries.d/atos.yaml`](../../../components/c1-base/usr/share/containers/registries.d/atos.yaml) | `use-sigstore-attachments: true` for the Atos image; without it the signature is not looked up |
 | [`usr/lib/bootc/install/85-atos-sigpolicy.toml`](../../../components/c1-base/usr/lib/bootc/install/85-atos-sigpolicy.toml) | `enforce-container-sigpolicy = true`: `bootc install` behaves as if `--enforce-container-sigpolicy` were passed |
 | [`third_party/bootc/patches/0002-…`](../../../third_party/bootc/patches/) | The version floor (below) |
+| [`third_party/bootc/patches/0003-…`](../../../third_party/bootc/patches/) | Only `registry` and `containers-storage` targets for `switch`/`upgrade` ([below](#other-local-transports)) |
 
 The lookup order is `containers-policy.json(5)`'s: `$HOME/.config/containers/policy.json`, then `/etc/containers/policy.json`, then `/usr/share/containers/policy.json`. An administrator can still override the policy by writing `/etc/containers/policy.json` (ownership, §2 priority 6); that is a root action and outside this card's threat model.
 
@@ -72,6 +73,40 @@ After `main` with #176 was merged in, `trust images install local` was re-run on
 | File removed: `bootc switch … localhost/other:test` | refused |
 | File removed: `bootc upgrade --check` (spec now names the staged local reference) | refused: *Upgrading composefs: Checking if image localhost/atos-dev:current is pulled: … rejected by policy* |
 
+## Other local transports
+
+Card #185 (D-015). bootc's composefs `switch` and `upgrade` also accept `oci`, `oci-archive`, `docker-archive`, `dir` and `docker-daemon` targets, and Fedora's policy accepts all five (the default `insecureAcceptAnything`, and an explicit `insecureAcceptAnything` for `docker-daemon`). Without a check, root could stage any image from a local directory or archive (VM below). bootc itself refuses `tarball`, `sif` and `ostree` (*Invalid transport*).
+
+**Why not the policy.** A `reject` for those transports in `policy.json` refuses bootc, but it also refuses `podman load`, `podman pull oci:`/`dir:`, `skopeo copy` from them and `FROM oci-archive:…`, for root **and** every rootless user (shown in the VM). A user could only get them back with a full `~/.config/containers/policy.json`, which hides every later `/usr` policy change. Path scopes cannot help either: for `oci` and `dir` a scope is a path prefix, and root's bootc can use any path.
+
+**The check.** So bootc refuses them itself: a third carried bootc patch, `0003-composefs-refuse-every-transport-except-registry-and.patch` (owner decision on #185, 2026-11-09; about 40 lines with its test, rebased with the others by the routine in [boot-counting.md](boot-counting.md)). At the start of `is_image_pulled`, which every composefs `switch` and `upgrade` calls first (`bootc_composefs/switch.rs`, `update.rs`), the target's transport must be `registry` or `containers-storage`; anything else, including a transport that does not parse or one added later, is refused in every mode, before the image is opened: *Refusing image … from transport 'oci': only registry and containers-storage are allowed*.
+
+- `registry` stays under the signature policy (above), `containers-storage` under the local-images reject and its developer exception (#150, above). Developer mode needs no other transport.
+- An `upgrade` on a machine whose spec already names such a transport (staged before this patch) is refused at the same check.
+- `bootc install` does not pass through `is_image_pulled`, so installing is unaffected. podman, skopeo and buildah are unaffected: `policy.json` is unchanged.
+- The unit test `allowed_transports` runs in the image build with the other patch tests.
+
+### VM results
+
+Before the patch: `tools/dev-vm/sealed.sh trust transports` at 82fc868, on a copy of the installed trust-1 disk, VM `atos-c75`, 2026-11-09. It used a tiny image (`FROM scratch`, one file). bootc checks the policy when it opens the target, before any layer is pulled, so any later error means the target got past the policy. The candidate policy is the shipped one plus `reject` for the four transports, written to `/etc` for the test only.
+
+| Check | Shipped policy | Candidate `reject` |
+| --- | --- | --- |
+| `bootc switch --transport oci` | **passes the policy**: pulled into the composefs repository, fails later (*Directory entry "usr" does not exist*) | refused at `OpenImage`: *rejected by policy* |
+| `… oci-archive`, `docker-archive`, `dir` | **passes the policy**: refused only by the version floor (the tiny image has no label) | refused at `OpenImage` |
+| `… docker-daemon` | reaches `OpenImage` (no daemon in the VM) | not tested |
+| root `podman load` (oci-archive, docker-archive), `podman pull oci:`/`dir:` | ok | **refused** |
+| the same, rootless user | ok | **refused** |
+
+With the patch: `sealed.sh trust` (all steps, `transports` included) at defd5a2, 2026-11-09, same VM and setup. The image build ran the patch tests: `allowed_transports`, `version_floor`, `version_floor_booted_and_staged`, `test_boot_count_exhausted`, 4 passed. Log: `tools/dev-vm/out/sealed/trust-transports.log`.
+
+| Check (shipped policy, patched bootc) | Result |
+| --- | --- |
+| `bootc switch` from `oci`, `oci-archive`, `docker-archive`, `dir` (tiny image) and `docker-daemon` | all five refused before the image is opened: *Checking if image /var/tmp/t/oci:tiny is pulled: Refusing image /var/tmp/t/oci:tiny from transport 'oci': only registry and containers-storage are allowed* |
+| `bootc switch --transport oci` to trust-2 (signed, newer than the booted trust-1) in an OCI directory | refused, the same message; nothing staged |
+| root and rootless `podman load` (oci-archive, docker-archive), `podman pull oci:`/`dir:` | all ok |
+| `install`, `local` (#150), `stage`, `apply`, `previous` (#75) | unchanged: every refusal with the same message, trust-2 staged and applied, trust-1 boots from the menu |
+
 ## Release key slot
 
 D-014: release images are built and signed by the owner with the release key on a hardware token; CI holds only the test key, and **no release machine trusts the test key**. The slot is `keyPaths`:
@@ -91,7 +126,7 @@ A system trusts only the keys in the image it booted. To rotate a key, first shi
 
 **Built in?** No. bootc 1.17.1 (the version fedora-bootc 45 ships) and bootc `main` (checked 2026-11-07) have no downgrade check for image pulls; ostree's timestamp check (`rpm-ostree --allow-downgrade`) does not apply to container images; and upstream's post-pull hook ([bootc#640](https://github.com/bootc-dev/bootc/issues/640)) is still open. So the floor is a second carried bootc patch, like boot counting (#56, D-007/D-008).
 
-**The patch** (rebased with the other carried patch on each bootc bump, using the routine in [boot-counting.md](boot-counting.md); `0002-composefs-refuse-to-stage-an-image-older-than-the-bo.patch`, about 90 lines with its test) adds one check to bootc's composefs `bootc upgrade` and `bootc switch` (which Fedora's enabled `bootc-fetch-apply-updates.timer` also runs). The check always runs before anything on disk changes. If the target is already in the local composefs repository, it runs before `validate_update`, because that step removes staged boot entries; otherwise a refused image, cached by an earlier attempt, could un-stage a pending good update. Otherwise it runs in `do_upgrade` after the pull, before staging:
+**The patch** (rebased with the other carried patches on each bootc bump, using the routine in [boot-counting.md](boot-counting.md); `0002-composefs-refuse-to-stage-an-image-older-than-the-bo.patch`, about 90 lines with its test) adds one check to bootc's composefs `bootc upgrade` and `bootc switch` (which Fedora's enabled `bootc-fetch-apply-updates.timer` also runs). The check always runs before anything on disk changes. If the target is already in the local composefs repository, it runs before `validate_update`, because that step removes staged boot entries; otherwise a refused image, cached by an earlier attempt, could un-stage a pending good update. Otherwise it runs in `do_upgrade` after the pull, before staging:
 
 1. It reads the target image's version label from its config (the pulled one in the local repository, or the signature-checked config of a cached one): `org.opencontainers.image.version`, else `version` (ostree-ext's `version_for_config`).
 2. It reads the labels of the booted image and, if an update is staged, of the staged image. **The floor is the higher of the two** (owner decision on #133): with v3 booted and v5 staged, a signed v4 would otherwise replace the update the client already accepted.
