@@ -203,6 +203,10 @@ Card #76 tested D-014's fallback B2 in the dev VM: Fedora's Microsoft-signed shi
 
 Card #158 booted the sealed image with Secure Boot on, under B1 and B2, and loaded test modules. Fedora's kernel accepts a module signed under **any cert in the platform keyring**: every db cert and, under B2, every MOK (`MokListTrusted` off included) and shim's `fedoraca`. It checks no key usage or EKU, so a CA cert in db vouches for modules signed by any key it certified. The release db key therefore signs modules on both set-ups, and so can Microsoft through its CAs in db. Results, threat and script (`spikes/c1-module-trust/run.sh`): [module-trust.md](module-trust.md).
 
+## IPE policy for kernel modules (spike)
+
+Card #169 tried an IPE policy that allows module loads only from fs-verity files of the composefs `/usr`, loaded from the initrd. The mechanism works: modules from `/usr` load, signed modules from `/var`, `/etc`, a `usr-overlay` or an `init_module` buffer are refused. It is not shippable on Fedora's kernel: a signed IPE policy is limited to 64 KiB (about 350 module digests, against 5,592 module files), and root can switch IPE off after `setenforce 0`. Results, root checks and recommendation (`spikes/c1-ipe-modules/run.sh`): [ipe-modules.md](ipe-modules.md).
+
 ## NVIDIA driver
 
 Card #162, D-017. NVIDIA's open kernel modules, built and signed in the `nvidia` stage, and NVIDIA's userspace and GSP firmware, unmodified from RPM Fusion nonfree. Turing and newer GPUs use them; older NVIDIA GPUs fall back to nouveau and NVK; machines without NVIDIA load neither. CI runs `components/c1-base/nvidia/check.sh` on every build. Package source, driver selection, fail-safe, licence, VM result and the owner's per-release smoke test: [nvidia.md](nvidia.md).
