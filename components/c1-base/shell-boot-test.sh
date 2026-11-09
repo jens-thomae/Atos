@@ -64,7 +64,7 @@ echo "ATOS-LOGIN-TO-DESKTOP-S $(awk "BEGIN { printf \"%.1f\", $t1 - $t0 }")"
 # Idle: startup finished, then 60 s more, so first-boot work is over (§7 "after login").
 systemctl is-system-running --wait >/dev/null 2>&1
 sleep 60
-# Idle numbers, §7: the shell is 300 MB of the 800 MB idle desktop (D-006). Breakdown for the owner.
+# Idle numbers, §7: the shell is 300 MB of the 800 MB idle desktop (D-006). The gate is the PSS sum below; the rest is for reference.
 echo "ATOS-SHELL-RSS-KB $(ps -u atos -o rss=,comm= | awk "\$2 == \"atos-shell\" { print \$1 }")"
 echo "ATOS-USED-MB $(awk "/MemTotal/ { t = \$2 } /MemAvailable/ { a = \$2 } END { print int((t - a) / 1024) }" /proc/meminfo)"
 echo "ATOS-MEM $(grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|Slab|SUnreclaim|AnonPages|KernelStack|PageTables):" /proc/meminfo | tr -s " " | tr "\n" ";")"
@@ -146,9 +146,14 @@ rss=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-SHELL-RSS-KB \([0-9]*\).*/\1
 used=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-USED-MB \([0-9]*\).*/\1/p' | head -1)
 login=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-LOGIN-TO-DESKTOP-S \([0-9.]*\).*/\1/p' | head -1)
 echo "login to desktop ${login:?} s in the VM (KVM, llvmpipe; indicative, §7's 10 s is reference hardware)"
-echo "shell RSS ${rss:?} KB (share 307200), used RAM ${used:?} MB (idle desktop budget 800)"
+pss=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-PSS-TOTAL-KB \([0-9]*\).*/\1/p' | head -1)
+slab=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-SUNRECLAIM-KB \([0-9]*\).*/\1/p' | head -1)
+# Gate (owner decision on #186, docs/budgets.md): PSS of all processes + unreclaimable slab, decimal MB.
+idle=$(( (${pss:?} + ${slab:?}) * 1024 / 1000000 ))
+echo "idle desktop RAM ${idle} MB (PSS ${pss} kB + SUnreclaim ${slab} kB; budget 800); for reference MemTotal-MemAvailable ${used:?} MB"
+echo "shell RSS ${rss:?} KB (share 307200)"
 [ "$rss" -le 307200 ] || fail "shell RSS over its 300 MB share"
-[ "$used" -le 800 ] || fail "idle desktop over 800 MB"
+[ "$idle" -le 800 ] || fail "idle desktop RAM $idle MB over 800 MB"
 # Pixels: the screen is not one colour (dock), and the open launcher changes the picture a lot (scrim).
 python3 -I - "$W/dock.ppm" "$W/launcher.ppm" <<'PY'
 import sys
