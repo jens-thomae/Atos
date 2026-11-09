@@ -118,6 +118,8 @@ mapfile -d '' creds < <(
   cred 'systemd.unit-dropin.serial-getty@ttyS0.service~test' $'[Unit]\nConditionPathExists=/nonexistent'
   cred atos.check "$CHECK"
   # The locked image user gets this password when systemd-sysusers creates it on first boot (#187).
+  # Fedora's systemd-sysusers.service imports only root's password credentials, hence the drop-in.
+  cred systemd.unit-dropin.systemd-sysusers.service~test $'[Service]\nImportCredential=passwd.plaintext-password.atos'
   cred passwd.plaintext-password.atos "$PW")
 
 if [ -w /dev/kvm ]; then acc=(-accel kvm -cpu host) tmo=15m; else acc=(-cpu max) tmo=60m; fi
