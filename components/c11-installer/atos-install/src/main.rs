@@ -245,8 +245,10 @@ fn install(a: &Args) -> Result<(), String> {
     let scratch = format!("{TARGET}/lost+found/var-tmp");
     fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
     sh(&["chmod", "1777", &scratch])?;
-    // DIAG(T-180, temporary)
-    let _ = sh(&["sh","-c",&format!("df -h /run /var/tmp {TARGET}; free -m; env CONTAINERS_STORAGE_CONF={STORAGE_CONF} podman run --rm --pull=never -v {scratch}:/var/tmp {} df -h /var/tmp / ; env CONTAINERS_STORAGE_CONF={STORAGE_CONF} podman run --rm --pull=never -v {scratch}:/var/tmp {} sh -c 'mount | grep -E \"var/tmp|on / \"; ls -ld /var/tmp'", a.target_imgref, a.target_imgref)]);
+    // bootc starts the image proxy in the host's mount namespace (via --pid=host), so the host's
+    // /var/tmp must be on the target disk as well; both are undone below.
+    sh(&["mount", "--bind", &scratch, "/var/tmp"])?;
+    let _ = sh(&["sh", "-c", "df -h /var/tmp | sed 's/^/ATOS-DIAG /'"]);
     sh(&[
         "env",
         &format!("CONTAINERS_STORAGE_CONF={STORAGE_CONF}"),
@@ -280,6 +282,7 @@ fn install(a: &Args) -> Result<(), String> {
     ])?;
     // bootc leaves the root mounted read-only when it is done.
     sh(&["mount", "-o", "remount,rw", TARGET])?;
+    sh(&["umount", "/var/tmp"])?;
     fs::remove_dir_all(&scratch).map_err(|e| e.to_string())?;
     // The install policy must not reach the installed system: there the image's /usr policy applies.
     let leaked = deployment_etc(Path::new(TARGET))?.join("containers/policy.json");
