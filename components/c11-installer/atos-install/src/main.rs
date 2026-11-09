@@ -419,6 +419,24 @@ fn create_admin(target: &Path, password: &str) -> Result<(), String> {
     let etc = deployment_etc(target)?;
     let root = etc.parent().ok_or("deployment root")?.to_string_lossy();
     let root = root.as_ref();
+    // useradd and chpasswd replace these files, which drops their labels (shadow_t etc.). Keep the
+    // deployment's labels and set them again below. Not setfiles with the deployment's file_contexts:
+    // the live system's kernel policy rejects contexts it lacks (flatpak's), so it refuses them all.
+    let files = ["passwd", "group", "shadow", "gshadow", "subuid", "subgid"];
+    let mut labels = vec![];
+    for name in files {
+        let f = etc.join(name);
+        let out = Command::new("stat")
+            .args(["-c", "%C"])
+            .arg(&f)
+            .output()
+            .map_err(|e| e.to_string())?;
+        out.status
+            .success()
+            .then_some(())
+            .ok_or_else(|| format!("no label on {}", f.display()))?;
+        labels.push(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    }
     sh(&[
         "useradd",
         "--prefix",
@@ -453,28 +471,19 @@ fn create_admin(target: &Path, password: &str) -> Result<(), String> {
     drop(stdin);
     let st = chpasswd.wait().map_err(|e| e.to_string())?;
     st.success().then_some(()).ok_or("chpasswd failed")?;
-    // The files were replaced; label them as the deployment's own policy says (shadow_t etc.).
-    let mut files = vec![];
-    for name in ["passwd", "group", "shadow", "gshadow", "subuid", "subgid"] {
-        files.push(etc.join(name));
-        files.push(etc.join(format!("{name}-")));
+    for (name, label) in files.iter().zip(&labels) {
+        for f in [etc.join(name), etc.join(format!("{name}-"))] {
+            if f.exists() {
+                sh(&["chcon", label, f.to_str().ok_or("path")?])?;
+            }
+        }
     }
-    files.push(etc.join(".pwd.lock"));
-    let files: Vec<String> = files
-        .into_iter()
-        .filter(|f| f.exists())
-        .map(|f| f.to_string_lossy().into_owned())
-        .collect();
-    let contexts = etc.join("selinux/targeted/contexts/files/file_contexts");
-    let mut setfiles = vec![
-        "setfiles",
-        "-F",
-        "-r",
-        root,
-        contexts.to_str().ok_or("path")?,
-    ];
-    setfiles.extend(files.iter().map(String::as_str));
-    sh(&setfiles)
+    // Fedora's file_contexts gives the lock file the passwd label.
+    let lock = etc.join(".pwd.lock");
+    if lock.exists() {
+        sh(&["chcon", &labels[0], lock.to_str().ok_or("path")?])?;
+    }
+    Ok(())
 }
 
 /// The composefs backend keeps each deployment's /etc in `state/deploy/<id>/etc`.
