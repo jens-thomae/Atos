@@ -19,6 +19,7 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
 
 0. **`comp`** (not shipped): builds `atos-comp` (C2) from `components/c2-compositor/` on the same Fedora base with the pinned toolchain (`rust-toolchain.toml`, rustup-init pinned by version). Only the stripped binary is copied into `base`; the toolchain and `target/` are deleted in the same step, because they do not fit the runner's disk as a layer.
 0. **`bootc`** (not shipped): builds `bootc` from the upstream tag in `third_party/bootc/UPSTREAM` with our patches (boot counting, #56; version floor, #75), and runs their unit tests. Only the stripped binary goes into `base`, where it replaces `/usr/bin/bootc`. See [boot-counting.md](boot-counting.md).
+0. **`nvidia`** (not shipped): builds NVIDIA's open kernel modules from the tag in `components/c1-base/nvidia/UPSTREAM` against exactly the base image's kernel and signs them with the TEST db key. Only the four signed `.ko` files go into `base`. See [nvidia.md](nvidia.md).
 1. **`base`**
    - `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
    - Installs `systemd-boot-unsigned` and removes `bootupd`, `shim-*` and `grub2-efi-*`. Sealed images boot systemd-boot signed with our key, not Fedora's shim and GRUB (D-014). Without bootupd, `bootc install` picks systemd-boot.
@@ -27,11 +28,12 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
    - The test keys' `PK.auth`, `KEK.auth` and `db.auth` in `/usr/lib/bootc/install/secureboot-keys/auto/`. `bootc install` copies them to the ESP as `loader/keys/auto/`.
    - Trust policy (#75): `usr/share/containers/policy.json`, `usr/share/containers/registries.d/atos.yaml`, `usr/lib/bootc/install/85-atos-sigpolicy.toml` and the TEST cosign key as `/usr/share/pki/containers/atos-c1-base-test.pub`. See [trust-policy.md](trust-policy.md).
    - The session (below): `greetd`, Xwayland, Mesa, `xterm`, `session/` (greetd config, `atos` user) and `atos-comp` copied from the `comp` stage.
+   - NVIDIA graphics (D-017, #162): NVK, NVIDIA's userspace and GSP firmware from RPM Fusion nonfree (pinned, unmodified), the signed modules from the `nvidia` stage, driver selection (`usr/lib/modprobe.d/atos-nvidia.conf`) and the suspend services. See [nvidia.md](nvidia.md).
    - Boot counting (#56): the patched `bootc`, the health check `atos-session-check.service` (enabled), a timeout drop-in for `boot-complete.target`, one SELinux rule for `systemd-bless-boot`, the karg `panic=10` (`kargs.d/20-atos-panic.toml`), and emergency drop-ins that reboot on a counted boot. The initramfs that carries those drop-ins is rebuilt in the `kernel` stage ([boot-counting.md](boot-counting.md)).
    - Label `org.opencontainers.image.title=Atos base`.
 2. **`tools`** (not shipped): `systemd-ukify` and `sbsigntools`, plus the test db key.
 3. **`sdboot`**: signs `systemd-boot*.efi` as `*.efi.signed`. `bootctl install` prefers the `.signed` file.
-4. **`kernel`** (not shipped): rebuilds the initramfs with Fedora's dracut config plus ours (#56) and checks it carries the emergency drop-in, then `bootc container split-kernel-and-rootfs` moves the kernel and initramfs to `/kernel/<kver>/`. Only the `uki` stage reads them, through a bind mount.
+4. **`kernel`** (not shipped): rebuilds the initramfs with Fedora's dracut config plus ours (#56) and checks it carries the emergency drop-in and no NVIDIA or nouveau module (#162), then `bootc container split-kernel-and-rootfs` moves the kernel and initramfs to `/kernel/<kver>/`. Only the `uki` stage reads them, through a bind mount.
 5. **`rootfs`**: the tree that gets sealed, built `FROM base`. This stage does four things:
    - Puts the signed systemd-boot into `/usr`.
    - Runs `split-kernel-and-rootfs` again and deletes its output in the same layer, so the layer only records that the kernel and initramfs are gone from `/usr/lib/modules/<kver>/`. No layer of the image carries a copy (#111); upstream bootc's own Dockerfile does the same. The example in bootc-sealed-images(7) builds the final image on top of the split stage, which ships the split-out files in a layer even where a later layer deletes them.
@@ -201,11 +203,15 @@ Card #76 tested D-014's fallback B2 in the dev VM: Fedora's Microsoft-signed shi
 
 Card #158 booted the sealed image with Secure Boot on, under B1 and B2, and loaded test modules. Fedora's kernel accepts a module signed under **any cert in the platform keyring**: every db cert and, under B2, every MOK (`MokListTrusted` off included) and shim's `fedoraca`. It checks no key usage or EKU, so a CA cert in db vouches for modules signed by any key it certified. The release db key therefore signs modules on both set-ups, and so can Microsoft through its CAs in db. Results, threat and script (`spikes/c1-module-trust/run.sh`): [module-trust.md](module-trust.md).
 
+## NVIDIA driver
+
+Card #162, D-017. NVIDIA's open kernel modules, built and signed in the `nvidia` stage, and NVIDIA's userspace and GSP firmware, unmodified from RPM Fusion nonfree. Turing and newer GPUs use them; older NVIDIA GPUs fall back to nouveau and NVK; machines without NVIDIA load neither. CI runs `components/c1-base/nvidia/check.sh` on every build. Package source, driver selection, fail-safe, licence, VM result and the owner's per-release smoke test: [nvidia.md](nvidia.md).
+
 ## Where it goes
 
 | Event | Result |
 | --- | --- |
-| Pull request (not docs-only) | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`. No registry token, no cosign key. |
+| Pull request (not docs-only) | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`, `nvidia/check.sh`. No registry token, no cosign key. |
 | Merge to `main` (not docs-only) | Build, countme check, `check-seal.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Publishes run one at a time (job-level concurrency group, never cancelled; GitHub keeps only the newest waiting one, which contains the replaced code). `:latest` moves only if the commit is ahead of the one it currently names in its `org.atos.source` label, so it never goes backwards and docs-only merges don't stall it. |
 | Docs-only change (`tools/ci/is-docs-only.sh`) | Skipped. |
 
@@ -215,7 +221,7 @@ Card #158 booted the sealed image with Secure Boot on, under B1 and B2, and load
 
 The package `ghcr.io/jens-thomae/atos/c1-base` is public while the repository is private, so every image built on `main` has its source published next to it as `ghcr.io/jens-thomae/atos/c1-base:<sha>-source`, signed with the same cosign key as the image. Order in the job: key guard, build and check the image, build the source image, push the source, push the image, sign both. A failure before the push leaves nothing behind; no image is ever public without its source.
 
-- **Format.** A plain `FROM scratch` image, not an oras artifact: the runner has no oras, and podman, skopeo and cosign handle it like the image. Contents: `atos-<sha>.tar.gz` (`git archive` of the commit), `fedora-packages.txt` (`rpm -qa` NVRs; Fedora's sources are at src.fedoraproject.org and koji) and a `README.md`.
+- **Format.** A plain `FROM scratch` image, not an oras artifact: the runner has no oras, and podman, skopeo and cosign handle it like the image. Contents: `atos-<sha>.tar.gz` (`git archive` of the commit), `open-gpu-kernel-modules-<tag>.tar.gz` (the NVIDIA module source the image's modules are built from, #162), `fedora-packages.txt` (`rpm -qa` NVRs; Fedora's sources are at src.fedoraproject.org and koji, RPM Fusion's at pkgs.rpmfusion.org) and a `README.md`.
 - **Pointer.** The image carries the label `org.atos.source=<image>:<sha>-source` (set with `--label` on the publish build, so the Containerfile is untouched). The source image carries `org.atos.source-of` and `org.atos.source-of-image-id` (the image's config digest, known before the push; the tag alone is mutable).
 - **Excluded.** `git archive` ships tracked files only: no `.git` history, no untracked files, no CI credentials (the checkout does not persist its token, and signing secrets never touch the tree). The publish job fails, right after checkout and before any build, if `tools/ci/check-no-private-keys.sh` (a content check; test: `tools/ci/test-check-no-private-keys.sh`) finds a private key block in the tree other than the TEST db key (D-014: public). The tree itself, `docs/` included, is published as it stands.
 - **Fetch it anonymously** (once the package is public):
