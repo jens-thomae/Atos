@@ -38,7 +38,6 @@ TARGET_IMGREF=${TARGET_IMGREF:-$GUEST_REG:latest}
 # Spaces and a colon check that it reaches chpasswd unchanged.
 TEST_PASSWORD='Atos test: 1'
 # The QEMU monitor, for typing at the login prompt (#187).
-MON_PORT=${MON_PORT:-4555}
 
 # The dev VM is aarch64 under emulation; CI is x86_64 with KVM.
 case "$(uname -m)" in
@@ -97,7 +96,10 @@ swtpm_up() {
     --flags startup-clear --daemon --pid file="$WORK/swtpm.pid"
 }
 
-# type_keys <text>: types <text> and Enter on the guest's keyboard through the QEMU monitor on fd 3.
+# mon <command>: one QEMU monitor command, one connection (as in c1-base's shell-boot-test.sh; a
+# single long-lived connection lost the typing, run 42681998225).
+mon() { echo "$1" | socat - UNIX-CONNECT:"$WORK/mon.sock" >/dev/null; }
+# type_keys <text>: types <text> and Enter on the guest's keyboard through the QEMU monitor.
 type_keys() {
   local s=$1 c k i
   for ((i = 0; i < ${#s}; i++)); do
@@ -109,19 +111,17 @@ type_keys() {
       :) k=shift-semicolon ;;
       *) echo "type_keys: no key for '$c'" >&2; return 1 ;;
     esac
-    printf 'sendkey %s\n' "$k" >&3
-    sleep 0.1
+    mon "sendkey $k"
   done
-  printf 'sendkey ret\n' >&3
+  mon "sendkey ret"
 }
 
 # The login on tty1 (#187): what a user types at greetd's prompt, once the report says it is up.
 login_tty1() {
-  exec 3<>"/dev/tcp/127.0.0.1/$MON_PORT"
   type_keys atos
   sleep 2
   type_keys "$TEST_PASSWORD"
-  exec 3>&-
+  echo "login typed on tty1"
 }
 
 # qemu_run <log> <extra qemu args...>; env CODE=<firmware code> (default: Secure Boot capable).
@@ -137,7 +137,7 @@ qemu_run() {
     -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
     -device "$TPMDEV",tpmdev=tpm0 \
     -drive if=none,id=hd,format=raw,file="$DISK" -device virtio-blk-pci,drive=hd,bootindex=1 \
-    -monitor tcp:127.0.0.1:"$MON_PORT",server=on,wait=off "${KBD[@]}" \
+    -monitor unix:"$WORK/mon.sock",server=on,wait=off "${KBD[@]}" \
     -serial file:"$log" "$@" &
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
