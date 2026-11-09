@@ -32,6 +32,33 @@ RUN cp ../../rust-toolchain.toml . \
     && strip -o /atos-comp target/release/atos-comp \
     && rm -rf target /opt/cargo /opt/rustup
 
+# atos-shell (C3, #186): same recipe as `comp`, plus our pinned Slint (tools/slint-fork/slint-fork.sh setup
+# fetches it and applies the patch queue; third_party/slint/patch.toml points cargo at it). The shell is
+# outside the root workspace and has its own Cargo.lock; no --locked, as in c3-shell.yml, because the fork's
+# path sources replace the crates.io entries. Only the stripped binary is copied into `base`.
+FROM ${BASE} AS shell
+RUN dnf -y install --setopt=install_weak_deps=False gcc clang clang-devel pkgconf-pkg-config git curl python3 \
+      mesa-libEGL-devel libxkbcommon-devel wayland-devel fontconfig-devel pipewire-devel
+ARG RUSTUP_VERSION=1.29.3
+ENV CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup PATH=/opt/cargo/bin:$PATH
+RUN set -eux; \
+    case "$(uname -m)" in x86_64) t=x86_64-unknown-linux-gnu ;; aarch64) t=aarch64-unknown-linux-gnu ;; esac; \
+    curl -fsSL -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$t/rustup-init"; \
+    curl -fsSL "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$t/rustup-init.sha256" | sed 's# .*#  /tmp/rustup-init#' | sha256sum --check; \
+    chmod +x /tmp/rustup-init; /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain none; rm /tmp/rustup-init
+COPY --from=repo rust-toolchain.toml /src/rust-toolchain.toml
+COPY --from=repo tools/slint-fork /src/tools/slint-fork
+COPY --from=repo third_party/slint /src/third_party/slint
+COPY --from=repo components/c4-toolkit /src/components/c4-toolkit
+COPY --from=repo components/c3-shell /src/components/c3-shell
+WORKDIR /src
+RUN cargo --version && tools/slint-fork/slint-fork.sh setup
+WORKDIR /src/components/c3-shell
+# ponytail: thin LTO as for atos-comp. Slint's checkout, toolchain and target/ go in the same step (runner disk).
+RUN CARGO_PROFILE_RELEASE_LTO=thin CARGO_TERM_COLOR=never cargo build --release --config ../../third_party/slint/patch.toml \
+    && strip -o /atos-shell target/release/atos-shell \
+    && rm -rf target /src/third_party/slint/src /opt/cargo /opt/rustup
+
 # bootc with our boot-counting patch (#56, D-008; docs/components/c1-base/boot-counting.md), built
 # from the upstream tag fedora-bootc 45 ships. Only the binary is copied into `base`.
 FROM ${BASE} AS bootc
@@ -147,6 +174,15 @@ RUN systemctl enable atos-session-check.service \
     && semodule -i /usr/share/atos/selinux/atos-bless-boot.cil \
     && rm -rf /var/tmp/*
 COPY --from=comp /atos-comp /usr/bin/atos-comp
+# The shell (C3, #186): dock, launcher, control centre. Started by the session wrapper
+# (usr/libexec/atos/atos-session, docs/components/c1-base/README.md "Session"); atos-comp's launcher
+# shortcut runs `atos-shell --launcher`. Runtime libraries (EGL, PipeWire client) and the portal
+# registration for dark mode (data/atos.portal) come with it.
+COPY --from=shell /atos-shell /usr/bin/atos-shell
+COPY --from=repo components/c3-shell/data/atos.portal /usr/share/xdg-desktop-portal/portals/atos.portal
+RUN dnf -y install --setopt=install_weak_deps=False mesa-libEGL pipewire-libs \
+    && ldd /usr/bin/atos-shell | grep -v 'not found' >/dev/null && ! ldd /usr/bin/atos-shell | grep 'not found' \
+    && rm -rf /run/dnf /var/lib/dnf /var/cache/* /var/log/*
 COPY --from=repo components/c2-compositor/data/keybindings.ron /usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults
 COPY --from=repo components/c2-compositor/data/tiling-exceptions.ron /usr/share/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 

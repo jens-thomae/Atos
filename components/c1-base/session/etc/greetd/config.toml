@@ -8,5 +8,5 @@ command = "agreety --cmd /bin/bash"
 user = "greetd"
 
 [initial_session]
-command = "atos-comp"
+command = "/usr/libexec/atos/atos-session"
 user = "atos"
