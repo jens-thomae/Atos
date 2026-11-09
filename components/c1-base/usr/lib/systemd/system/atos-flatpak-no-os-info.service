@@ -1,0 +1,17 @@
+# D-005, #187 (docs/components/c1-base/README.md, "Apps: Flatpak and Flathub"): flatpak sends the OS name,
+# version and architecture to the remote with every pull unless report-os-info is false. That setting lives
+# in the installation's own repo config under /var, so it is set once, here, the way Fedora's
+# flatpak-add-fedora-repos.service adds remotes. A user who sets it back to true keeps that.
+[Unit]
+Description=Turn off Flatpak's OS report for the system installation
+ConditionPathExists=!/var/lib/flatpak/.atos-no-os-info
+Before=flatpak-system-helper.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/flatpak config --system --set report-os-info false
+ExecStartPost=/usr/bin/touch /var/lib/flatpak/.atos-no-os-info
+
+[Install]
+WantedBy=multi-user.target

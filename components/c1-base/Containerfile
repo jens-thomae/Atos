@@ -138,6 +138,16 @@ COPY secureboot-test/PK.auth secureboot-test/KEK.auth secureboot-test/db.auth /u
 # signature by this TEST cosign key (policy.json and registries.d come with usr/ above).
 COPY cosign.pub /usr/share/pki/containers/atos-c1-base-test.pub
 
+# Apps: Flatpak with Flathub as the only, system-wide default remote (D-003, #187; docs/components/c1-base/README.md,
+# "Apps: Flatpak and Flathub"). flathub.flatpakrepo is Flathub's own file with its signing key (the same key as in
+# Fedora's signed fedora-flathub-remote); flatpak reads it from remotes.d. Fedora's service that adds its own OCI
+# remotes is masked. atos-flatpak-no-os-info turns off the Flatpak-Os-Info header once (D-005). No portals here.
+RUN dnf -y install --setopt=install_weak_deps=False flatpak \
+    && systemctl mask flatpak-add-fedora-repos.service \
+    && systemctl enable atos-flatpak-no-os-info.service \
+    && rm -rf /run/selinux-policy /run/dnf /var/lib/dnf /var/cache/* /var/log/*
+COPY flatpak/flathub.flatpakrepo /usr/share/flatpak/remotes.d/flathub.flatpakrepo
+
 COPY session/ /
 # Boot counting (#56): patched bootc names an upgrade's UKI entry `…+3.conf`; the health check
 # decides when a counted boot is good (usr/lib/systemd/system/atos-session-check.service). The
