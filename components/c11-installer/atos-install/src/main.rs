@@ -305,6 +305,15 @@ fn install(a: &Args) -> Result<(), String> {
     // The live root is an overlay, which cannot hold the container's upper layer: put podman's
     // own storage in tmpfs and read the ISO's payload as an additional (read-only) image store.
     write_private(STORAGE_CONF, STORAGE_CONF_TOML.as_bytes())?;
+    // The container's /var/tmp would land in that tmpfs too, and bootc stages the whole payload
+    // there while pulling it into composefs (#180): put it on the target disk. lost+found is the
+    // one directory bootc's empty-root check ignores; it is removed again below.
+    let scratch = format!("{TARGET}/lost+found/var-tmp");
+    fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    sh(&["chmod", "1777", &scratch])?;
+    // bootc starts the image proxy in the host's mount namespace (via --pid=host), so the host's
+    // /var/tmp must be on the target disk as well; both are undone below.
+    sh(&["mount", "--bind", &scratch, "/var/tmp"])?;
     sh(&[
         "env",
         &format!("CONTAINERS_STORAGE_CONF={STORAGE_CONF}"),
@@ -322,6 +331,8 @@ fn install(a: &Args) -> Result<(), String> {
         "-v",
         &format!("{TARGET}:/target"),
         "-v",
+        &format!("{scratch}:/var/tmp"),
+        "-v",
         &format!("{INSTALL_POLICY}:/etc/containers/policy.json:ro"),
         "--pull=never",
         &a.target_imgref,
@@ -336,6 +347,8 @@ fn install(a: &Args) -> Result<(), String> {
     ])?;
     // bootc leaves the root mounted read-only when it is done.
     sh(&["mount", "-o", "remount,rw", TARGET])?;
+    sh(&["umount", "/var/tmp"])?;
+    fs::remove_dir_all(&scratch).map_err(|e| e.to_string())?;
     // The install policy must not reach the installed system: there the image's /usr policy applies.
     let leaked = deployment_etc(Path::new(TARGET))?.join("containers/policy.json");
     if leaked.exists() {
