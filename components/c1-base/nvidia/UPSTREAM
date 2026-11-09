@@ -1,0 +1,11 @@
+# NVIDIA driver pins (D-017, #162; docs/components/c1-base/nvidia.md). Sourced by the Containerfile
+# and by the source-bundle step of .github/workflows/c1-base.yml. The module source tag and the
+# userspace version must be the same driver version: the build fails otherwise.
+# Open kernel modules (MIT/GPL-2.0), built from source in the Containerfile's `nvidia` stage.
+repo=https://github.com/NVIDIA/open-gpu-kernel-modules
+tag=615.78.08
+commit=1a82fbfda8f321b056eb3568850f9316c5e465c5
+# Proprietary userspace and GSP firmware, unmodified, from RPM Fusion nonfree's Fedora 45 tree
+# (signed with RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020 next to this file). Exact version-release.
+rpmfusion=https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything
+userspace=615.78.08-1.fc45

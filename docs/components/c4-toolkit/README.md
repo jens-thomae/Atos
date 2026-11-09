@@ -63,6 +63,8 @@ See [rebase.md](rebase.md) for the routine and the first dry-run record.
 
 Headless screenshot and accessibility-tree tests: [screenshot-tests.md](screenshot-tests.md).
 
+Accessibility tree on a live AT-SPI bus and §7 budgets with the tree on (A8, M6 re-run): [a8-tree-on.md](a8-tree-on.md).
+
 ## Patch queue
 
 | Patch | Card | What |

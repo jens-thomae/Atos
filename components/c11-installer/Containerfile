@@ -40,6 +40,7 @@ RUN set -xe; kver=$(ls /usr/lib/modules); env DRACUT_NO_XATTR=1 dracut -f /usr/l
 COPY iso.yaml /usr/lib/image-builder/bootc/iso.yaml
 COPY atos-installer.service /usr/lib/systemd/system/atos-installer.service
 COPY --from=build /atos-install /usr/bin/atos-install
+COPY install-policy.json /usr/share/atos-install/install-policy.json
 # The live system runs only the installer: no bootloader updates, no greeter, no update timers.
 RUN systemctl mask bootloader-update.service bootc-fetch-apply-updates.timer rpm-ostree-countme.timer \
     && systemctl disable getty@tty1.service \

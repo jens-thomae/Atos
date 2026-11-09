@@ -1,0 +1,9 @@
+{
+  "app": "/tmp/tmp.8lhTQ7LzRr/slint-fork-10k",
+  "cpu": "Intel(R) Celeron(R) N5105 @ 2.00GHz",
+  "kernel": "6.8.0-147-generic",
+  "cpu_window_s": 10,
+  "cold_start_ms": 156.557449,
+  "idle_rss_mb": 108.310528,
+  "idle_cpu_percent": 0
+}

@@ -1,0 +1,4 @@
+# NVIDIA graphics (#162, docs/components/c1-base/nvidia.md). systemd applies presets on first boot, and
+# RPM Fusion's 70-nvidia.preset enables nvidia-powerd (Dynamic Boost, NVIDIA laptops only). This file
+# sorts first, so it wins: off, rather than starting on every machine. The suspend services stay enabled.
+disable nvidia-powerd.service
