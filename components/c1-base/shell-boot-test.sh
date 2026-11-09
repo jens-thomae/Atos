@@ -81,7 +81,7 @@ echo "ATOS-SUNRECLAIM-KB $(awk "/^SUnreclaim:/ { print \$2 }" /proc/meminfo)"
 echo ATOS-PRESS-SUPER
 wl=$(basename "$(ls -t $rt/wayland-[0-9] | head -1)")
 if wait_for "log | grep -q ^LAUNCHER_OPEN_MS"; then echo ATOS-LAUNCHER-OPEN; else echo ATOS-CHECK-FAIL launcher did not open; fi
-sleep 8
+sleep 25   # the host retries the launcher screendump for up to 20 s of this (#192)
 runuser -u atos -- env XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=$wl atos-shell --launcher   # closes it
 sleep 1
 # A crashing shell: the session stays, the shell returns.
@@ -124,20 +124,34 @@ pid=$!
 shots=(); halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|ATOS-CHECK-FAIL'
 mon() { echo "$1" | socat - UNIX-CONNECT:"$W/mon.sock" >/dev/null; }
 shot() { mon "screendump $W/$1.ppm"; shots+=("$1"); }
+# #192: the launcher's frame is not always on QEMU's screen 3 s after the marker (a screendump still showed the dock).
+# Retry until the picture differs from the dock's as the final check demands, for 20 s; if it never does the check fails as before.
+launcher_shot() {
+  sleep 3
+  for t in $(seq 20); do
+    mon "screendump $W/launcher.ppm"; sleep 1   # the monitor replies before the file is complete
+    python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/launcher.ppm" >/dev/null 2>&1 && { echo "launcher frame on screen after $((t + 3)) s"; shots+=(launcher); return; }
+  done
+  echo "launcher frame never changed the screen in 23 s"
+  # Evidence only, never a pass: does a pointer move make the stale screen flush? (stale screendump vs. compositor not drawing)
+  mon "mouse_move 5 5"; sleep 2; mon "screendump $W/nudged.ppm"; sleep 1
+  python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/nudged.ppm" 2>&1 | sed 's/^/after a pointer move: /' || true
+  shots+=(launcher)
+}
 pressed=
 while kill -0 "$pid" 2>/dev/null; do
   [ -f "$OUT/boot.log" ] || { sleep 1; continue; }
   l=$(tr -d '\r' <"$OUT/boot.log" | grep -a ATOS- || true)
   [ -n "$pressed" ] || { grep -q ATOS-PRESS-SUPER <<<"$l" && { mon "sendkey meta_l"; pressed=1; }; }
   [[ " ${shots[*]} " == *" dock "* ]] || { grep -q ATOS-DOCK-UP <<<"$l" && { sleep 3; shot dock; }; }
-  [[ " ${shots[*]} " == *" launcher "* ]] || { grep -q ATOS-LAUNCHER-OPEN <<<"$l" && { sleep 3; shot launcher; }; }
+  [[ " ${shots[*]} " == *" launcher "* ]] || { grep -q ATOS-LAUNCHER-OPEN <<<"$l" && launcher_shot; }
   grep -aqE "$halt" "$OUT/boot.log" && { kill "$pid"; break; }
   sleep 1
 done
 wait "$pid" || true
 tr -d '\r' <"$OUT/boot.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS-|Secure Boot|session-check|boot is (good|bad)' || true
 
-for s in dock launcher; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
+for s in dock launcher nudged; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
 fail() { echo "::error::$*"; exit 1; }
 for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING; do
   grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the serial log"
@@ -156,17 +170,4 @@ echo "shell RSS ${rss:?} KB (share 307200)"
 [ "$rss" -le 307200 ] || fail "shell RSS over its 300 MB share"
 [ "$idle" -le 800 ] || fail "idle desktop RAM $idle MB over 800 MB"
 # Pixels: the screen is not one colour (dock), and the open launcher changes the picture a lot (scrim).
-python3 -I - "$W/dock.ppm" "$W/launcher.ppm" <<'PY'
-import sys
-def ppm(p):
-    d = open(p, "rb").read(); parts = d.split(b"\n", 3)
-    assert parts[0] == b"P6"; w, h = map(int, parts[1].split()); return w, h, parts[3]
-w, h, a = ppm(sys.argv[1]); _, _, b = ppm(sys.argv[2])
-row = lambda px, y: px[y * w * 3:(y + 1) * w * 3]
-bg = row(a, 2)[:3]                                   # top-left corner: the desktop background
-strip = sum(row(a, y)[i:i + 3] != bg for y in range(int(h * .85), h) for i in range(0, w * 3, 3))
-diff = sum(a[i] != b[i] for i in range(0, len(a), 97)) / (len(a) / 97)
-print(f"dock strip: {strip} px off the background; launcher changed {diff:.0%} of the samples")
-assert strip > 500, "no dock in the bottom strip"
-assert diff > .3, "the launcher did not change the screen"
-PY
+python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/launcher.ppm"
