@@ -78,6 +78,8 @@ The image installs [`atos-bless-boot.cil`](../../../components/c1-base/usr/share
 
 ## Shown in the dev VM (2026-11-07)
 
+**These results predate rule A1** (#187): they used the old check, which waited for the session. `sealed.sh counting` now breaks the greeter instead of the compositor, but has not been re-run. A1's good path runs on every installer KVM test: on the installed system, before anyone types, `session-check` must exit with `login prompt up: boot is good` (`ATOS-SESSION-CHECK-OK`, [`vm-test.sh`](../../../components/c11-installer/vm-test.sh)).
+
 `tools/dev-vm/sealed.sh counting` ([`sealed.sh`](../../../tools/dev-vm/sealed.sh)) uses its own disk, `~/sealed/counting.raw`, and the dev registry from the update loop (#55). Images: **dev-1** (as shipped), **dev-2** (adds `IMAGE_VERSION=dev-2`), and **dev-bad**, which is dev-2 with `IMAGE_VERSION=dev-bad` and `/usr/bin/atos-comp` pointing at `false`. dev-bad boots, but its session never comes up, as when an update ships a compositor that crashes. *Since #187 (rule A1) `sealed.sh` breaks the login prompt instead: dev-bad's `agreety` points at `false`, dev-hang's `greetd` sleeps. The results below were recorded with the old rule and have not been re-run.* The variants are built from copies of the Containerfile in `~/sealed`; the shipped one does not change.
 
 The VM passes longer timeouts as systemd credentials (`TimeoutStartSec=20min` for the check, `JobTimeoutSec=40min` for `boot-complete.target`), because boots under CPU emulation take minutes. A VM-only unit prints `ATOS-BOOT image=… counter=…` on every boot, read from `LoaderBootCountPath`. QEMU now has a `virtio-gpu-pci` device, so `atos-comp` has a DRM device. Filtered serial logs:

@@ -163,6 +163,8 @@ dmesg -n 1 # kernel audit lines on the serial console split the markers (run 426
 # before runuser below opens sessions of its own. s: the user'"'"'s logind sessions on tty1.
 s() { loginctl list-sessions --no-legend | grep -E " atos .*tty1"; }
 s >/dev/null && echo ATOS-LOGIN-AUTOLOGIN-FOUND
+# The boot health check (rule A1) once, before anyone has typed: it must call the waiting prompt good.
+r=$(timeout 120 /usr/libexec/atos/session-check 2>&1) && echo "ATOS-SESSION-CHECK-OK $r" || echo "ATOS-SESSION-CHECK-FAIL $r"
 pgrep -x agreety >/dev/null && echo ATOS-LOGIN-READY
 i=0; until s >/dev/null || [ $i -ge 120 ]; do sleep 1; i=$((i + 1)); done
 s && echo ATOS-LOGIN-OK
