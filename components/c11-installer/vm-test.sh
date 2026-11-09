@@ -34,6 +34,9 @@ build_arg=()
 [ -z "${BASE:-}" ] || build_arg=(--build-arg "BASE=$BASE")
 # The image the installed system tracks; CI sets it to the published image.
 TARGET_IMGREF=${TARGET_IMGREF:-$GUEST_REG:latest}
+# The administrator password the unattended install types (#187); a test value for a throwaway disk.
+# Spaces and a colon check that it reaches chpasswd unchanged.
+TEST_PASSWORD='Atos test: 1'
 
 # The dev VM is aarch64 under emulation; CI is x86_64 with KVM.
 case "$(uname -m)" in
@@ -70,7 +73,7 @@ StandardError=tty
 TTYPath=/dev/'"$SERIAL"'
 # Through cat, so systemd tools see no terminal (no size queries or resets); sleep 1 lets the
 # serial port drain before poweroff (a report once lost its last lines).
-ExecStart=/bin/sh -c "{ systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; } 2>&1 | cat; sleep 1; systemctl poweroff --no-block"'
+ExecStart=/bin/sh -c "{ systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; sh $$CREDENTIALS_DIRECTORY/atos.check; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; } 2>&1 | cat; sleep 1; systemctl poweroff --no-block"'
 
 # The unattended install: what a user does on tty1, minus the questions.
 INSTALL_UNIT="[Unit]
@@ -82,7 +85,7 @@ Type=exec
 StandardOutput=tty
 StandardError=tty
 TTYPath=/dev/$SERIAL
-ExecStart=/bin/sh -c 'atos-install --disk /dev/vda --yes --target-imgref $TARGET_IMGREF && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
+ExecStart=/bin/sh -c '{ echo \"$TEST_PASSWORD\"; echo \"$TEST_PASSWORD\"; } | atos-install --disk /dev/vda --yes --target-imgref $TARGET_IMGREF && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
 
 swtpm_up() {
   mkdir -p "$TPM"
@@ -115,8 +118,21 @@ qemu_run() {
   done
   wait "$pid" || true
   tr -d '\r' < "$log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -av 'EFI Internal Shell' \
-    | grep -aE "atos-install|atos-tpm-seal|ATOS-|Secure Boot|Setup Mode|SLOT|^ *[0-9]+ (recovery|tpm2|password)|LUKS|crypt|booted|staged|IMAGE_VERSION|Startup finished|recovery key|Installing|Partitioning|Encrypting|installed on|$halt" || true
+    | grep -aE "atos-install|atos-tpm-seal|ATOS-|Secure Boot|Setup Mode|SLOT|^ *[0-9]+ (recovery|tpm2|password)|LUKS|crypt|booted|staged|IMAGE_VERSION|uid=|Startup finished|recovery key|Installing|Partitioning|Encrypting|installed on|$halt" || true
 }
+
+# The administrator account and the apps setup (#187), checked on every boot. sudo checks the
+# password through PAM (pam_unix, unix_chkpwd: shadow labels matter under enforcing SELinux).
+# shellcheck disable=SC2016 # expands in the guest
+ADMIN_CHECK='pw=$(cat "$CREDENTIALS_DIRECTORY/atos.test-password")
+id atos
+ls -Z /etc/passwd /etc/group /etc/shadow /etc/gshadow
+grep -q "^atos:[$]y[$]" /etc/shadow && echo ATOS-ADMIN-PASSWORD-YESCRYPT
+printf "%s\n" "$pw" | runuser -u atos -- sudo -S -k -p "" true && echo ATOS-ADMIN-SUDO-OK
+printf "wrong\n" | runuser -u atos -- sudo -S -k -p "" true 2>/dev/null || echo ATOS-ADMIN-SUDO-WRONG-REFUSED
+flatpak remotes --system --columns=name,url 2>&1 | sed "s/^/ATOS-FLATPAK-REMOTE /"
+echo "ATOS-FLATPAK-OS-INFO $(flatpak config --system --get report-os-info 2>&1)"
+grep -q "^Exec=xterm" /usr/share/applications/xterm.desktop && echo ATOS-TERMINAL-ENTRY'
 
 # boot <log>: boots the installed disk with the report unit (env ACTION, NET=1).
 boot() {
@@ -129,6 +145,8 @@ boot() {
     # Without KVM, udev in the initrd needs longer than the default 45 s to find the root.
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot\x2dluks.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
+    cred atos.check "$ADMIN_CHECK"
+    cred atos.test-password "$TEST_PASSWORD"
     [ -z "${ACTION:-}" ] || cred atos.action "$ACTION")
   # shellcheck disable=SC2054
   [ -z "${NET:-}" ] || nic=(-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile=)
@@ -181,6 +199,8 @@ step_install() {
     -device virtio-scsi-pci,id=scsi0 -drive if=none,id=cd,format=raw,media=cdrom,readonly=on,file="$ISO" \
     -device scsi-cd,drive=cd,bootindex=0 "${creds[@]}"
   grep -aq ATOS-INSTALL-OK "$OUT/install.log"
+  grep -aq 'Password for the administrator account' "$OUT/install.log"
+  ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" || { echo "the password is in the install log" >&2; exit 1; }
   echo "ATOS-INSTALL-TIME qemu_start_to_poweroff=$(( $(date +%s) - t0 ))s"
 }
 
