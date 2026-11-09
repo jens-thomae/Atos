@@ -248,7 +248,6 @@ fn install(a: &Args) -> Result<(), String> {
     // bootc starts the image proxy in the host's mount namespace (via --pid=host), so the host's
     // /var/tmp must be on the target disk as well; both are undone below.
     sh(&["mount", "--bind", &scratch, "/var/tmp"])?;
-    let _ = sh(&["sh", "-c", "df -h /var/tmp | sed 's/^/ATOS-DIAG /'"]);
     sh(&[
         "env",
         &format!("CONTAINERS_STORAGE_CONF={STORAGE_CONF}"),
