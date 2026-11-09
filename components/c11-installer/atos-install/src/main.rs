@@ -245,6 +245,8 @@ fn install(a: &Args) -> Result<(), String> {
     let scratch = format!("{TARGET}/lost+found/var-tmp");
     fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
     sh(&["chmod", "1777", &scratch])?;
+    // DIAG(T-180, temporary)
+    let _ = sh(&["sh","-c",&format!("df -h /run /var/tmp {TARGET}; free -m; env CONTAINERS_STORAGE_CONF={STORAGE_CONF} podman run --rm --pull=never -v {scratch}:/var/tmp {} df -h /var/tmp / ; env CONTAINERS_STORAGE_CONF={STORAGE_CONF} podman run --rm --pull=never -v {scratch}:/var/tmp {} sh -c 'mount | grep -E \"var/tmp|on / \"; ls -ld /var/tmp'", a.target_imgref, a.target_imgref)]);
     sh(&[
         "env",
         &format!("CONTAINERS_STORAGE_CONF={STORAGE_CONF}"),
