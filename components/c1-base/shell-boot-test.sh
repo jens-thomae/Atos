@@ -77,6 +77,7 @@ done | sort -rn | awk "{ t += \$1; n[\$2] += \$1; if (\$2 == \"atos-shell\") sh 
 echo "ATOS-SUNRECLAIM-KB $(awk "/^SUnreclaim:/ { print \$2 }" /proc/meminfo)"
 # The shortcut itself: the host presses Super through the QEMU monitor (atos-comp'"'"'s default binding), which runs
 # `atos-shell --launcher` from atos-comp. Nothing here calls the shell.
+# (QEMU sends the key to every keyboard: the default PS/2 one is the only one, a second device would toggle twice.)
 echo ATOS-PRESS-SUPER
 wl=$(basename "$(ls -t $rt/wayland-[0-9] | head -1)")
 if wait_for "log | grep -q ^LAUNCHER_OPEN_MS"; then echo ATOS-LAUNCHER-OPEN; else echo ATOS-CHECK-FAIL launcher did not open; fi
@@ -115,7 +116,7 @@ rm -f "$W/mon.sock"
 echo "booting the installed disk"
 # shellcheck disable=SC2054 # commas are QEMU option syntax
 timeout "$tmo" qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on \
-  "${acc[@]}" -smp 4 -m 4G -display none -device virtio-gpu-pci -device virtio-keyboard-pci -nic none \
+  "${acc[@]}" -smp 4 -m 4G -display none -device virtio-gpu-pci -nic none \
   -drive if=pflash,format=raw,readonly=on,file=$F/OVMF_CODE_4M.secboot.fd -drive if=pflash,format=raw,file="$W/vars.fd" \
   -drive if=virtio,format=raw,file="$W/disk.raw" \
   -monitor unix:"$W/mon.sock",server=on,wait=off -serial file:"$OUT/boot.log" "${creds[@]}" &
