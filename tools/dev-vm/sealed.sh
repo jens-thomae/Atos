@@ -49,6 +49,10 @@
 #            install   installs trust-1, tracking :latest, which points at trust-1
 #            local     on a copy of that disk: `bootc switch --transport containers-storage` refused
 #                      (#150); with the developer-mode policy in /etc only the fixed reference passes
+#            transports  (#185, not in the default list) on a copy of that disk: `bootc switch` to a
+#                      tiny image in oci, oci-archive, docker-archive and dir with the shipped policy,
+#                      then with a candidate policy in /etc that rejects them; and what the candidate
+#                      breaks (`podman load`, `podman pull oci:`/`dir:`, as root and rootless)
 #            stage     points :latest at trust-2, boots trust-1, tries `bootc switch` to the
 #                      unsigned, wrongly signed and old images (all refused), then `bootc upgrade`
 #                      stages trust-2; then the guest points :latest at trust-mid (refused: the
@@ -489,6 +493,57 @@ trust_local() {
   registry_up
   cp --sparse=always "$TDISK" "$WORK/trust-local.raw"
   VARS=$WORK/trust-local-vars.fd NET=1 TIMEOUT=90m ACTION=$LOCAL_ACTION boot "$WORK/trust-local.raw" "$OUT/trust-local.log" fresh
+}
+# The other local transports (#185), in the guest, with a tiny image (FROM scratch, one file): the
+# policy is checked when bootc first opens the target, before any layer is pulled, so an error after
+# that point means the policy accepted it (host disk space rules out four 4 GB stagings). First with
+# the shipped policy, then with a CANDIDATE policy in /etc (not shipped) that rejects the four
+# transports, and what else that candidate refuses.
+# shellcheck disable=SC2016 # expands in the guest
+TRANSPORTS_ACTION='printf "[[registry]]\nlocation = \"10.0.2.2:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/50-atos-dev.conf
+until curl -sf http://10.0.2.2:5000/v2/ >/dev/null; do sleep 2; done
+P=ATOS-TRANSPORT T=/var/tmp/t
+echo "$P bootc: $(bootc --version); skopeo: $(skopeo --version); podman: $(podman --version)"
+echo "$P /etc policy after install: $(ls /etc/containers/policy.json 2>&1)"
+for t in dir tarball sif ostree docker-daemon; do
+  echo "$P parse --transport $t: $(bootc switch --transport $t /nonexistent 2>&1 | tail -n 1)"
+done
+ref() { case $1 in oci) echo $T/oci:tiny ;; oci-archive) echo $T/oci.tar ;; docker-archive) echo $T/docker.tar ;; dir) echo $T/dir ;; esac; }
+mkdir -p $T
+for t in oci oci-archive docker-archive dir; do
+  skopeo copy -q docker://10.0.2.2:5000/atos/tiny:t "$t:$(ref $t)" || echo "$P copy to $t FAILED"
+done
+chmod -R a+rX $T
+useradd -m tuser 2>/dev/null; echo "$P tuser subuid entries: $(grep -c ^tuser: /etc/subuid)"
+candidate() { python3 -c "import json; p = json.load(open(\"/usr/share/containers/policy.json\")); p[\"transports\"].update({t: {\"\": [{\"type\": \"reject\"}]} for t in (\"oci\", \"oci-archive\", \"docker-archive\", \"dir\")}); json.dump(p, open(\"/etc/containers/policy.json\", \"w\"), indent=4)"; }
+checks() { # <label>: bootc switch from each transport; podman load or pull of each, as root and rootless
+  local t out cmd run
+  for t in oci oci-archive docker-archive dir; do
+    if out=$(bootc switch --transport $t "$(ref $t)" 2>&1); then echo "$P $1 bootc switch $t ACCEPTED"
+    else echo "$P $1 bootc switch $t: $(printf "%s" "$out" | tail -n 2 | tr "\n" " ")"; fi
+    case $t in *-archive) cmd="podman load -q -i $(ref $t)" ;; *) cmd="podman pull -q $t:$(ref $t)" ;; esac
+    for run in "" "runuser -u tuser --"; do
+      if out=$(cd / && $run $cmd 2>&1); then echo "$P $1 ${run:+tuser }$cmd: ok"
+      else echo "$P $1 ${run:+tuser }$cmd: refused: $(printf "%s" "$out" | tail -n 1)"; fi
+    done
+    podman rmi -a -f >/dev/null 2>&1; runuser -u tuser -- sh -c "cd / && podman rmi -a -f" >/dev/null 2>&1
+  done
+}
+checks shipped
+candidate && echo "$P candidate in /etc: $(jq -c ".transports | with_entries(select(.key | test(\"oci|dir|archive\")))" /etc/containers/policy.json)"
+checks candidate
+rm /etc/containers/policy.json
+echo "$P staged entries: $(ls /boot/loader/entries.staged 2>/dev/null | tr "\n" " ")"
+bootc status'
+# On a copy of the freshly installed disk, so the other steps are unaffected.
+trust_transports() {
+  registry_up
+  mkdir -p "$WORK/tiny" && printf 'atos\n' > "$WORK/tiny/tiny.txt"
+  printf 'FROM scratch\nCOPY tiny.txt /\n' | sudo podman build -q -t localhost/tiny:t -f - "$WORK/tiny" >/dev/null
+  sudo podman push -q --tls-verify=false localhost/tiny:t docker://localhost:5000/atos/tiny:t
+  cp --sparse=always "$TDISK" "$WORK/trust-transports.raw"
+  VARS=$WORK/trust-transports-vars.fd NET=1 ACTION=$TRANSPORTS_ACTION \
+    boot "$WORK/trust-transports.raw" "$OUT/trust-transports.log" fresh
 }
 trust_apply() { VARS=$TVARS boot "$TDISK" "$OUT/trust-apply.log"; }
 trust_previous() { VARS=$TVARS MENU=1 boot "$TDISK" "$OUT/trust-previous.log"; }
