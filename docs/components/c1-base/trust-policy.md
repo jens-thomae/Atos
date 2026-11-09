@@ -98,7 +98,14 @@ Before the patch: `tools/dev-vm/sealed.sh trust transports` at 82fc868, on a cop
 | root `podman load` (oci-archive, docker-archive), `podman pull oci:`/`dir:` | ok | **refused** |
 | the same, rootless user | ok | **refused** |
 
-With the patch: **not yet run.** The image build passed the patch's unit tests (`allowed_transports`, with `version_floor`, `version_floor_booted_and_staged` and `test_boot_count_exhausted`: 4 passed), then stopped at the UKI step: *No space left on device* in the dev VM.
+With the patch: `sealed.sh trust` (all steps, `transports` included) at defd5a2, 2026-11-09, same VM and setup. The image build ran the patch tests: `allowed_transports`, `version_floor`, `version_floor_booted_and_staged`, `test_boot_count_exhausted`, 4 passed. Log: `tools/dev-vm/out/sealed/trust-transports.log`.
+
+| Check (shipped policy, patched bootc) | Result |
+| --- | --- |
+| `bootc switch` from `oci`, `oci-archive`, `docker-archive`, `dir` (tiny image) and `docker-daemon` | all five refused before the image is opened: *Checking if image /var/tmp/t/oci:tiny is pulled: Refusing image /var/tmp/t/oci:tiny from transport 'oci': only registry and containers-storage are allowed* |
+| `bootc switch --transport oci` to trust-2 (signed, newer than the booted trust-1) in an OCI directory | refused, the same message; nothing staged |
+| root and rootless `podman load` (oci-archive, docker-archive), `podman pull oci:`/`dir:` | all ok |
+| `install`, `local` (#150), `stage`, `apply`, `previous` (#75) | unchanged: every refusal with the same message, trust-2 staged and applied, trust-1 boots from the menu |
 
 ## Release key slot
 
