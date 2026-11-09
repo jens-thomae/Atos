@@ -3,8 +3,8 @@
 # tools/dev-vm/sealed.sh `disk`), boots it under QEMU/KVM with OVMF Secure Boot (the TEST keys are
 # enrolled from outside, as components/c11-installer/vm-test.sh `enrol` does) and a virtio GPU, and
 # lets a one-off systemd unit (a credential: the image carries no test hook) check, as the logged-in
-# session: the dock draws its first frame, `atos-shell --launcher` (the command of atos-comp's
-# shortcut) opens the launcher, a killed shell comes back while atos-comp keeps running, and the
+# session: the dock draws its first frame, the launcher opens when the host presses the shortcut
+# (Super, sent through the QEMU monitor), a killed shell comes back while atos-comp keeps running, and the
 # shell's RSS and the idle desktop's RAM are within §7. QEMU's screendump keeps a picture of the
 # dock and of the open launcher; the picture is checked too (the dock's strip is not the plain
 # background, the open launcher darkens the screen).
@@ -55,13 +55,24 @@ uid=$(id -u atos); rt=/run/user/$uid
 log() { journalctl -b -t atos-shell -o cat --no-pager; }
 wait_for() { for _ in $(seq 240); do eval "$1" && return 0; sleep 0.5; done; return 1; }   # 2 min
 wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 1 ]" || { echo ATOS-CHECK-FAIL no dock frame; log | tail -20; systemctl poweroff --no-block; exit 0; }
+# Login to desktop: from the compositor process start to the shell'"'"'s first frame (VM, KVM: indicative, §7 is reference hardware).
+comp=$(pgrep -u atos -x atos-comp | head -1)
+t0=$(awk "{ printf \"%.2f\", \$22 / 100 }" /proc/$comp/stat)
+t1=$(journalctl -b -t atos-shell -o short-monotonic --no-pager | grep -m1 BUDGET_FIRST_FRAME | sed "s/^\[ *\([0-9.]*\)\].*/\1/")
 echo "ATOS-DOCK-UP uptime=$(cut -d. -f1 /proc/uptime)s"
-sleep 8
-# Idle numbers, §7: the shell is 300 MB of the 800 MB idle desktop (D-006).
+echo "ATOS-LOGIN-TO-DESKTOP-S $(awk "BEGIN { printf \"%.1f\", $t1 - $t0 }")"
+# Idle: startup finished, then 60 s more, so first-boot work is over (§7 "after login").
+systemctl is-system-running --wait >/dev/null 2>&1
+sleep 60
+# Idle numbers, §7: the shell is 300 MB of the 800 MB idle desktop (D-006). Breakdown for the owner.
 echo "ATOS-SHELL-RSS-KB $(ps -u atos -o rss=,comm= | awk "\$2 == \"atos-shell\" { print \$1 }")"
 echo "ATOS-USED-MB $(awk "/MemTotal/ { t = \$2 } /MemAvailable/ { a = \$2 } END { print int((t - a) / 1024) }" /proc/meminfo)"
-wl=$(basename "$(ls $rt/wayland-[0-9] | head -1)")
-runuser -u atos -- env XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=$wl atos-shell --launcher
+echo "ATOS-MEM $(grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|Slab|SUnreclaim|AnonPages|KernelStack|PageTables):" /proc/meminfo | tr -s " " | tr "\n" ";")"
+ps -eo rss,comm --sort=-rss | head -15 | sed "s/^/ATOS-PS /"
+# The shortcut itself: the host presses Super through the QEMU monitor (atos-comp'"'"'s default binding), which runs
+# `atos-shell --launcher` from atos-comp. Nothing here calls the shell.
+echo ATOS-PRESS-SUPER
+wl=$(basename "$(ls -t $rt/wayland-[0-9] | head -1)")
 if wait_for "log | grep -q ^LAUNCHER_OPEN_MS"; then echo ATOS-LAUNCHER-OPEN; else echo ATOS-CHECK-FAIL launcher did not open; fi
 sleep 8
 runuser -u atos -- env XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=$wl atos-shell --launcher   # closes it
@@ -98,18 +109,22 @@ rm -f "$W/mon.sock"
 echo "booting the installed disk"
 # shellcheck disable=SC2054 # commas are QEMU option syntax
 timeout "$tmo" qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on \
-  "${acc[@]}" -smp 4 -m 4G -display none -device virtio-gpu-pci -nic none \
+  "${acc[@]}" -smp 4 -m 4G -display none -device virtio-gpu-pci -device virtio-keyboard-pci -nic none \
   -drive if=pflash,format=raw,readonly=on,file=$F/OVMF_CODE_4M.secboot.fd -drive if=pflash,format=raw,file="$W/vars.fd" \
   -drive if=virtio,format=raw,file="$W/disk.raw" \
   -monitor unix:"$W/mon.sock",server=on,wait=off -serial file:"$OUT/boot.log" "${creds[@]}" &
 pid=$!
 shots=(); halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|ATOS-CHECK-FAIL'
-shot() { echo "screendump $W/$1.ppm" | socat - UNIX-CONNECT:"$W/mon.sock" >/dev/null; shots+=("$1"); }
+mon() { echo "$1" | socat - UNIX-CONNECT:"$W/mon.sock" >/dev/null; }
+shot() { mon "screendump $W/$1.ppm"; shots+=("$1"); }
+pressed=
 while kill -0 "$pid" 2>/dev/null; do
-  l=$(tr -d '\r' <"$OUT/boot.log" 2>/dev/null | grep -a ATOS- || true)
+  [ -f "$OUT/boot.log" ] || { sleep 1; continue; }
+  l=$(tr -d '\r' <"$OUT/boot.log" | grep -a ATOS- || true)
+  [ -n "$pressed" ] || { grep -q ATOS-PRESS-SUPER <<<"$l" && { mon "sendkey meta_l"; pressed=1; }; }
   [[ " ${shots[*]} " == *" dock "* ]] || { grep -q ATOS-DOCK-UP <<<"$l" && { sleep 3; shot dock; }; }
   [[ " ${shots[*]} " == *" launcher "* ]] || { grep -q ATOS-LAUNCHER-OPEN <<<"$l" && { sleep 3; shot launcher; }; }
-  grep -aqE "$halt" "$OUT/boot.log" 2>/dev/null && { kill "$pid"; break; }
+  grep -aqE "$halt" "$OUT/boot.log" && { kill "$pid"; break; }
   sleep 1
 done
 wait "$pid" || true
@@ -123,6 +138,8 @@ done
 grep -aqE 'ATOS-CHECK-FAIL' "$OUT/boot.log" && fail "guest check failed"
 rss=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-SHELL-RSS-KB \([0-9]*\).*/\1/p' | head -1)
 used=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-USED-MB \([0-9]*\).*/\1/p' | head -1)
+login=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-LOGIN-TO-DESKTOP-S \([0-9.]*\).*/\1/p' | head -1)
+echo "login to desktop ${login:?} s in the VM (KVM, llvmpipe; indicative, §7's 10 s is reference hardware)"
 echo "shell RSS ${rss:?} KB (share 307200), used RAM ${used:?} MB (idle desktop budget 800)"
 [ "$rss" -le 307200 ] || fail "shell RSS over its 300 MB share"
 [ "$used" -le 800 ] || fail "idle desktop over 800 MB"
