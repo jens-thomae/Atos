@@ -94,7 +94,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
-          name: shell-boot
+          name: shell-boot-${{ github.run_attempt }}  # one per attempt: a re-run must not overwrite the failed one (#192)
           path: shell-boot/
           if-no-files-found: warn
           retention-days: 14
