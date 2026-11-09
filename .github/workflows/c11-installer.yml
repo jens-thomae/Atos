@@ -109,10 +109,11 @@ jobs:
           grep -aq 'bound to the TPM with PCR 7' $out/boot.log
           # #187: the administrator account works with the typed password, and only with it.
           for m in ADMIN-PASSWORD-YESCRYPT ADMIN-SUDO-OK ADMIN-SUDO-WRONG-REFUSED; do grep -aq "ATOS-$m" $out/boot.log; done
-          # Flatpak and Flathub come with c1-base (#187); the published image has them only once that has
-          # merged and published, so this check is skipped for older payloads.
+          # Flatpak, Flathub and the password login (no autologin) come with c1-base (#187); the published
+          # image has them only once that has merged and published, so this check is skipped for older payloads.
           if sudo podman run --rm "$TARGET_IMGREF" rpm -q flatpak >/dev/null; then
-            for m in 'FLATPAK-REMOTE flathub' 'FLATPAK-OS-INFO false' TERMINAL-ENTRY; do grep -aq "ATOS-$m" $out/boot.log; done
+            for m in 'FLATPAK-REMOTE flathub' 'FLATPAK-OS-INFO false' TERMINAL-ENTRY LOGIN-READY LOGIN-OK; do grep -aq "ATOS-$m" $out/boot.log; done
+            if grep -aq ATOS-LOGIN-AUTOLOGIN-FOUND $out/boot.log; then echo "::error::autologin is still on"; exit 1; fi
           fi
           $v reboot
           grep -aq ATOS-REPORT-END $out/reboot.log

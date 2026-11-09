@@ -37,6 +37,8 @@ TARGET_IMGREF=${TARGET_IMGREF:-$GUEST_REG:latest}
 # The administrator password the unattended install types (#187); a test value for a throwaway disk.
 # Spaces and a colon check that it reaches chpasswd unchanged.
 TEST_PASSWORD='Atos test: 1'
+# The QEMU monitor, for typing at the login prompt (#187).
+MON_PORT=${MON_PORT:-4555}
 
 # The dev VM is aarch64 under emulation; CI is x86_64 with KVM.
 case "$(uname -m)" in
@@ -93,6 +95,33 @@ swtpm_up() {
     --flags startup-clear --daemon --pid file="$WORK/swtpm.pid"
 }
 
+# type_keys <text>: types <text> and Enter on the guest's keyboard through the QEMU monitor on fd 3.
+type_keys() {
+  local s=$1 c k i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case $c in
+      [a-z0-9]) k=$c ;;
+      [A-Z]) k=shift-${c,,} ;;
+      ' ') k=spc ;;
+      :) k=shift-semicolon ;;
+      *) echo "type_keys: no key for '$c'" >&2; return 1 ;;
+    esac
+    printf 'sendkey %s\n' "$k" >&3
+    sleep 0.1
+  done
+  printf 'sendkey ret\n' >&3
+}
+
+# The login on tty1 (#187): what a user types at greetd's prompt, once the report says it is up.
+login_tty1() {
+  exec 3<>"/dev/tcp/127.0.0.1/$MON_PORT"
+  type_keys atos
+  sleep 2
+  type_keys "$TEST_PASSWORD"
+  exec 3>&-
+}
+
 # qemu_run <log> <extra qemu args...>; env CODE=<firmware code> (default: Secure Boot capable).
 qemu_run() {
   local log=$1; shift
@@ -106,14 +135,16 @@ qemu_run() {
     -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
     -device "$TPMDEV",tpmdev=tpm0 \
     -drive if=none,id=hd,format=raw,file="$DISK" -device virtio-blk-pci,drive=hd,bootindex=1 \
+    -monitor tcp:127.0.0.1:"$MON_PORT",server=on,wait=off -device qemu-xhci -device usb-kbd \
     -serial file:"$log" "$@" &
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
-  local pid=$!
+  local pid=$! typed=
   local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
     m=$(tr -d '\r' < "$log" 2>/dev/null | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
     [ -z "$m" ] || { echo "HALT on: $m"; kill "$pid"; break; }
+    if [ -z "$typed" ] && grep -aq ATOS-LOGIN-READY "$log"; then login_tty1 && typed=1; fi
     sleep 5
   done
   wait "$pid" || true
@@ -125,6 +156,14 @@ qemu_run() {
 # password through PAM (pam_unix, unix_chkpwd: shadow labels matter under enforcing SELinux).
 # shellcheck disable=SC2016 # expands in the guest
 ADMIN_CHECK='pw=$(cat "$CREDENTIALS_DIRECTORY/atos.test-password")
+# No autologin (#187): greetd waits at its prompt; the host types user and password on tty1. First,
+# before runuser below opens sessions of its own. s: the user'"'"'s logind sessions on tty1.
+s() { loginctl list-sessions --no-legend | grep -E " atos .*tty1"; }
+s >/dev/null && echo ATOS-LOGIN-AUTOLOGIN-FOUND
+pgrep -x agreety >/dev/null && echo ATOS-LOGIN-READY
+i=0; until s >/dev/null || [ $i -ge 120 ]; do sleep 1; i=$((i + 1)); done
+s && echo ATOS-LOGIN-OK
+sleep 5; pgrep -u atos -x atos-comp >/dev/null && echo ATOS-LOGIN-COMPOSITOR-RUNS
 id atos
 ls -Z /etc/passwd /etc/group /etc/shadow /etc/gshadow
 grep -q "^atos:[$]y[$]" /etc/shadow && echo ATOS-ADMIN-PASSWORD-YESCRYPT
