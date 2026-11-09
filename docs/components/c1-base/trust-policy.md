@@ -54,6 +54,8 @@ D-015 allows **one fixed reference** while developer mode is on. For the transpo
 
 The whole `trust` suite was re-run on this branch: the #75 results below are unchanged (every refusal with the same message, trust-2 applied, trust-1 boots from the menu). The `stage` step now needs more than the default 45 min here, so it gets 90.
 
+After `main` with #176 was merged in, `trust images install local` was re-run on 2026-11-09: the three installs use `components/c11-installer/install-policy.json` and succeed, and every row below is unchanged.
+
 `tools/dev-vm/sealed.sh trust local`, on a copy of the freshly installed trust-1 disk (the `trust` setup, Dev VM demo below), 2026-11-08, M1 Max, aarch64 under QEMU emulation. Log: `tools/dev-vm/out/sealed/trust-local.log`. trust-2 is copied into root's local storage as `localhost/atos-dev:current` and tagged `localhost/other:test`.
 
 | Check | Result |
