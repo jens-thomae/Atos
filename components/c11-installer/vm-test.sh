@@ -158,6 +158,7 @@ qemu_run() {
 # password through PAM (pam_unix, unix_chkpwd: shadow labels matter under enforcing SELinux).
 # shellcheck disable=SC2016 # expands in the guest
 ADMIN_CHECK='pw=$(cat "$CREDENTIALS_DIRECTORY/atos.test-password")
+dmesg -n 1 # kernel audit lines on the serial console split the markers (run 42687015461)
 # No autologin (#187): greetd waits at its prompt; the host types user and password on tty1. First,
 # before runuser below opens sessions of its own. s: the user'"'"'s logind sessions on tty1.
 s() { loginctl list-sessions --no-legend | grep -E " atos .*tty1"; }
