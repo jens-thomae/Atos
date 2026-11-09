@@ -59,7 +59,9 @@ log() { journalctl -b -t atos-shell -o cat --no-pager; }
 wait_for() { for _ in $(seq 240); do eval "$1" && return 0; sleep 0.5; done; return 1; }   # 2 min
 # No autologin (#187): the host types user and password at the prompt once it is up.
 wait_for "pgrep -x agreety >/dev/null" && echo ATOS-LOGIN-READY || { echo ATOS-CHECK-FAIL no login prompt; systemctl poweroff --no-block; exit 0; }
-wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 1 ]" || { echo ATOS-CHECK-FAIL no dock frame; log | tail -20; systemctl poweroff --no-block; exit 0; }
+# What the login left behind (#187), for a failed login: no password text, only its status.
+login_diag() { passwd -S atos; loginctl list-sessions --no-legend; systemctl show -p ImportCredential systemd-sysusers.service; journalctl -b -o cat --no-pager -u greetd -u systemd-sysusers -t agreety -t greetd | tail -30; }
+wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 1 ]" || { log | tail -20; login_diag 2>&1 | sed "s/^/ATOS-DIAG /"; echo ATOS-CHECK-FAIL no dock frame; systemctl poweroff --no-block; exit 0; }
 # Login to desktop: from the compositor process start to the shell'"'"'s first frame (VM, KVM: indicative, §7 is reference hardware).
 comp=$(pgrep -u atos -x atos-comp | head -1)
 t0=$(awk "{ printf \"%.2f\", \$22 / 100 }" /proc/$comp/stat)
@@ -145,7 +147,7 @@ pressed='' typed=''
 while kill -0 "$pid" 2>/dev/null; do
   [ -f "$OUT/boot.log" ] || { sleep 1; continue; }
   l=$(tr -d '\r' <"$OUT/boot.log" | grep -a ATOS- || true)
-  [ -n "$typed" ] || { grep -q ATOS-LOGIN-READY <<<"$l" && { type_keys atos; sleep 2; type_keys "$PW"; typed=1; }; }
+  [ -n "$typed" ] || { grep -q ATOS-LOGIN-READY <<<"$l" && { type_keys atos; sleep 2; type_keys "$PW"; typed=1; sleep 3; shot login; }; }
   [ -n "$pressed" ] || { grep -q ATOS-PRESS-SUPER <<<"$l" && { mon "sendkey meta_l"; pressed=1; }; }
   [[ " ${shots[*]} " == *" dock "* ]] || { grep -q ATOS-DOCK-UP <<<"$l" && { sleep 3; shot dock; }; }
   [[ " ${shots[*]} " == *" launcher "* ]] || { grep -q ATOS-LAUNCHER-OPEN <<<"$l" && { sleep 3; shot launcher; }; }
@@ -155,7 +157,7 @@ done
 wait "$pid" || true
 tr -d '\r' <"$OUT/boot.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS-|Secure Boot|session-check|boot is (good|bad)' || true
 
-for s in dock launcher; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
+for s in login dock launcher; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
 fail() { echo "::error::$*"; exit 1; }
 for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING; do
   grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the serial log"
