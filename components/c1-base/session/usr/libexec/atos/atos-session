@@ -1,0 +1,21 @@
+#!/bin/sh
+# The desktop session (#186): greetd's initial_session. Runs atos-comp and keeps atos-shell running
+# next to it. atos-comp is not given the shell as a kiosk command: that turns its shortcuts off
+# (components/c3-shell/README.md), and a crashing shell must not end the session. The shell is
+# restarted one second after it exits, as often as needed; it ends with the compositor.
+export XDG_CURRENT_DESKTOP=atos   # xdg-desktop-portal picks atos.portal (UseIn=atos) and the launcher filters entries by it
+(
+  while :; do
+    # atos-comp names its socket wayland-N; the shell and `atos-shell --launcher` must use the same name.
+    for s in "$XDG_RUNTIME_DIR"/wayland-[0-9]; do
+      [ -S "$s" ] && WAYLAND_DISPLAY=${s##*/} systemd-cat -t atos-shell atos-shell   # its output goes to the journal (journalctl -t atos-shell)
+      break
+    done
+    sleep 1
+  done
+) &
+loop=$!
+atos-comp "$@"; rc=$?
+kill "$loop" 2>/dev/null
+pkill -u "$(id -u)" -x atos-shell
+exit "$rc"

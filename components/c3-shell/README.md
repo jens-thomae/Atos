@@ -25,6 +25,10 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `tests/` | Screenshot and accessibility-tree tests with the C4 harness ([screenshot-tests.md](../../docs/components/c4-toolkit/screenshot-tests.md)) |
 | `e2e/` | End-to-end run on atos-comp (nested in headless sway) and its checks, used by CI |
 
+## In the image (#186)
+
+The c1-base build compiles `atos-shell` in its own `shell` stage (our pinned Slint through `tools/slint-fork/slint-fork.sh setup`, thin LTO) and installs it as `/usr/bin/atos-shell`, with `data/atos.portal`. The session wrapper `usr/libexec/atos/atos-session` (C1) starts it next to atos-comp and restarts it after a crash; see "Session" in the [C1 README](../../docs/components/c1-base/README.md). CI boots the image and checks the dock, the launcher and the restart there.
+
 ## Dock-taskbar behaviour (#63)
 
 - One floating bar per output, anchored to the bottom edge with a `Space.s3` gap, `Size.dock-height` high, exclusive zone so windows do not cover it.
