@@ -15,7 +15,7 @@
 # Guest lines start with ATOS-REPORT-USRO. Logs: tools/dev-vm/out/sealed/usrov-*.
 set -euo pipefail
 SPIKE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=/dev/null # boot, IMAGE, WORK, OUT, step_build come from sealed.sh
+# shellcheck source=/dev/null # boot, IMAGE, WORK, OUT, INSTALL_POLICY, step_build come from sealed.sh
 source "$SPIKE/../../tools/dev-vm/sealed.sh"
 DISK=$WORK/usrov.raw VARS_FILE=$WORK/usrov-vars.fd
 TOOLS="strace tmux gdb gcc"  # small, small, large, largest: what a developer reaches for first
@@ -92,6 +92,7 @@ usro_install() {
   rm -f "$DISK" && truncate -s 20G "$DISK"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$INSTALL_POLICY:/etc/containers/policy.json:ro" \
     "$IMAGE" bootc install to-disk --generic-image --via-loopback "/out/$(basename "$DISK")"
 }
 usro_overlay() { VARS=$VARS_FILE NET=1 TIMEOUT=120m ACTION=$OVERLAY_ACTION boot "$DISK" "$OUT/usrov-overlay.log" fresh; }
