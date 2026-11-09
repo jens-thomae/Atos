@@ -49,10 +49,12 @@ These runs happen on GitHub-hosted `ubuntu-24.04` runners, so their absolute num
 | Shell: no dropped frames | No | Needs a compositor and hardware | Phase 1 |
 | Apps: cold start ≤ 300 ms | Yes | Harness, `BUDGET_FIRST_FRAME` marker; test app now, D-006 prototypes in #12 | Real apps from Phase 2; true cold cache on the reference runner (optional `drop_caches` rule, see `reference-runner.md`) |
 | Apps: Files opens 10,000 items ≤ 500 ms to first paint | Not yet | Same marker convention, on the D-006 Files prototypes (#12) | Phase 0 (#12), then Files in Phase 2 |
-| System: idle desktop RAM ≤ 800 MB | Partly | Harness, one app's RSS against the desktop limit | Whole desktop after login in Phase 1 |
+| System: idle desktop RAM ≤ 800 MB | Partly | Harness, one app's RSS against the desktop limit; the whole desktop in the image by `components/c1-base/shell-boot-test.sh` (definition below) | Reference hardware with a GPU |
 | System: idle desktop CPU ≤ 1 % over 5 min | Partly | Harness, one app, percent of one core; 10 s on PRs, 5 min nightly | Whole desktop in Phase 1 |
 | System: boot to usable desktop ≤ 10 s | No | Needs an image and hardware | Phase 1 |
 | Stability: 0 known crashers | No | Needs apps and crash reporting | Phase 3 gate |
 | Stability: automatic rollback on failed update | No | Needs an image | Phase 1 |
 | Accessibility: keyboard and screen reader | No | Needs apps | Phase 2 onwards |
 | Accessibility: contrast ≥ 4.5:1 body, ≥ 3:1 large | Partly | `contrast_ratio` and `contrast_passes` (WCAG 2.x), unit-tested; no theme tokens to check yet | When the design-system tokens land in the repo |
+
+**Idle desktop RAM (owner decision on #186, 2026-11-09):** the sum of `Pss` from `/proc/<pid>/smaps_rollup` over all processes plus `SUnreclaim` from `/proc/meminfo`, in decimal MB, measured in the booted image 60 s after startup has finished (`systemctl is-system-running --wait`). It counts what processes and the kernel hold, with shared pages split among their users, and leaves out the page cache. `MemTotal − MemAvailable` is printed for reference only: it discounts just half of the page cache and read about 300 MB higher. The image check runs in a VM with software rendering, so its numbers are indicative until measured on reference hardware with a GPU.

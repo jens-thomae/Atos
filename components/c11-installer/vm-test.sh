@@ -45,12 +45,14 @@ case "$(uname -m)" in
   aarch64)
     QEMU=(qemu-system-aarch64 -machine virt) F=/usr/share/AAVMF
     CODE_SB=$F/AAVMF_CODE.secboot.fd CODE_NOSB=$F/AAVMF_CODE.no-secboot.fd VARS0=$F/AAVMF_VARS.fd
-    TPMDEV=tpm-tis-device SERIAL=ttyAMA0 ;;
+    # virt has no keyboard; the login (#187) types on this one. q35 has PS/2, and QEMU sends a key to
+    # every keyboard, so x86_64 gets no second one (it would type each key twice).
+    TPMDEV=tpm-tis-device SERIAL=ttyAMA0 KBD=(-device qemu-xhci -device usb-kbd) ;;
   x86_64)
     # shellcheck disable=SC2054 # commas are QEMU option syntax
     QEMU=(qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on) F=/usr/share/OVMF
     CODE_SB=$F/OVMF_CODE_4M.secboot.fd CODE_NOSB=$F/OVMF_CODE_4M.fd VARS0=$F/OVMF_VARS_4M.fd
-    TPMDEV=tpm-tis SERIAL=ttyS0 ;;
+    TPMDEV=tpm-tis SERIAL=ttyS0 KBD=() ;;
   *) echo "unsupported architecture" >&2; exit 1 ;;
 esac
 # Per QEMU run; with KVM a prompt hidden on tty0 then fails in minutes, not after an hour.
@@ -135,7 +137,7 @@ qemu_run() {
     -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
     -device "$TPMDEV",tpmdev=tpm0 \
     -drive if=none,id=hd,format=raw,file="$DISK" -device virtio-blk-pci,drive=hd,bootindex=1 \
-    -monitor tcp:127.0.0.1:"$MON_PORT",server=on,wait=off -device qemu-xhci -device usb-kbd \
+    -monitor tcp:127.0.0.1:"$MON_PORT",server=on,wait=off "${KBD[@]}" \
     -serial file:"$log" "$@" &
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
