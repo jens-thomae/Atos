@@ -100,6 +100,7 @@ dev_install() {
   rm -f "$DDISK" && truncate -s 20G "$DDISK"
   sudo podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
     -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v "$WORK:/out" \
+    -v "$REPO/components/c11-installer/install-policy.json:/etc/containers/policy.json:ro" \
     "$RELEASE" bootc install to-disk --generic-image --via-loopback "/out/$(basename "$DDISK")"
   # Swap the committed key set systemd-boot enrols for the VM's own (same db cert, own PK and KEK).
   dev=$(sudo losetup -fP --show "$DDISK")

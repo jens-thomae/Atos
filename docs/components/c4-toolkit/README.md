@@ -63,6 +63,8 @@ See [rebase.md](rebase.md) for the routine and the first dry-run record.
 
 Headless screenshot and accessibility-tree tests: [screenshot-tests.md](screenshot-tests.md).
 
+Accessibility tree on a live AT-SPI bus and §7 budgets with the tree on (A8, M6 re-run): [a8-tree-on.md](a8-tree-on.md).
+
 ## Patch queue
 
 | Patch | Card | What |
@@ -71,5 +73,7 @@ Headless screenshot and accessibility-tree tests: [screenshot-tests.md](screensh
 | `0002-a11y-use-the-new-roles-…` | #62 | `StandardTableView` (fluent, cosmic, cupertino, material; not the native qt style): column headers named by title; rows with label (first cell), selected, index and default action. Menus (all styles, via `menu-base.slint`): `menu` frame, `menu-item` with title, enabled, checked, expandable and default action |
 | `0003-a11y-report-size-of-set-…` | #94 | A5: `StandardListView` items and `StandardTableView` rows carry the model length as size of set (with their index as position), and the table's list carries it too, so rows that are not instantiated stay addressable. Slint instantiates only visible rows; the total plus each live row's index lets an assistant scroll to any row. Pure `.slint`, no backend code |
 | `0004-a11y-name-popups-…` | #95 | AccessKit: popup roots become `Menu`, `Dialog` or `Tooltip` nodes named by `accessible-label` or title; `Dialog` windows get the dialog role (compiler default). See [popups-and-dialogs.md](popups-and-dialogs.md) |
+| `0005-a11y-complete-the-semantic-actions-…` | #93 | A4: `ReplaceSelectedText`, `ScrollIntoView`, `ShowContextMenu`, `Click` on `ComboBox`; see [semantic-actions.md](semantic-actions.md) |
+| `0006-a11y-derive-row-ids-…` | #96 | A7: `StandardListView` items, `StandardTableView` rows and column headers derive their `accessible-id` from the widget's (`<id>/item-N`, `/row-N`, `/column-N`); the winit backend publishes an empty id as no `author_id`. See [stable-ids.md](stable-ids.md) |
 
 Checkable is set on menu items that are checked, because `MenuEntry` has no separate checkable flag.

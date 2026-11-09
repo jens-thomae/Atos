@@ -1,0 +1,9 @@
+{
+  "app": "/tmp/tmp.8lhTQ7LzRr/iced-10k",
+  "cpu": "Intel(R) Celeron(R) N5105 @ 2.00GHz",
+  "kernel": "6.8.0-147-generic",
+  "cpu_window_s": 10,
+  "cold_start_ms": 87.256934,
+  "idle_rss_mb": 36.864,
+  "idle_cpu_percent": 0
+}

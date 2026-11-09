@@ -64,6 +64,10 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      # The base pin is our mirror of the recorded quay.io digest, and the mirror holds it (#117). Same login, read only.
+      # A bump's copy (base-mirror.yml) starts on the same push, so wait for it up to 10 min.
+      - name: Base image is mirrored
+        run: for _ in $(seq 20); do bash tools/ci/mirror-base.sh && exit 0; sleep 30; done; exit 1
       # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -76,6 +80,8 @@ jobs:
         run: |
           sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
           components/c1-base/check-seal.sh c1-base
+      - name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
+        run: components/c1-base/nvidia/check.sh c1-base
 
   publish:
     needs: changes
@@ -125,6 +131,8 @@ jobs:
         run: |
           sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
           components/c1-base/check-seal.sh c1-base
+      - name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
+        run: components/c1-base/nvidia/check.sh c1-base
 
       # Corresponding source (GPL, D-013, #85): the package is public, the repository is not. Built and checked
       # before anything is pushed, and pushed before the image, so no image is ever public without its source. A FROM-scratch
@@ -136,6 +144,11 @@ jobs:
           mkdir src
           ID=$(podman image inspect --format '{{.Id}}' c1-base)  # config digest, known before the push
           git archive --prefix="atos-$GITHUB_SHA/" -o "src/atos-$GITHUB_SHA.tar.gz" HEAD
+          # NVIDIA's open kernel modules (MIT/GPL-2.0), the exact commit the image's modules are built from (#162).
+          (. components/c1-base/nvidia/UPSTREAM
+           git clone -q --depth 1 --branch "$tag" "$repo" "$RUNNER_TEMP/nv"
+           test "$(git -C "$RUNNER_TEMP/nv" rev-parse HEAD)" = "$commit"
+           git -C "$RUNNER_TEMP/nv" archive --prefix="open-gpu-kernel-modules-$tag/" -o "$PWD/src/open-gpu-kernel-modules-$tag.tar.gz" HEAD)
           podman run --rm c1-base rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > src/fedora-packages.txt
           [ -s src/fedora-packages.txt ]
           cat > src/README.md <<EOF
@@ -143,8 +156,13 @@ jobs:
 
           - atos-$GITHUB_SHA.tar.gz: the Atos repository at commit $GITHUB_SHA (atos-comp, Slint-linked code, image recipe).
             Rust dependencies are pinned in the Cargo.lock files and come from crates.io and the git revisions named there.
-          - fedora-packages.txt: every Fedora package (NVR) in the image. Their sources are at
-            https://src.fedoraproject.org (git, per package and release) and https://koji.fedoraproject.org (source RPMs).
+          - open-gpu-kernel-modules-*.tar.gz: NVIDIA's open kernel modules at the tag and commit in
+            components/c1-base/nvidia/UPSTREAM, built into the image's nvidia*.ko (MIT/GPL-2.0, D-017).
+          - fedora-packages.txt: every package (NVR) in the image. Fedora's sources are at
+            https://src.fedoraproject.org (git, per package and release) and https://koji.fedoraproject.org (source RPMs);
+            the nvidia-* and xorg-x11-drv-nvidia* packages come from RPM Fusion nonfree, sources at https://pkgs.rpmfusion.org.
+            NVIDIA's userspace and GSP firmware are binary only, under the NVIDIA Driver License Agreement
+            (/usr/share/licenses/xorg-x11-drv-nvidia/LICENSE in the image).
           - Licence: D-013, our own source is MIT OR Apache-2.0; binaries carry the licence of what they link (atos-comp and Slint-linked code: GPL-3.0-only).
           EOF
           printf 'FROM scratch\nLABEL org.atos.source-of="%s:%s" org.atos.source-of-image-id="sha256:%s"\nCOPY . /\n' "$IMAGE" "$GITHUB_SHA" "$ID" > src/Containerfile

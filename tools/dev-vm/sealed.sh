@@ -12,6 +12,11 @@
 #            uki     one hex digit of the composefs digest in the UKI's command line changed
 #            `tamper <case>` runs one case
 #   all      all four steps
+#   nvidia   NVIDIA's modules under Secure Boot (#162, docs/components/c1-base/nvidia.md), after `disk`:
+#            enrols the TEST keys as `boot` does, then loads nvidia-drm in the guest. The VM has no
+#            NVIDIA GPU, so `No such device` from nvidia.ko's init means the kernel accepted the
+#            signature (it is checked before init runs); `Key was rejected` means it did not. Also
+#            shows that no NVIDIA or nouveau module loads by itself on a machine without NVIDIA
 #   update   the update and rollback loop (#55), on its own disk ~/sealed/update.raw. Steps:
 #            images    builds dev-1 (as shipped) and dev-2 (plus IMAGE_VERSION=dev-2 in os-release,
 #                      VM-only), pushes both to a registry in this VM (localhost:5000)
@@ -62,9 +67,8 @@ WORK=~/sealed
 OUT="$HERE/out/sealed"
 mkdir -p "$WORK" "$OUT"
 # The image's policy refuses local images (#150), and `bootc install` reads its own image from
-# local storage. So the install container alone gets the policy with that one rule accepted.
-INSTALL_POLICY=$WORK/install-policy.json
-sed 's/"reject"/"insecureAcceptAnything"/' "$HERE/../../components/c1-base/usr/share/containers/policy.json" > "$INSTALL_POLICY"
+# local storage. So the install container alone gets the installer's install-only policy (#176).
+INSTALL_POLICY=$HERE/../../components/c11-installer/install-policy.json
 
 # Once startup has finished: prints Secure Boot state, `bootc status`, the mounts, the image's
 # IMAGE_VERSION and boot time, runs the optional `atos.action` credential (ACTION=<script>),
@@ -146,7 +150,7 @@ boot() { # <disk> <log> [fresh]: fresh = new firmware variables, i.e. setup mode
     sleep 5
   done
   tr -d '\r' < "$log" | grep -av 'EFI Internal Shell' | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
-    | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|ATOS-BOOT|sh\[[0-9]+\]:|session-check|boot is (good|bad)|reboot: Restarting|counted boot failed|Timed out|timed out|fs-verity|/sbin/init|$halt"
+    | grep -aE "Enrolling|enrolled|secureboot:|ATOS-REPORT|ATOS-BOOT|ATOS-NVIDIA|sh\[[0-9]+\]:|session-check|boot is (good|bad)|reboot: Restarting|counted boot failed|Timed out|timed out|fs-verity|/sbin/init|$halt"
 }
 
 step_build() { sudo podman build --build-context repo="$HERE/../.." -t "$IMAGE" "$HERE/../../components/c1-base"; }
@@ -160,6 +164,14 @@ step_disk() {
 }
 
 step_boot() { boot "$WORK/disk.raw" "$OUT/boot.log" fresh; }
+
+# shellcheck disable=SC2016 # expands in the guest
+NVIDIA_ACTION='echo "ATOS-NVIDIA lockdown: $(cat /sys/kernel/security/lockdown)"
+echo "ATOS-NVIDIA loaded at boot: $(lsmod | grep -oE "^(nvidia|nouveau)[a-z_]*" | tr "\n" " ")(end)"
+for m in nvidia nvidia-modeset nvidia-drm nvidia-uvm; do echo "ATOS-NVIDIA $m: signer $(modinfo -F signer $m), vermagic $(modinfo -F vermagic $m)"; done
+modprobe nvidia-drm 2>&1 | sed "s/^/ATOS-NVIDIA /"
+journalctl -k -b -o cat --no-pager | grep -E "NVRM|nvidia|Loading of|Key was rejected|PKCS#7" | sed "s/^/ATOS-NVIDIA kernel: /"'
+step_nvidia() { ACTION=$NVIDIA_ACTION boot "$WORK/disk.raw" "$OUT/nvidia.log" fresh; }
 
 # Tamper cases work on ~/sealed/tampered.raw, with its root at $mnt and its ESP at $esp.
 mnt=$WORK/mnt esp=$WORK/esp dev=
@@ -484,11 +496,11 @@ trust_previous() { VARS=$TVARS MENU=1 boot "$TDISK" "$OUT/trust-previous.log"; }
 # Sourced (spikes/c1-dev-image/run.sh reuses boot() and the registry): stop before the steps.
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 case "${1:-}" in
-  build|disk|boot) "step_$1" ;;
+  build|disk|boot|nvidia) "step_$1" ;;
   tamper) step_tamper "${2:-}" ;;
   all) step_build; step_disk; step_boot; step_tamper ;;
   update) for s in ${2:-images install stage apply previous rollback back}; do "update_$s"; done ;;
   counting) for s in ${2:-images install stage-good good bad hang hang-target panic emerg}; do "counting_$s"; done ;;
   trust) for s in ${2:-images install local stage apply previous}; do "trust_$s"; done ;;
-  *) sed -n '2,51p' "$0" >&2; exit 2 ;;
+  *) sed -n '2,60p' "$0" >&2; exit 2 ;;
 esac

@@ -37,6 +37,7 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
       - run: bash tools/ci/test-is-docs-only.sh
+      - run: bash tools/ci/test-mirror-base.sh
       - id: diff
         shell: bash
         run: |

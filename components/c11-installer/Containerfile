@@ -3,7 +3,9 @@
 # Build: podman build --build-context repo=. -t atos-installer components/c11-installer
 # ISO:   image-builder generic-iso from this image, with the c1-base image as payload (see build-iso.sh).
 # Same base as c1-base, so the layers are shared. Keep in step with components/c1-base/Containerfile.
-ARG BASE=quay.io/fedora/fedora-bootc:45@sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29
+# Mirror and upstream record: docs/components/c1-base/base-mirror.md.
+# upstream: quay.io/fedora/fedora-bootc:45@sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29
+ARG BASE=ghcr.io/jens-thomae/atos/fedora-bootc:45.20261108.0@sha256:0c0d822e8545efe843e72f4a216295e9fd3d8a8213709fff0db6844b5d9aad29
 
 FROM ${BASE} AS build
 RUN dnf -y install --setopt=install_weak_deps=False gcc curl
@@ -38,6 +40,7 @@ RUN set -xe; kver=$(ls /usr/lib/modules); env DRACUT_NO_XATTR=1 dracut -f /usr/l
 COPY iso.yaml /usr/lib/image-builder/bootc/iso.yaml
 COPY atos-installer.service /usr/lib/systemd/system/atos-installer.service
 COPY --from=build /atos-install /usr/bin/atos-install
+COPY install-policy.json /usr/share/atos-install/install-policy.json
 # The live system runs only the installer: no bootloader updates, no greeter, no update timers.
 RUN systemctl mask bootloader-update.service bootc-fetch-apply-updates.timer rpm-ostree-countme.timer \
     && systemctl disable getty@tty1.service \
