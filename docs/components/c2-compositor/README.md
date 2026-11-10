@@ -27,7 +27,7 @@ cargo build --locked && cargo test --locked && cargo clippy --all-targets --lock
 
 ## Downstream changes
 
-Every change against `epoch-1.11.0`. No behaviour change except the renamed state directory (last row of Renamed).
+Every change against `epoch-1.11.0`. Behaviour changes: the renamed state directory (last row of Renamed) and the ones under Behaviour changes.
 
 ### Renamed
 
@@ -51,6 +51,10 @@ Every change against `epoch-1.11.0`. No behaviour change except the renamed stat
 ### Moved
 
 - `README.md` to `README.upstream.md` (unchanged); `LICENSE` (GPL-3.0) kept as is.
+
+### Behaviour changes
+
+- The seat starts on the output under the pointer (which starts at the origin), not on the first output found (#195, `src/backend/mod.rs` `initial_output`). Upstream took the first output in DRM device order, which comes from smithay's `HashMap` of udev devices and changes between boots. With two outputs, about every second boot then opened output-less layer surfaces such as the launcher on the output the pointer was not on.
 
 ### Deliberately not renamed (not "make no behaviour changes")
 
