@@ -23,6 +23,16 @@ limactl stop atos / limactl delete atos    # stop, or throw it away
 - `tools/dev-vm/sealed.sh` builds the sealed base image, installs it and boots it with Secure Boot under QEMU inside the VM, then runs a tamper check (#54). It needs the HWE kernel and is best run in its own instance; see [`docs/components/c1-base/`](components/c1-base/README.md#rebuild-and-boot-it-in-the-dev-vm).
 - `ATOS_VM=atos-check tools/dev-vm/vm up` creates a separate instance, for example to test a change to `atos.yaml` without touching `atos`. Delete it afterwards with `limactl delete -f atos-check`.
 
+## Disk space
+
+Every checkout (main and each `.claude/worktrees/*`) builds into its own `~/target/<checkout path>`, 8–10 GB each. Three rules keep several parallel sessions from filling the disk (#213):
+
+- Before every `vm run` and `vm up`, `tools/dev-vm/gc.sh` deletes the cache of any checkout under the mounted repo that no longer exists. Caches of checkouts visible in the VM are never touched; neither are caches of checkouts outside the mount, and nothing is deleted if the mount is missing. `tools/dev-vm/gc-test.sh` tests this against a temporary tree.
+- The same script warns when less than 5 GB is free and lists the largest caches. Then delete caches of finished checkouts: `limactl shell atos -- rm -rf ~/target/<checkout path>`.
+- New VMs get a 100 GiB disk (`atos.yaml`; it is sparse, so the Mac only uses what the VM writes). The size applies only when the VM is created. A VM made earlier keeps 50 GiB; to get 100 GiB, stop all sessions that use it, then `limactl delete atos && tools/dev-vm/vm up`. This loses its build caches.
+
+A shared target dir was rejected: parallel builds would block on cargo's lock, and workspace crates rebuild per path anyway.
+
 ## Pinned inputs
 
 Everything `vm up` downloads is pinned and checked, except apt packages:

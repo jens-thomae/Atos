@@ -14,7 +14,7 @@ vmType: vz
 mountType: virtiofs
 cpus: 4
 memory: 8GiB
-disk: 50GiB
+disk: 100GiB
 
 containerd:
   system: false
