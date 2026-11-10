@@ -9,7 +9,7 @@ The §7 Stability budget asks for an automatic rollback to the previous image af
 3. In the OS, `systemd-bless-boot-generator` sees the variable and pulls in `systemd-bless-boot.service`, which requires `boot-complete.target`. Our health check, `atos-session-check.service`, is `RequiredBy=boot-complete.target`.
 4. **Good boot:** the check passes, `boot-complete.target` is reached, and `systemd-bless-boot` renames the entry to `…-1.conf`. From then on, it is an ordinary entry.
 5. **Bad boot:** every way a counted boot can fail ends in a reboot, and each reboot uses up one try:
-   - **The session does not come up:** the check fails and reboots (`FailureAction=reboot`). This is a clean reboot, so a stop job that hangs can delay it by up to systemd's own shutdown timeouts.
+   - **The login prompt does not come up:** the check fails and reboots (`FailureAction=reboot`). This is a clean reboot, so a stop job that hangs can delay it by up to systemd's own shutdown timeouts.
    - **The boot hangs after switch-root** before the check decides: `JobTimeoutSec=5min` / `JobTimeoutAction=reboot` on `boot-complete.target`.
    - **The kernel panics:** the karg `panic=10` ([`kargs.d/20-atos-panic.toml`](../../../components/c1-base/usr/lib/bootc/kargs.d/20-atos-panic.toml)) reboots 10 s later. Like every karg, it is sealed into the signed UKI.
    - **The initrd (or the booted system) enters emergency mode,** for example because the composefs digest does not match: drop-ins for `emergency.service` and `dracut-emergency.service` run [`counted-boot-failed`](../../../components/c1-base/usr/libexec/atos/counted-boot-failed) first. On a counted boot (systemd-boot set `LoaderBootCountPath`), it reboots instead of starting the shell. The `kernel` stage rebuilds the initramfs with Fedora's dracut config plus [`40-atos-boot-counting.conf`](../../../components/c1-base/usr/lib/dracut/dracut.conf.d/40-atos-boot-counting.conf), which adds the drop-ins and the script.
@@ -20,16 +20,15 @@ A boot without a counter runs none of the counting logic: the check and the time
 
 ## What "good" means
 
-**A boot is good when the desktop session runs:** `atos-comp` (C2) runs as `atos`, its Wayland socket exists, and it is still running 10 s later ([`session-check`](../../../components/c1-base/usr/libexec/atos/session-check)). The check fails as soon as greetd falls back to its text login, which means the session ended. It also fails after 2 minutes (`TimeoutStartSec=2min`).
+**A boot is good when greetd shows its login prompt** (rule A1, owner decision on #187, 2026-11-09): `greetd` is active and the same `agreety` process has been waiting for 10 s ([`session-check`](../../../components/c1-base/usr/libexec/atos/session-check)). A desktop session that already runs (`atos-comp` as `atos`, someone logged in within those 10 s) counts as well. The check fails as soon as `greetd.service` has failed, and after 2 minutes (`TimeoutStartSec=2min`).
 
 Why this definition:
 
-- **It is what the user needs from a boot.** Atos is a desktop OS. An image that boots but shows no desktop is unusable for someone who has no terminal (C1: *"no terminal needed"*). Reaching `multi-user.target` would pass such an image.
-- **It covers the failures an update can cause.** Kernel, initrd, root mount, systemd units, Mesa, the compositor and greetd are all on the path to a running session. If any of them breaks, the session does not come up. The check itself runs only in the booted system. Failures before that are caught as described in step 5: by `panic=10`, by the emergency drop-ins, or by the `boot-complete.target` timeout.
+- **There is no autologin** (#187, owner decision A). Nobody may log in during a counted boot, so the check cannot wait for the session; until #187 it did (*"the desktop session runs"*), which would now roll back every update.
+- **It covers what runs before login.** Kernel, initrd, root mount, systemd units and greetd are on the path to the prompt. Failures before switch-root are caught as described in step 5: by `panic=10`, by the emergency drop-ins, or by the `boot-complete.target` timeout.
+- **What it does not cover: the compositor and Mesa.** They start only after login. If an update breaks them, the user logs in, gets the prompt back, and picks **"Previous version"** in the boot menu (§6 C1 keeps that entry; the owner accepted this on #187).
 - **It is not "no failed units".** systemd ships `systemd-boot-check-no-failures.service`, but it would roll back an image because of an unrelated unit, such as a network wait. That rejects updates that work for the user.
-- **The 10 s wait** catches a compositor that crashes right after it starts. The **2-minute limit** is 12 times the 10 s boot budget (§7). Neither value is in the spec; both are flagged on the card.
-
-When C3 (shell) exists, the check should also wait for the shell's first frame. That is a later card.
+- **The 10 s wait** catches a greeter that greetd keeps restarting. The **2-minute limit** is 12 times the 10 s boot budget (§7). Neither value is in the spec; both are flagged on the card.
 
 ## The patch
 
@@ -79,7 +78,9 @@ The image installs [`atos-bless-boot.cil`](../../../components/c1-base/usr/share
 
 ## Shown in the dev VM (2026-11-07)
 
-`tools/dev-vm/sealed.sh counting` ([`sealed.sh`](../../../tools/dev-vm/sealed.sh)) uses its own disk, `~/sealed/counting.raw`, and the dev registry from the update loop (#55). Images: **dev-1** (as shipped), **dev-2** (adds `IMAGE_VERSION=dev-2`), and **dev-bad**, which is dev-2 with `IMAGE_VERSION=dev-bad` and `/usr/bin/atos-comp` pointing at `false`. dev-bad boots, but its session never comes up, as when an update ships a compositor that crashes. The variants are built from copies of the Containerfile in `~/sealed`; the shipped one does not change.
+**These results predate rule A1** (#187): they used the old check, which waited for the session. `sealed.sh counting` now breaks the greeter instead of the compositor, but has not been re-run. A1's good path runs on every installer KVM test: on the installed system, before anyone types, `session-check` must exit with `login prompt up: boot is good` (`ATOS-SESSION-CHECK-OK`, [`vm-test.sh`](../../../components/c11-installer/vm-test.sh)).
+
+`tools/dev-vm/sealed.sh counting` ([`sealed.sh`](../../../tools/dev-vm/sealed.sh)) uses its own disk, `~/sealed/counting.raw`, and the dev registry from the update loop (#55). Images: **dev-1** (as shipped), **dev-2** (adds `IMAGE_VERSION=dev-2`), and **dev-bad**, which is dev-2 with `IMAGE_VERSION=dev-bad` and `/usr/bin/atos-comp` pointing at `false`. dev-bad boots, but its session never comes up, as when an update ships a compositor that crashes. *Since #187 (rule A1) `sealed.sh` breaks the login prompt instead: dev-bad's `agreety` points at `false`, dev-hang's `greetd` sleeps. The results below were recorded with the old rule and have not been re-run.* The variants are built from copies of the Containerfile in `~/sealed`; the shipped one does not change.
 
 The VM passes longer timeouts as systemd credentials (`TimeoutStartSec=20min` for the check, `JobTimeoutSec=40min` for `boot-complete.target`), because boots under CPU emulation take minutes. A VM-only unit prints `ATOS-BOOT image=… counter=…` on every boot, read from `LoaderBootCountPath`. QEMU now has a `virtio-gpu-pci` device, so `atos-comp` has a DRM device. Filtered serial logs:
 

@@ -1,6 +1,6 @@
 # C11 installer
 
-The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted by default**, with no account and no network (D-005). Card #66. Secure Boot key enrolment at install (D-014 B1/B2/C) is card #123; the signed PCR11 policy is card #122.
+The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted by default**, with no online account and no network (D-005). Card #66; the administrator password is #187. Secure Boot key enrolment at install (D-014 B1/B2/C) is card #123; the signed PCR11 policy is card #122.
 
 ## What is where
 
@@ -33,6 +33,18 @@ The installed system gets **no** `/etc/containers/policy.json`, so the image's `
 **Results** (`c11-installer.yml`, KVM, 8 November 2026): with the published `c1-base:latest` the install took 105 s and both boots passed (Secure Boot on, sealed to PCR 7, TPM unlock). With a payload built from #150's branch (`containers-storage` → `reject` in the image policy; run by hand with the `c1-base-ref` input), 110 s, same boots. Some runs of both stopped at `no space left on device` in the live system's `/var/tmp` while bootc copied the image, after the policy had accepted it (#180).
 
 To test an unpublished c1-base: run the workflow by hand with `c1-base-ref` set to a branch, tag or commit. It builds that ref rootless as `c1-base.yml` does (a rootful build's UKI digest did not match its image) and checks the seal before building the ISO.
+
+## Administrator account (#187)
+
+Owner decision on #187 (2026-11-09): the installer asks for a password and makes the session user an administrator. After the disk question and the `erase` confirmation, `atos-install` asks for the password twice (not echoed; empty or mismatched entries are asked again, three tries). The rest of the install runs unattended.
+
+- **Which user.** `atos`, the user greetd logs in (c1-base `session/usr/lib/sysusers.d/atos.conf`). No user name is asked: the card asks for a password only, and the session, its home and greetd all name `atos`.
+- **How.** After `bootc install`, `useradd --prefix` adds `atos` (UID 1000, `/var/home/atos`, `/bin/bash`, supplementary group `wheel`) to the deployment's `/etc` (`state/deploy/<id>/etc`), and `chpasswd --prefix` sets the password. chpasswd hashes it as the image's `login.defs` says: yescrypt. The installer reads the labels of the files before (`shadow_t`, `passwd_file_t`) and sets them again with `chcon` on the replaced files and their backups. Not `setfiles` with the deployment's file contexts: the live system's kernel policy has no Flatpak module and rejects the whole file (seen in the KVM run). On first boot sysusers.d finds `atos` and leaves it; tmpfiles.d creates the home directory.
+- **What `wheel` gives.** Fedora's defaults: `sudo` (`%wheel ALL=(ALL) ALL`, password asked) and polkit administrator (`unix-group:wheel`), which is also D-015's admin authentication. No `NOPASSWD`.
+- **The password is never logged or stored in plain text.** It is read from standard input into memory, written only to chpasswd's standard input, and overwritten after use (best effort: `read_line` may leave copies in freed memory). It is never on a command line, in a file or on the console. The KVM test fails if the test password appears in the install log.
+- **Without a terminal** (the KVM test) the two lines are read from standard input as they come, so `--yes` still reads the password; end of input fails the install before the disk is touched.
+- **Changing it later:** `passwd` in a terminal.
+- **Logging in.** There is no autologin (owner decision A on #187): every boot stops at greetd's login prompt on tty1, where the user types `atos` and this password (c1-base README, "Session"). The KVM test logs in that way, typing on the VM's keyboard through the QEMU monitor once the report says the prompt is up, and checks that a logind session for `atos` on tty1 starts.
 
 ## Disk layout and unlock
 
@@ -71,9 +83,9 @@ A oneshot unit in the deployment's `/etc` (outside the sealed `/usr`, so the ima
 
 ## Known gaps, accepted for Phase 1
 
-- **Silent unlock plus autologin** (owner answer Q4 on #66). The disk unlocks silently through the TPM (D-015), and the image logs the passwordless `atos` user straight into a session (C1, greetd). **A stolen laptop therefore boots into a session; the encryption protects only a disk taken out of the machine,** or one moved to another machine or booted another way. User accounts and login come with the first-run flow (Phase 3).
+- **Silent unlock, then a password login** (#187, owner decision A; until then autologin, Q4 on #66). The disk unlocks silently through the TPM (D-015) and the machine boots to greetd's login prompt on tty1. **A stolen laptop therefore stops at the login: the session and the user's files need the password.** What the TPM binding alone still allows is in "What PCR7 alone does not stop" above: any UKI signed by the same key unlocks the disk, so someone with that UKI can read and change `/etc` and `/var` without the password, until the signed PCR11 policy (#122). The prompt is text until a graphical greeter exists (C3/C11).
 - **The window before the seal** (owner answer Q2). Until `atos-tpm-seal` has run, the disk unlocks with this machine's TPM and no PCR check. Anyone with the machine in that window can boot something else (a live USB with `systemd-cryptsetup … tpm2-device=auto` is enough) and read or change `/etc` and `/var`, which are outside the seal. With Secure Boot on, the window ends with the first boot, which normally follows the install directly.
-- **Without Secure Boot the window never ends** (owner decision on #66, option A: keep the no-PCR slot while Secure Boot is off; not protected against booting another OS until #123). The seal needs Secure Boot on and the firmware out of setup mode. Until key enrolment at install (#123) lands, Atos keys are on no real machine: stock firmware with Microsoft keys won't start the Atos-signed UKI, so Secure Boot has to be off. **Every install on real hardware therefore stays in this state: the disk opens without a prompt for any OS booted on that machine, and is protected only when taken out of it.** The warning goes to the boot console and `/run/issue.d/`, which greetd's autologin hides, and to the graphical session through `/run/atos/disk-unsealed` (below; the C3 shell shows a notice, #138). The dev VM (systemd-boot enrols the TEST keys in setup mode) and CI do seal.
+- **Without Secure Boot the window never ends** (owner decision on #66, option A: keep the no-PCR slot while Secure Boot is off; not protected against booting another OS until #123). The seal needs Secure Boot on and the firmware out of setup mode. Until key enrolment at install (#123) lands, Atos keys are on no real machine: stock firmware with Microsoft keys won't start the Atos-signed UKI, so Secure Boot has to be off. **Every install on real hardware therefore stays in this state: the disk opens without a prompt for any OS booted on that machine, and is protected only when taken out of it.** The warning goes to the boot console and `/run/issue.d/`, which greetd's login prompt does not show (`agreety` prints only `/etc/issue`), and to the graphical session through `/run/atos/disk-unsealed` (below; the C3 shell shows a notice, #138). The dev VM (systemd-boot enrols the TEST keys in setup mode) and CI do seal.
 - **No TPM.** The installer needs a TPM 2.0 (`systemd-cryptenroll --tpm2-device=auto` fails without one). A passphrase path is not part of this card.
 - **The installer media trusts Fedora's shim and Microsoft's UEFI CA** while it runs. That does not carry over to the installed system.
 
@@ -104,7 +116,7 @@ Dev VM (`atos-c11`, aarch64, QEMU **without KVM**, AAVMF Secure Boot, swtpm), 7 
 
 Repeated after main gained boot counting (#126: `panic=10`, emergency drop-ins, rebuilt initramfs): images rebuilt, `install` (installer 2,311 s under TCG), first `boot` (`bound to the TPM with PCR 7`) and `reboot` (TPM unlock, no prompt) all pass.
 
-No step asks for an account or a network (D-005); the VM has no network during the install.
+No step asks for an online account or a network (D-005); the VM has no network during the install.
 
 **CI on x86_64** (`c11-installer.yml`): Ubuntu's OVMF refuses systemd-boot's enrolment of the TEST keys from `loader/keys/auto` (`Failed to write PK secure boot variable: Security violation`; AAVMF accepts the same files). CI therefore enrols them into the firmware variables after the install with `virt-fw-vars` (`vm-test.sh enrol`), then checks that the first boot runs with Secure Boot on and seals to PCR 7, and that the second unlocks without a prompt. Auto-enrolment by systemd-boot is covered only by the aarch64 dev VM. Real x86 firmware may refuse it the same way; key enrolment at install (#123) has to handle that.
 
