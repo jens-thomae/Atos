@@ -136,7 +136,7 @@ This is how fast each app produces frames into a CPU-rendered 1920 × 1080 headl
 
 ## M6: accessibility tree
 
-Dump script and trees: `tools/d006/atspi.py`, `d006-data/vm/m6/<toolkit>/m6-tree-{initial,menu,dialog}.txt` (role, name, states of every node), with screenshots of each state. Trees and results are identical on CI. 26 checks: window, sidebar, 3 places, *Up*, path label, file list, 3 column headers, 9 rows of `small`, context menu, 3 menu items, *Properties* dialog, *Close*.
+Dump script and trees: `tools/d006/atspi.py`, `d006-data/vm/m6/<toolkit>/m6-tree-{initial,menu,dialog}.txt` (role, name, states of every node; in the archive), with screenshots of each state. Trees and results are identical on CI. 26 checks: window, sidebar, 3 places, *Up*, path label, file list, 3 column headers, 9 rows of `small`, context menu, 3 menu items, *Properties* dialog, *Close*.
 
 **libcosmic: 26 of 26 missing.** The application is on the bus with one unnamed `frame` and no children in every state (initial, menu open, dialog open). No node ever carries the `focused` state. Cause as in the #10 README (the fork never sends widget nodes to AccessKit); the `a11y` feature did not crash.
 
