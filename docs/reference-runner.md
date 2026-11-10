@@ -86,7 +86,7 @@ sudo bash -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc
 
 ## 7. Packages for the compositor and the D-006 measurements (#12)
 
-[`.github/workflows/perf.yml`](../.github/workflows/perf.yml) measures inside a headless sway compositor. [`.github/workflows/d006-measure.yml`](../.github/workflows/d006-measure.yml) also starts the Files prototypes there, injects keys and reads their accessibility trees. That needs, once, as the owner:
+[`.github/workflows/perf.yml`](../.github/workflows/perf.yml) measures inside a headless sway compositor. The finished D-006 spike workflow also started the Files prototypes there, injected keys and read their accessibility trees (removed in T-203; the packages below stay because they are cheap and `perf.yml` uses sway). That needs, once, as the owner:
 
 ```sh
 sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-spi2-core gir1.2-atspi-2.0 python3-gi dbus-daemon libgl1-mesa-dri libegl1 fontconfig fonts-dejavu-core mesa-utils
@@ -100,7 +100,7 @@ sudo apt-get install -y --no-install-recommends sway wtype wl-clipboard grim at-
 | `libgl1-mesa-dri`, `libegl1`, `fontconfig`, `fonts-dejavu-core` | OpenGL ES through Mesa's software rasteriser (Slint's femtovg renderer) and a font |
 | `dbus-daemon`, `mesa-utils` | A private session bus per run; `eglinfo`, to record which GL renderer (llvmpipe or a GPU driver) the apps get |
 
-The `runner` user has no login session, so sway runs headless; with the GPU access below it renders with `gles2` on the GPU's render node. Both `perf.yml`'s `measure` job and the D-006 `measure-nuc` job (four variants: libcosmic default, libcosmic `wgpu`, Slint default, Slint software renderer) need that access and **fail at their check without it**. Run it with `gh workflow run d006-measure.yml -f nuc=true` or the label `d006-nuc` on a pull request; the job takes about 2 h 15 min (idle CPU over the full 5 minutes, 5 runs per variant). The job summary evaluates the gates G1–G5 of [`D-006-toolkit.md`](decisions/D-006-toolkit.md#41-the-gpu-gates-exact) per variant and marks a variant **not measured** unless both the compositor's Wayland `egl:` line and the app's own renderer line show the Intel driver.
+The `runner` user has no login session, so sway runs headless; with the GPU access below it renders with `gles2` on the GPU's render node. `perf.yml`'s `measure` job needs that access and **fails at its check without it**. The D-006 GPU measurement (four variants, gates G1–G5 of [`D-006-toolkit.md`](decisions/D-006-toolkit.md#41-the-gpu-gates-exact)) ran on it before its workflow was removed in T-203.
 
 ## GPU access (permanent, option A)
 
@@ -140,7 +140,7 @@ The set-up gives the runner two things: membership of the group `render` and the
 - The runner stays the unprivileged user `runner`: no password, not in `sudo`, no other groups than `runner` and `render` (plus the optional drop-caches rule below).
 - No untrusted code runs on the NUC: nothing from forks, no downloads outside the pinned workflow actions and the build artifacts, no other services or secrets under `runner`.
 
-**Every GPU job proves it.** `perf.yml` and `d006-measure.yml` record the GL renderer that sway's Wayland clients get (the `egl:` line) in the job summary. `perf.yml` fails rather than measure if that renderer is a software one (`llvmpipe`, `softpipe`) or missing, or if sway does not start on `gles2`.
+**Every GPU job proves it.** `perf.yml` records the GL renderer that sway's Wayland clients get (the `egl:` line) in the job summary. `perf.yml` fails rather than measure if that renderer is a software one (`llvmpipe`, `softpipe`) or missing, or if sway does not start on `gles2`.
 
 **How to remove it** (back to software-only, for example before handing the NUC on):
 
@@ -151,7 +151,7 @@ ps -o user=,supgrp= -C Runner.Listener                    # runner  runner (no r
 sudo apt-get remove -y mesa-vulkan-drivers                # only if step 2 installed it
 ```
 
-If step 2's "NEW packages" line listed more than `mesa-vulkan-drivers`, remove those too by name. Don't use `apt-get autoremove` blindly; it may remove packages that other steps installed. After removal, the GPU jobs in `perf.yml` and `d006-measure.yml` fail at their check until the access is back.
+If step 2's "NEW packages" line listed more than `mesa-vulkan-drivers`, remove those too by name. Don't use `apt-get autoremove` blindly; it may remove packages that other steps installed. After removal, the GPU job in `perf.yml` fails at their check until the access is back.
 
 If a summary ever shows `llvmpipe` in the `egl:` line, headless sway did not hand the GPU to its clients; for the D-006 measurements, option B below runs sway on a real display instead.
 
@@ -218,7 +218,7 @@ sudo -u runner sudo -n /usr/sbin/sysctl -q -w vm.drop_caches=3 && echo allowed
 
 ## Security notes
 
-- Jobs run code from branches of this repository only. `perf.yml` never runs for pull requests from forks; keep **Settings** → **Actions** → **General** → fork pull request workflows turned off. The repository is public, so two guards matter: the same-repository `if` in each NUC workflow (`perf.yml`, `c3-shell.yml`, `t59-layer-shell.yml`, `d006-measure.yml`), and **Settings** → **Actions** → **General** → "Require approval for all external contributors" (set, checked 2026-11-10).
+- Jobs run code from branches of this repository only. `perf.yml` never runs for pull requests from forks; keep **Settings** → **Actions** → **General** → fork pull request workflows turned off. The repository is public, so two guards matter: the same-repository `if` in each NUC workflow (`perf.yml`, `c3-shell.yml`), and **Settings** → **Actions** → **General** → "Require approval for all external contributors" (set, checked 2026-11-10).
 - Use the NUC for measurements only: no other secrets, keys or services under the `runner` user.
 - Other load on the NUC skews the numbers. Avoid using it around the nightly run at 01:30 UTC (about 10 minutes).
 - If the NUC is off, nightly jobs wait in the queue for up to 24 hours and then fail; nothing else is affected.

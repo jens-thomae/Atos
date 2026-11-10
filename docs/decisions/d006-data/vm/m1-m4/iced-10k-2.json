@@ -1,9 +1,0 @@
-{
-  "app": "/tmp/tmp.Jzpyoa1BmV/iced-10k",
-  "cpu": "unknown",
-  "kernel": "6.8.0-142-generic",
-  "cpu_window_s": 10,
-  "cold_start_ms": 55.654503,
-  "idle_rss_mb": 35.119104,
-  "idle_cpu_percent": 0.19995882663797404
-}

@@ -2,7 +2,7 @@
 
 Card: #12 · Method: [`D-006-prototype-brief.md`](D-006-prototype-brief.md) §6–7 · Measured: 2026-11-05 · No recommendation here; that is #14.
 
-Both prototypes (`spikes/d006-iced/`, libcosmic rev `daca62bb`; `spikes/d006-slint/`, Slint 1.18.1) were measured in the same environment in the same run with the scripts in [`tools/d006/`](../../tools/d006/). Raw data is in [`d006-data/`](d006-data/).
+Both prototypes (`spikes/d006-iced/`, libcosmic rev `daca62bb`; `spikes/d006-slint/`, Slint 1.18.1) were measured in the same environment in the same run with the scripts in [`tools/d006/`](../../tools/d006/). Summaries are in [`d006-data/`](d006-data/); the raw per-run files are in [`spikes/d006-data.tar.xz`](../../spikes/d006-data.tar.xz) (see the README there).
 
 ## Status: measured on the reference NUC, in headless sway with software rendering
 
@@ -26,11 +26,10 @@ The NUC column set is in its own section below. The VM is a dedicated instance (
 The step-7 packages are installed on the NUC (done; the first NUC attempt failed only on the missing `eglinfo`, reported on #12). To repeat the measurement:
 
 ```sh
-gh workflow run d006-measure.yml -f nuc=true      # once the workflow is on main
-# or: add the label `d006-nuc` to a pull request of this repository
+# the workflow was removed in T-203; the command is in git history
 ```
 
-[`.github/workflows/d006-measure.yml`](../../.github/workflows/d006-measure.yml) builds both prototypes and the harness on a hosted runner, uploads them with the scripts, and the `nuc` job only measures: `tools/d006/measure.sh` (M1–M7), `summarize.py` writes the tables below into the job summary, and the raw data is the `d006-results-nuc` artifact (about 1 h 20 min: five 5-minute idle windows per prototype). The same job on a hosted runner is started by the label `d006-measure`. On any Linux machine with the packages: `tools/d006/measure.sh <d006-iced> <d006-slint> <budgets> <out-dir>`. M9 is `tools/d006/m9-build.sh <out.json>`.
+The D-006 measurement workflow (removed in T-203; see git history) built both prototypes and the harness on a hosted runner, uploads them with the scripts, and the `nuc` job only measures: `tools/d006/measure.sh` (M1–M7), `summarize.py` writes the tables below into the job summary, and the raw data is the `d006-results-nuc` artifact (about 1 h 20 min: five 5-minute idle windows per prototype). On any Linux machine with the packages: `tools/d006/measure.sh <d006-iced> <d006-slint> <budgets> <out-dir>`. M9 is `tools/d006/m9-build.sh <out.json>`.
 
 ## Reference hardware: Intel NUC 11 (Celeron N5105)
 
@@ -54,7 +53,7 @@ Workflow run 42071246272 on the self-hosted runner `nuc` (Ubuntu 24.04.5, kernel
 
 ## GPU measurement on the reference NUC (#36)
 
-Workflow run [42195032297](https://github.com/jens-thomae/Atos/actions/runs/42195032297) (`d006-measure.yml -f nuc=true`, `main` at the merge of #39), runner `nuc` with option A from [`reference-runner.md`](../reference-runner.md) (`runner` in group `render`, `mesa-vulkan-drivers`). Same machine as above (Celeron N5105, Ubuntu 24.04.5, kernel 6.8.0-147, Mesa 25.2.8, sway 1.9, 1920 × 1080 @ 60 Hz). Four variants, 5 runs per number, full 300 s idle window, warm page cache, same fixture digest. Raw data: [`d006-data/nuc-gpu/`](d006-data/nuc-gpu/) (`summary.md` is the job summary, `environment.txt` the renderer proof).
+Workflow run [42195032297](https://github.com/jens-thomae/Atos/actions/runs/42195032297) (the D-006 measurement workflow with `-f nuc=true`, `main` at the merge of #39), runner `nuc` with option A from [`reference-runner.md`](../reference-runner.md) (`runner` in group `render`, `mesa-vulkan-drivers`). Same machine as above (Celeron N5105, Ubuntu 24.04.5, kernel 6.8.0-147, Mesa 25.2.8, sway 1.9, 1920 × 1080 @ 60 Hz). Four variants, 5 runs per number, full 300 s idle window, warm page cache, same fixture digest. Raw data: [`d006-data/nuc-gpu/`](d006-data/nuc-gpu/) (`summary.md` is the job summary, `environment.txt` the renderer proof).
 
 **The GPU was used.** sway ran headless with its GLES2 renderer (`sway_renderer: gles2` in `environment.txt`) on `/dev/dri/renderD128`. `egl:` line (Wayland platform, `eglinfo -B` while sway ran): `Mesa Intel(R) UHD Graphics (JSL)`. This supersedes deviation 1 above for the numbers in this section; the earlier NUC section stays as measured.
 
@@ -107,7 +106,7 @@ Workflow run [42195032297](https://github.com/jens-thomae/Atos/actions/runs/4219
 
 ## M1–M4: harness
 
-Median, (min–max), 5 runs, harness `tools/budgets` unchanged, per-run files in `d006-data/*/m1-m4/`. M2 includes app start-up with the 10k folder. M3 and M4 come from the `small` runs.
+Median, (min–max), 5 runs, harness `tools/budgets` unchanged, per-run files in `d006-data/*/m1-m4/` (in the archive). M2 includes app start-up with the 10k folder. M3 and M4 come from the `small` runs.
 
 | Metric | Budget | libcosmic, VM | Slint, VM | libcosmic, CI | Slint, CI |
 | --- | --- | --- | --- | --- | --- |
@@ -137,7 +136,7 @@ This is how fast each app produces frames into a CPU-rendered 1920 × 1080 headl
 
 ## M6: accessibility tree
 
-Dump script and trees: `tools/d006/atspi.py`, `d006-data/vm/m6/<toolkit>/m6-tree-{initial,menu,dialog}.txt` (role, name, states of every node), with screenshots of each state. Trees and results are identical on CI. 26 checks: window, sidebar, 3 places, *Up*, path label, file list, 3 column headers, 9 rows of `small`, context menu, 3 menu items, *Properties* dialog, *Close*.
+Dump script and trees: `tools/d006/atspi.py`, `d006-data/vm/m6/<toolkit>/m6-tree-{initial,menu,dialog}.txt` (role, name, states of every node; in the archive), with screenshots of each state. Trees and results are identical on CI. 26 checks: window, sidebar, 3 places, *Up*, path label, file list, 3 column headers, 9 rows of `small`, context menu, 3 menu items, *Properties* dialog, *Close*.
 
 **libcosmic: 26 of 26 missing.** The application is on the bus with one unnamed `frame` and no children in every state (initial, menu open, dialog open). No node ever carries the `focused` state. Cause as in the #10 README (the fork never sends widget nodes to AccessKit); the `a11y` feature did not crash.
 
@@ -179,7 +178,7 @@ Dump script and trees: `tools/d006/atspi.py`, `d006-data/vm/m6/<toolkit>/m6-tree
 
 ## M9: build
 
-Clean `cargo build --release --locked` in the VM (4 vCPU M1 Max, aarch64, dependencies already downloaded, nothing else running), `tools/d006/m9-build.sh`; [`d006-data/vm/m9.json`](d006-data/vm/m9.json). Not measured on x86_64 CI or the NUC (building there is outside the "nothing compiles on the NUC" rule).
+Clean `cargo build --release --locked` in the VM (4 vCPU M1 Max, aarch64, dependencies already downloaded, nothing else running), `tools/d006/m9-build.sh`; `d006-data/vm/m9.json` (in the archive). Not measured on x86_64 CI or the NUC (building there is outside the "nothing compiles on the NUC" rule).
 
 | | libcosmic | Slint |
 | --- | --- | --- |

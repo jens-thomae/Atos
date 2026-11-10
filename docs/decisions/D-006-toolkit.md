@@ -108,7 +108,7 @@ The last variant has no Mesa in the process, so it separates llvmpipe's share of
 
 #### Work for a builder card first (not the owner)
 
-The current workflow can't measure the GPU as it stands. A new card (the planner files it) changes `tools/d006/measure.sh` and `d006-measure.yml`:
+The current workflow can't measure the GPU as it stands. A new card (the planner files it) changes `tools/d006/measure.sh` and the D-006 measurement workflow:
 
 1. **Renderer setting.** Sway uses `WLR_RENDERER=gles2` with `WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128`, set explicitly rather than left to wlroots' automatic choice. Pixman stays the default when no flag is set.
 2. **Proof of which renderer the apps used.** `environment.txt` must show what the *apps* got, not what the machine has:
@@ -153,7 +153,7 @@ The runner today is an unprivileged service user with no seat, which is why sway
 
 What this changes: one group membership (render nodes allow GPU rendering and compute only, not display or input), and one driver package. No service, port, sudo right or persistent setting is added.
 
-Then the agent starts the run with `gh workflow run d006-measure.yml -f nuc=true` once the card above is merged, and the owner undoes the change. **Undo** (same session):
+Then the agent starts the run with the D-006 measurement workflow with `-f nuc=true` once the card above is merged, and the owner undoes the change. **Undo** (same session):
 
 ```sh
 sudo gpasswd -d runner render

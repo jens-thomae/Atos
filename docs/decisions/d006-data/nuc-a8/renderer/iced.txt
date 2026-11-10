@@ -1,1 +1,0 @@
-D006_RENDERER: iced tiny-skia CPU

@@ -1,1 +1,0 @@
-D006_RENDERER: iced Vulkan Intel(R) UHD Graphics (JSL)

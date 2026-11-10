@@ -27,7 +27,6 @@ Durations are the median (10th–90th percentile) of the last 500 successful run
 | `base-mirror.yml` | Push to any branch of this repository that changes a base pin | Same | Manual | under 1 min |
 | `perf.yml` (NUC) | Only with the label `perf` (`docs/budgets.md`) | Never | Nightly 01:30 UTC | 6 min (nightly) |
 | `upstream-watch.yml` | Never | Never | Mondays 06:00 UTC | under 1 min |
-| `d006-measure.yml`, `t59-layer-shell.yml` (spikes) | Only with their labels | Never | Manual | varies |
 
 ## The image paths (`tools/ci/is-image-change.sh`)
 

@@ -1,9 +1,0 @@
-{
-  "app": "/tmp/tmp.s2c4KvFOck/iced-small",
-  "cpu": "AMD EPYC 9V74 80-Core Processor",
-  "kernel": "7.0.0-1017-azure",
-  "cpu_window_s": 30,
-  "cold_start_ms": 85.238947,
-  "idle_rss_mb": 33.62816,
-  "idle_cpu_percent": 0
-}
