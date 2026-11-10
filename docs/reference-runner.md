@@ -218,7 +218,7 @@ sudo -u runner sudo -n /usr/sbin/sysctl -q -w vm.drop_caches=3 && echo allowed
 
 ## Security notes
 
-- Jobs run code from branches of this repository only. `perf.yml` never runs for pull requests from forks; keep **Settings** → **Actions** → **General** → fork pull request workflows turned off. Together with the private repository this is the primary guard. If the repository ever goes public, remove the runner or require approval for all outside contributors first.
+- Jobs run code from branches of this repository only. `perf.yml` never runs for pull requests from forks; keep **Settings** → **Actions** → **General** → fork pull request workflows turned off. The repository is public, so two guards matter: the same-repository `if` in each NUC workflow (`perf.yml`, `c3-shell.yml`, `t59-layer-shell.yml`, `d006-measure.yml`), and **Settings** → **Actions** → **General** → "Require approval for all external contributors" (set, checked 2026-11-10).
 - Use the NUC for measurements only: no other secrets, keys or services under the `runner` user.
 - Other load on the NUC skews the numbers. Avoid using it around the nightly run at 01:30 UTC (about 10 minutes).
 - If the NUC is off, nightly jobs wait in the queue for up to 24 hours and then fail; nothing else is affected.

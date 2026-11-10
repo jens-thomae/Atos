@@ -4,10 +4,10 @@ A Linux-based desktop OS: Wayland compositor, shell, UI toolkit and native app s
 
 ## Layout
 
-- `components/`: one directory per component (C1–C11, spec §6).
+- `components/`: one directory per component (C1–C12, spec §6).
 - `tools/`: budget checks, test harnesses and scripts.
 - `spikes/`: throwaway experiments (see below).
-- `docs/`: spec, decisions and component docs.
+- `docs/`: spec, decisions, component and user docs; index in [`docs/README.md`](docs/README.md).
 
 ## Rust workspace
 
@@ -15,13 +15,7 @@ The root `Cargo.toml` is a Cargo workspace (edition 2024, resolver 3). `rust-too
 
 To add a crate, create it under its component directory and list its path in `members` in the root `Cargo.toml`.
 
-Check everything from the repository root:
-
-```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-```
+The root workspace is only part of the project: C2, C3 and the C4 test harness are separate workspaces. The exact lint and test commands for each are in the table under "Commands" in [`CLAUDE.md`](CLAUDE.md).
 
 ## Spikes
 
@@ -31,4 +25,4 @@ cargo test
 
 Atos's own source code is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT licence](LICENSE-MIT), at your option (D-013). Contributions are accepted under the same terms.
 
-Shipped binaries carry the licence their dependencies require: the compositor (a cosmic-comp fork) is GPL-3.0-only, and so are binaries that link Slint if D-006 picks it. Spikes under `spikes/` keep their own licence statements.
+Shipped binaries carry the licence their dependencies require: the compositor (a cosmic-comp fork) is GPL-3.0-only, and so are binaries that link Slint (D-006). Spikes under `spikes/` keep their own licence statements.

@@ -1,8 +1,8 @@
 # Turning Secure Boot off and on
 
-User guide for card #107 (D-014, D-015). *Last checked against `main` on 2026-11-08; revisit when #122 and #123 land.* It describes what the installer and `atos-tpm-seal` do **today** (card #66, [installer docs](../c11-installer/README.md)). Where behaviour is not built yet, the text says so.
+User guide for card #107 (D-014, D-015). *Last checked against `main` on 2026-11-08; revisit when #122 and #123 land.* It describes what the installer and `atos-tpm-seal` do **today** (card #66, [installer docs](../components/c11-installer/README.md)). Where behaviour is not built yet, the text says so.
 
-Atos does not offer a switch for this. Secure Boot is a firmware setting, so the OS cannot change it. (D-014's design also discards the Platform Key after enrolment; no enrolment exists on real hardware until #123.) Turning it off is your choice in the firmware setup (D-015). This is "option C" in [developer-mode.md](developer-mode.md) §2.3. If you want your own builds, developer mode (D-015) keeps Secure Boot on and is the better route.
+Atos does not offer a switch for this. Secure Boot is a firmware setting, so the OS cannot change it. (D-014's design also discards the Platform Key after enrolment; no enrolment exists on real hardware until #123.) Turning it off is your choice in the firmware setup (D-015). This is "option C" in [developer-mode.md](../components/c1-base/developer-mode.md) §2.3. If you want your own builds, developer mode (D-015) keeps Secure Boot on and is the better route.
 
 ## What turning it off means
 
@@ -60,5 +60,5 @@ Other OSes boot freely with Secure Boot off, and on a never-sealed machine they 
 
 ## Not covered here
 
-- Developer mode (D-015) enrols its own key and keeps Secure Boot on: [developer-mode.md](developer-mode.md).
-- B2 (shim and MOK, D-016) is not built yet; see [shim-mok-spike.md](shim-mok-spike.md). Once it is, PCR14 is bound too and the same rules apply.
+- Developer mode (D-015) enrols its own key and keeps Secure Boot on: [developer-mode.md](../components/c1-base/developer-mode.md).
+- B2 (shim and MOK, D-016) is not built yet; see [shim-mok-spike.md](../components/c1-base/shim-mok-spike.md). Once it is, PCR14 is bound too and the same rules apply.
