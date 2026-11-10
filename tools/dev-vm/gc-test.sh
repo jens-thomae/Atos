@@ -2,7 +2,7 @@
 # Test for gc.sh against a temporary tree with spaces in names. Runs anywhere with bash.
 set -euo pipefail
 GC="$(cd "$(dirname "$0")" && pwd)/gc.sh"
-T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+T="$(cd -P "$(mktemp -d)" && pwd)"; trap 'rm -rf "$T"' EXIT
 M="$T/mount/My Repo"; TG="$T/target"; OUT="$T/outside"
 mkdir -p "$M/live one" "$M/.claude/worktrees/live two" "$OUT/other checkout"
 # caches: live (with space), live prefix-clash, stale (with space + odd chars), outside mount, nested stale
