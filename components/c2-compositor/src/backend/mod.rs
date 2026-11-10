@@ -50,8 +50,16 @@ pub fn init_backend_auto(
     };
 
     if res.is_ok() {
-        let output = initial_output(state.common.shell.read().outputs())
-            .with_context(|| "Backend initialized without output")?;
+        let output = initial_output(
+            &state
+                .common
+                .shell
+                .read()
+                .outputs()
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+        .with_context(|| "Backend initialized without output")?;
         let initial_seat = crate::shell::create_seat(
             dh,
             &mut state.common.seat_state,
@@ -164,11 +172,11 @@ pub fn init_backend_auto(
 /// The seat's first active output, where clients without an output of their own (the launcher) open:
 /// the one under the pointer, which starts at the origin. Not simply the first output, whose order
 /// follows smithay's DRM device `HashMap` and changes between boots (#195).
-fn initial_output<'a>(outputs: impl Iterator<Item = &'a Output> + Clone) -> Option<Output> {
+fn initial_output(outputs: &[Output]) -> Option<Output> {
     outputs
-        .clone()
+        .iter()
         .find(|o| o.geometry().contains((0, 0)))
-        .or_else(|| outputs.clone().next())
+        .or(outputs.first())
         .cloned()
 }
 
@@ -200,11 +208,8 @@ mod tests {
     fn initial_output_is_under_the_pointer_not_first_found() {
         // Device order put the right-hand output first, as in the failing boots.
         let outputs = [output("Virtual-2", 1280), output("Virtual-1", 0)];
-        assert_eq!(initial_output(outputs.iter()).unwrap().name(), "Virtual-1");
-        assert_eq!(
-            initial_output(outputs[..1].iter()).unwrap().name(),
-            "Virtual-2"
-        );
-        assert!(initial_output([].iter()).is_none());
+        assert_eq!(initial_output(&outputs).unwrap().name(), "Virtual-1");
+        assert_eq!(initial_output(&outputs[..1]).unwrap().name(), "Virtual-2");
+        assert!(initial_output(&[]).is_none());
     }
 }
