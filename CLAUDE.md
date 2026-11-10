@@ -103,8 +103,8 @@ The root workspace holds only `tools/budgets`, `tools/tokens` and `components/c1
 | Root workspace | `cargo fmt --check && cargo clippy --all-targets -- -D warnings`, then `cargo nextest run && cargo test --doc` | `ci.yml` |
 | C2 `components/c2-compositor` | `cargo build --workspace --locked`, `cargo test --workspace --locked`, `cargo clippy --workspace --all-targets --locked -- -D warnings` (system libraries in the workflow) | `c2-compositor.yml` |
 | C3 `components/c3-shell` | First, from the root: `tools/slint-fork/slint-fork.sh setup`. Then `cargo fmt --check`, `cargo clippy --all-targets --config ../../third_party/slint/patch.toml -- -D warnings`, `cargo nextest run --config ../../third_party/slint/patch.toml` (no `--locked`) | `c3-shell.yml` |
-| C4 harness `components/c4-toolkit/test-harness` | Same `setup`; same three commands with `--config ../../../third_party/slint/patch.toml` | `slint-fork.yml` |
-| C1 `components/c1-base` | `podman build` of the Containerfile, then `check-seal.sh`, `nvidia/check.sh`; `shell-boot-test.sh` needs KVM, so it runs only in CI | `c1-base.yml` |
+| C4 harness `components/c4-toolkit/test-harness` | Same `setup`; same three commands with `--config ../../../third_party/slint/patch.toml` (system libraries in the workflow) | `slint-fork.yml` |
+| C1 `components/c1-base` | From the root: `podman build --build-context repo=. -t c1-base components/c1-base`, then `components/c1-base/check-seal.sh c1-base` and `components/c1-base/nvidia/check.sh c1-base`. `shell-boot-test.sh` needs KVM, so it runs only in CI | `c1-base.yml` |
 | C11 `components/c11-installer` | `atos-install` is in the root workspace; `build-iso.sh` and `vm-test.sh` (install and boot under KVM) run only in CI | `c11-installer.yml` |
 
 Budgets: `cargo build --release -p budgets && target/release/budgets target/release/budget-test-app --cpu-window 10`. It needs Linux (the harness reads `/proc`); for the §7 numbers use `--cpu-window full` and the NUC (`perf.yml`). On a Mac use the dev VM: `tools/dev-vm/vm run <command>` (`docs/dev-environment.md`).
