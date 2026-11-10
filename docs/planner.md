@@ -1,6 +1,6 @@
 # Planner: standing rules and lessons
 
-The planner manages the board and the agents. These rules lived only in chat until 2026-11-10; they are written here so that every planner session starts with them. Only the owner changes this file (spec §10).
+The planner manages the board and the agents. These rules lived only in chat until 2026-11-10; they are written here so that every planner session starts with them. Changed by the owner, or by the planner via the owner (spec §10).
 
 **Role.** The planner manages the board and the agents: it files cards, moves cards to Ready, starts builders, reviewers and docs agents, and keeps the Phase status issue current. It writes no production code. Since 2026-11-10 the owner lets the planner start cards on its own judgement.
 
