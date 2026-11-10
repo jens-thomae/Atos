@@ -60,3 +60,4 @@ It is the only job in the workflow with `issues: write`, and it runs no build. O
 - **Cancel superseded runs.** A new push to a pull request cancels its older run (`ci.yml`, `c1-base.yml`). Runs on `main` and scheduled runs are never cancelled; `publish` runs one at a time. The NUC workflows keep their own concurrency.
 - **Artifacts.** Public visibility makes minutes free, not storage: artifacts still count against the account's storage allowance (GitHub's billing docs, checked 2026-11-10). Every `upload-artifact` step therefore sets `retention-days` (7 or 14), and the installer ISO (about 2 GB) is not uploaded.
 - **Source bundle (`publish`, #85).** Adds about 1 minute to a publish run and about 10 MB per image in the registry (`git archive | gzip` of the tree was 9.5 MB on 2026-11-06).
+
