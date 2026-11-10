@@ -22,7 +22,7 @@ command -v limactl >/dev/null || { echo "limactl not found: brew install lima" >
 # artifacts must not mix with the macOS target/, and virtiofs is slow for it.
 in_vm() {
   limactl shell --workdir "$PWD" "$NAME" -- bash -lc \
-    'export CARGO_TARGET_DIR="$HOME/target$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; "$@"' bash "$@"
+    'export CARGO_TARGET_DIR="$HOME/target$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; "$0" || true; "$@"' "$HERE/gc.sh" "$@"
 }
 
 case "${1:-}" in
