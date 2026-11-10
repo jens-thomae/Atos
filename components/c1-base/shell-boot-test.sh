@@ -143,7 +143,7 @@ rm -f "$W/mon.sock"
 echo "booting the installed disk"
 # shellcheck disable=SC2054 # commas are QEMU option syntax
 timeout "$tmo" qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on \
-  "${acc[@]}" -smp 4 -m 4G -display none -device virtio-gpu-pci,id=vgpu -nic none \
+  "${acc[@]}" -smp 4 -m 4G -display none -vga none -device virtio-gpu-pci -nic none \
   -drive if=pflash,format=raw,readonly=on,file=$F/OVMF_CODE_4M.secboot.fd -drive if=pflash,format=raw,file="$W/vars.fd" \
   -drive if=virtio,format=raw,file="$W/disk.raw" \
   -monitor unix:"$W/mon.sock",server=on,wait=off -serial file:"$OUT/boot.log" "${creds[@]}" &
@@ -160,21 +160,19 @@ type_keys() {
 }
 shots=(); halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|ATOS-CHECK-FAIL'
 mon() { echo "$1" | socat - UNIX-CONNECT:"$W/mon.sock" >/dev/null; }
-# #195: the VM has two display devices, QEMU's default VGA (console 0, bochs-drm, what screendump reads) and the
-# virtio GPU (vgpu). Keep a picture of the virtio head next to each shot.
-shot() { mon "screendump $W/$1.ppm"; mon "screendump $W/$1-vgpu.ppm vgpu"; shots+=("$1"); }
+# #195: one display head (-vga none). With QEMU's default VGA next to the virtio GPU the kernel numbers the two
+# connectors in probe order, so the head under the pointer (where the launcher opens) was not always the one screendump read.
+shot() { mon "screendump $W/$1.ppm"; shots+=("$1"); }
 # #192: the launcher's frame is not always on QEMU's screen 3 s after the marker (a screendump still showed the dock).
 # Retry until the picture differs from the dock's as the final check demands, for 20 s; if it never does the check fails as before.
 launcher_shot() {
   sleep 3
   for t in $(seq 20); do
     mon "screendump $W/launcher.ppm"; sleep 1   # the monitor replies before the file is complete
-    python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/launcher.ppm" >/dev/null 2>&1 && { echo "launcher frame on screen after $((t + 3)) s"; mon "screendump $W/launcher-vgpu.ppm vgpu"; shots+=(launcher); return; }
+    python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/launcher.ppm" >/dev/null 2>&1 && { echo "launcher frame on screen after $((t + 3)) s"; shots+=(launcher); return; }
   done
   echo "launcher frame never changed the screen in 23 s"
   # Evidence only, never a pass: does a pointer move make the stale screen flush? (stale screendump vs. compositor not drawing)
-  mon "screendump $W/launcher-vgpu.ppm vgpu"; sleep 1
-  python3 -I "$HERE/shot-diff.py" "$W/dock-vgpu.ppm" "$W/launcher-vgpu.ppm" 2>&1 | sed 's/^/virtio head: /' || true
   mon "mouse_move 5 5"; sleep 2; mon "screendump $W/nudged.ppm"; sleep 1
   python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/nudged.ppm" 2>&1 | sed 's/^/after a pointer move: /' || true
   shots+=(launcher)
@@ -193,7 +191,7 @@ done
 wait "$pid" || true
 tr -d '\r' <"$OUT/boot.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS-|Secure Boot|session-check|boot is (good|bad)' || true
 
-for s in login dock launcher nudged login-vgpu dock-vgpu launcher-vgpu; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
+for s in login dock launcher nudged; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
 fail() { echo "::error::$*"; exit 1; }
 for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING; do
   grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the serial log"
