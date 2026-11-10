@@ -93,4 +93,4 @@ About 3 minutes after the build under emulation (2 min 36 s in this run). Work f
 - The patch: <https://git.launchpad.net/ubuntu/+source/edk2/tree/debian/patches/OvmfPkg-FirmwareSecvarUpdater-append-Microsoft-2023-CAs-t.patch?h=ubuntu/noble-updates>
 - LP #2146560, "edk2: Introduce FirmwareSecvarUpdater": <https://bugs.launchpad.net/ubuntu/+source/edk2/+bug/2146560>
 - Card #158: [module-trust.md](module-trust.md), "Side finding" (`spikes/c1-module-trust/run.sh b1`)
-- [D-014 write-up](../../decisions/D-014-signing-keys.md), [secure-boot-off-and-on.md](secure-boot-off-and-on.md)
+- [D-014 write-up](../../decisions/D-014-signing-keys.md), [secure-boot-off-and-on.md](../../user/secure-boot-off-and-on.md)
