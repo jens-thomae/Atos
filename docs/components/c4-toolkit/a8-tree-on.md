@@ -4,7 +4,7 @@ Card: #97 · PR: #164 · Requirement: A8 in D-011 §5.2 · Method: [`D-006-measu
 
 ## How it is measured
 
-`d006-measure.yml` builds the D-006 Files spike (`spikes/d006-slint`) twice: against Slint 1.18.1 from crates.io, and against our fork (`third_party/slint`, patches 0001–0006). `tools/d006/measure.sh` runs the fork binary as two variants:
+The D-006 measurement workflow (removed in T-203; see git history) built the D-006 Files spike (`spikes/d006-slint`) twice: against Slint 1.18.1 from crates.io, and against our fork (`third_party/slint`, patches 0001–0006). `tools/d006/measure.sh` runs the fork binary as two variants:
 
 - `slint-fork`: femtovg on GL, tree off (as all earlier measurements, deviation 5).
 - `slint-fork-a11y`: same binary. Before each launch the script sets `org.a11y.Status` `IsEnabled` and `ScreenReaderEnabled` to true, so AccessKit builds and publishes the tree for M1–M5. `accesskit_unix` 0.22.1 follows `IsEnabled`.

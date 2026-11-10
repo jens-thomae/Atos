@@ -1,2 +1,0 @@
-application 'd006-iced' []
-  frame '' ['enabled', 'focusable', 'sensitive', 'showing', 'visible']

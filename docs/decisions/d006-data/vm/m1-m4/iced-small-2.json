@@ -1,9 +1,0 @@
-{
-  "app": "/tmp/tmp.Jzpyoa1BmV/iced-small",
-  "cpu": "unknown",
-  "kernel": "6.8.0-142-generic",
-  "cpu_window_s": 300,
-  "cold_start_ms": 76.896161,
-  "idle_rss_mb": 32.022528,
-  "idle_cpu_percent": 0.003333274675310025
-}

@@ -1,9 +1,0 @@
-{
-  "app": "/tmp/tmp.s2c4KvFOck/slint-10k",
-  "cpu": "AMD EPYC 9V74 80-Core Processor",
-  "kernel": "7.0.0-1017-azure",
-  "cpu_window_s": 10,
-  "cold_start_ms": 165.21950099999998,
-  "idle_rss_mb": 153.157632,
-  "idle_cpu_percent": 0
-}

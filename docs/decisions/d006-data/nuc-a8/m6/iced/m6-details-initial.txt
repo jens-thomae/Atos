@@ -1,2 +1,0 @@
-application 'd006-iced' id='' actions=[]
-  frame '' id='' actions=[]

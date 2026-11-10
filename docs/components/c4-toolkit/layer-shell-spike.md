@@ -1,6 +1,6 @@
 # Spike: Slint on wlr-layer-shell with an AccessKit tree (#59)
 
-Card: #59 · Written: 2026-11-06 · Code: [`spikes/c4-layer-shell/`](../../../spikes/c4-layer-shell/) (throwaway, outside the workspace) · CI: [`.github/workflows/t59-layer-shell.yml`](../../../.github/workflows/t59-layer-shell.yml)
+Card: #59 · Written: 2026-11-06 · Code: [`spikes/c4-layer-shell/`](../../../spikes/c4-layer-shell/) (throwaway, outside the workspace) · CI: its workflow was removed in T-203 (see git history)
 
 This spike tests the largest known risk of D-006 (§4.3 costs, §5): whether Slint can draw shell surfaces through a layer-shell backend of our own, with an accessibility tree, and at what cost. It decides nothing. Proposals for the owner are flagged in [section 7](#7-for-the-owner).
 
@@ -165,4 +165,4 @@ tools/dev-vm/vm run bash -c 'cd spikes/c4-layer-shell && cargo build --release -
 (cd spikes/c4-layer-shell && ../../tools/dev-vm/vm run bash -c 'T=$CARGO_TARGET_DIR/release; ./measure.sh $T/c4-layer-shell $T/budgets out/vm')
 ```
 
-On CI: any PR touching the spike runs the hosted job. The label `t59-nuc` adds the NUC run on the GPU (same-repo branches only).
+The spike's CI workflow (hosted job, plus a label-gated NUC run on the GPU) was removed in T-203 once the spike was decided; it is in git history.
