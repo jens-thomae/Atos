@@ -12,7 +12,21 @@ The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted 
 | [`firstboot/`](../../../components/c11-installer/firstboot/) | `atos-tpm-seal`, the first-boot unit that binds the disk to Secure Boot (below) |
 | [`build-iso.sh`](../../../components/c11-installer/build-iso.sh) | Builds the installer image, then the ISO with image-builder's `generic-iso` type (pinned by digest), with the c1-base image as offline payload |
 | [`vm-test.sh`](../../../components/c11-installer/vm-test.sh) | The end-to-end test in the dev VM (below) |
-| [`.github/workflows/c11-installer.yml`](../../../.github/workflows/c11-installer.yml) | CI: builds the amd64 ISO, checks its contents, then installs it under KVM and boots it twice |
+| [`.github/workflows/c11-installer.yml`](../../../.github/workflows/c11-installer.yml) | CI: builds the amd64 ISO, checks its contents, then installs it under KVM and boots it twice; on `main` it uploads the tested ISO (below) |
+
+## Getting the ISO (#202)
+
+After the KVM test passes on `main`, `c11-installer.yml` uploads the ISO it just tested as the artifact `atos-install-TEST-<commit>`: the ISO, its `.sha256` file and `README-TEST-BUILD.txt`. Find it under the run's **Artifacts** in the Actions tab (download needs a GitHub login; it comes as a zip of about 2.1 GB). Check it with `sha256sum -c atos-install-TEST-*.iso.sha256`. Artifacts expire after 14 days.
+
+**It is a test build.** The image and the ISO's payload are signed with the CI test keys (D-014), which any writer to the repository can read. No release machine trusts them. Release builds come from the owner's offline keys (#77).
+
+The workflow runs only when installer files change, so a new ISO appears on `main` only after a C11 change. For a fresh ISO with the current `c1-base:latest`, run it by hand on `main` (about 15 minutes):
+
+```bash
+gh workflow run c11-installer.yml --ref main
+```
+
+A manual run with `c1-base-ref` set, and every pull request run, uploads nothing.
 
 ## Why this approach
 
