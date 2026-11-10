@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// The keyboard focus ring: an outline drawn over the parent, only while `active`.
+// Put it last in the parent so it is on top; `radius` is the parent's border-radius.
+import { Palette, Size } from "../tokens.slint";
+
+export component FocusRing inherits Rectangle {
+    in property <bool> active;
+    in property <length> radius;
+    in property <brush> ring: Palette.accent;
+
+    border-radius: root.radius;
+    border-width: root.active ? Size.focus-ring-width : 0px;
+    border-color: root.ring;
+}

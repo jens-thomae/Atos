@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A search field row: magnifier, text input and placeholder (the launcher's field). The row is
+// as high as the command palette mockup's (64 px); `preferred-height` is the content's own, which
+// the launcher's panel height is computed from.
+import { Palette, Size, Space, Type } from "../tokens.slint";
+
+export component SearchField inherits Rectangle {
+    // The accessible name; also the placeholder.
+    in property <string> label: "Search";
+    in-out property <string> text <=> input.text;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    callback accepted();
+
+    // `focus()` is a builtin of focusable elements only, so the field has its own.
+    public function focus-input() {
+        input.focus();
+    }
+
+    height: Space.s7 + Space.s4;
+    preferred-height: row.preferred-height;
+    forward-focus: input;
+
+    row := HorizontalLayout {
+        padding-left: Space.s4;
+        padding-right: Space.s4;
+        spacing: Space.s3;
+
+        VerticalLayout {
+            alignment: center;
+            // Magnifier, the mockup's glyph (24-unit grid).
+            Path {
+                accessible-role: none;
+                width: Space.s4 + Space.s1;
+                height: Space.s4 + Space.s1;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 17 11 A 6 6 0 1 1 5 11 A 6 6 0 1 1 17 11 M 20 20 L 15.5 15.5";
+                stroke: Palette.text-2;
+                stroke-width: 1.5 * Size.hairline;
+            }
+        }
+
+        Rectangle {
+            input := TextInput {
+                accessible-label: root.label;
+                input-type: InputType.search;
+                single-line: true;
+                vertical-alignment: center;
+                color: Palette.text;
+                font-size: Type.search-input.size;
+                font-weight: Type.search-input.weight;
+                edited => { root.edited(self.text); }
+                accepted => { root.accepted(); }
+            }
+
+            if input.text == "": Text {
+                accessible-role: none;
+                width: 100%;
+                height: 100%;
+                text: root.label;
+                color: Palette.text-3;
+                font-size: Type.search-input.size;
+                font-weight: Type.search-input.weight;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

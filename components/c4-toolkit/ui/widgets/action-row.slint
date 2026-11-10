@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A full-width row with one label that runs an action (the control centre's power options).
+import { Palette, Radius, Size, Space, Type } from "../tokens.slint";
+import { FocusRing } from "focus-ring.slint";
+
+export component ActionRow inherits Rectangle {
+    in property <string> label;
+    callback clicked();
+
+    height: Size.control + Space.s1;
+    border-radius: Radius.control;
+    background: touch.has-hover ? Palette.hover : Palette.group;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Text {
+        accessible-role: none;
+        x: Space.s3;
+        vertical-alignment: center;
+        text: root.label;
+        font-size: Type.label.size;
+        font-weight: Type.label.weight;
+        color: Palette.text;
+    }
+    FocusRing {
+        active: focus.has-focus;
+        radius: parent.border-radius;
+    }
+}

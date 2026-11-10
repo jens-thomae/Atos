@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A line icon: SVG path data on a 24 x 24 grid, stroked in a token colour.
+import { Palette, Size, Space } from "../tokens.slint";
+
+export component Glyph inherits Path {
+    in property <string> data;
+    in property <brush> color: Palette.text-2;
+    accessible-role: none;
+    commands: root.data;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    width: Space.s4 + Space.s1 / 2;
+    height: self.width;
+    fill: transparent;
+    stroke: root.color;
+    stroke-width: Size.hairline * 1.7;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
