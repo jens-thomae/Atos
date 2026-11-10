@@ -25,9 +25,9 @@ limactl stop atos / limactl delete atos    # stop, or throw it away
 
 ## Disk space
 
-Every checkout (main and each `.claude/worktrees/*`) builds into its own `~/target/<checkout path>`, 8–10 GB each. Two rules keep several parallel sessions from filling the disk (#213):
+Every checkout (main and each `.claude/worktrees/*`) builds into its own `~/target/<checkout path>`, 8–10 GB each. Three rules keep several parallel sessions from filling the disk (#213):
 
-- Before every `vm run` and `vm up`, `tools/dev-vm/gc.sh` deletes the cache of any checkout that no longer exists. Caches of existing checkouts are never touched.
+- Before every `vm run` and `vm up`, `tools/dev-vm/gc.sh` deletes the cache of any checkout under the mounted repo that no longer exists. Caches of checkouts visible in the VM are never touched; neither are caches of checkouts outside the mount, and nothing is deleted if the mount is missing. `tools/dev-vm/gc-test.sh` tests this against a temporary tree.
 - The same script warns when less than 5 GB is free and lists the largest caches. Then delete caches of finished checkouts: `limactl shell atos -- rm -rf ~/target/<checkout path>`.
 - New VMs get a 100 GiB disk (`atos.yaml`; it is sparse, so the Mac only uses what the VM writes). The size applies only when the VM is created. A VM made earlier keeps 50 GiB; to get 100 GiB, stop all sessions that use it, then `limactl delete atos && tools/dev-vm/vm up`. This loses its build caches.
 
