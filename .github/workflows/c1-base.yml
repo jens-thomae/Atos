@@ -278,7 +278,7 @@ jobs:
   # Nightly (and manual dispatch): main from scratch, as publish builds it (no layer cache), with the PR build's checks
   # and boot test. Pushes nothing, so it needs no registry token (the base mirror is public) and no signing key.
   nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' # TEMP, reverted before review
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
