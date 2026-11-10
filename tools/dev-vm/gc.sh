@@ -6,7 +6,8 @@
 # 2. Warns when less than 5 GB is free on the VM disk.
 # GC_TARGET_ROOT and GC_MOUNT_ROOT exist for tools/dev-vm/gc-test.sh.
 TARGET="${GC_TARGET_ROOT:-$HOME/target}"
-MOUNT="${GC_MOUNT_ROOT:-$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)}"
+# The mount is the main checkout (same rule as REPO in tools/dev-vm/vm), also when started from a worktree.
+MOUNT="${GC_MOUNT_ROOT:-$(cd "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd)}"
 
 # Mount missing: every checkout would look deleted, so do nothing.
 if [ -n "$TARGET" ] && [ "${TARGET#/}" != "$TARGET" ] && [ -n "$MOUNT" ] && [ -d "$MOUNT" ] && [ -d "$TARGET" ]; then
