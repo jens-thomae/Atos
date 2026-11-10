@@ -58,7 +58,7 @@ If you run out of context or time before finishing, skip to step 7. A clear hand
 - UI changes follow the design system and have screenshot tests.
 - Affected docs are updated (component docs only; propose spec changes, don't make them).
 - A reviewer agent approved the PR, and the owner accepted it.
-- The owner delegates acceptance to the planner for cards that decide nothing, change no spec text and touch no security-relevant code; those merge once the reviewer approves and CI is green.
+- The owner delegates acceptance to the planner for cards that decide nothing, change no spec text and touch no security-relevant code. Delegated acceptance means the reviewer's approval is enough to accept the work. The merge itself still needs the owner's OK in the planner session; one OK may cover a batch of fast-lane pull requests.
 
 ## Roles
 
@@ -113,9 +113,11 @@ Budgets: `cargo build --release -p budgets && target/release/budgets target/rele
 
 Every card is in one lane. The planner names it on the card.
 
-- **Fast lane:** only `components/*/ui/**/*.slint`, `docs/design/tokens.json`, the generated `tokens.slint` and screenshot references change. One "polish" card may collect many tweaks from one sitting with the owner: one branch and one PR per sitting, and the handoff note lists what changed. The reviewer checks tokens-only values, the screenshot diffs and the accessibility tests. It merges under the planner delegation above.
+- **Fast lane:** only `components/*/ui/**/*.slint`, `docs/design/tokens.json`, the generated `tokens.slint` and screenshot references change. One "polish" card may collect many tweaks from one sitting with the owner: one branch and one PR per sitting, and the handoff note lists what changed. The reviewer checks tokens-only values, the screenshot diffs and the accessibility tests. It is accepted under the planner delegation above.
 - **Standard lane:** everything else, as described in this file.
 - **Security lane:** permissions, sandboxing, signing, trust policy, network, the C12 broker, CI workflows, and anything under `components/c1-base/` or `components/c11-installer/` that changes what boots or what is trusted. As standard, plus Opus for builder and reviewer, and the owner always accepts.
+
+The security lane takes precedence. Security warnings, prompts, confirmations and privacy indicators are never fast lane, wherever their files are. A fast-lane change may alter look and layout, but not remove or rename a callback, a text or an accessibility property.
 
 ## Conventions
 
