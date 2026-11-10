@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 0 # a push is diffed from github.event.before, which may be several commits back (about 10 MB)
           persist-credentials: false
       - run: bash tools/ci/test-is-image-change.sh && bash tools/ci/test-nightly-issue.sh
       - id: diff
@@ -62,17 +62,20 @@ jobs:
           FULL_CI: >-
             ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
             contains(github.event.pull_request.labels.*.name, 'full-ci') }}
-        # PR: HEAD is the merge commit, HEAD^1 the base. main: squash merges, so HEAD^1 is the previous main.
-        # ponytail: a direct multi-commit push to main is judged by its last commit only.
+          # Push: the whole pushed range (a rebase merge pushes several commits). Empty on pull requests.
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        # PR: HEAD^1..HEAD of the merge commit. Push: BEFORE..HEAD; no usable range (new branch, force push) runs every lane.
         run: |
-          git diff --no-renames --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+          rc=0; bash tools/ci/changed-paths.sh ${BEFORE:+"$BEFORE"} > "$RUNNER_TEMP/changed" || rc=$?
+          [ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"
           build=$(bash tools/ci/is-image-change.sh pr < "$RUNNER_TEMP/changed")
           publish=$(bash tools/ci/is-image-change.sh publish < "$RUNNER_TEMP/changed")
+          [ "$rc" = 3 ] && build=true publish=true
           [ "$FULL_CI" = true ] && build=true
           if [ "$GITHUB_EVENT_NAME" = push ]; then build=false; else publish=false; fi
           printf 'build=%s\npublish=%s\n' "$build" "$publish" >> "$GITHUB_OUTPUT"
-          { echo "build: $build, publish: $publish (label full-ci: $FULL_CI). Changed paths:"; echo '```'
-            cat "$RUNNER_TEMP/changed"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "build: $build, publish: $publish (label full-ci: $FULL_CI; no usable push range: $([ "$rc" = 3 ] && echo yes || echo no))."
+            echo 'Changed paths:'; echo '```'; tr '\0' '\n' < "$RUNNER_TEMP/changed"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   # Pull requests: no registry token, no signing key.
   build:
@@ -137,7 +140,7 @@ jobs:
 
   publish:
     needs: changes
-    if: needs.changes.outputs.publish == 'true'
+    if: github.event_name == 'push' && needs.changes.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     # One publish at a time, never cancelled while pushing; GitHub keeps only the newest waiting one (#109).
@@ -278,7 +281,8 @@ jobs:
   # Nightly (and manual dispatch): main from scratch, as publish builds it (no layer cache), with the PR build's checks
   # and boot test. Pushes nothing, so it needs no registry token (the base mirror is public) and no signing key.
   nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Not in forks: their owner's runs and tokens are no concern of this workflow.
+    if: github.repository == 'jens-thomae/Atos' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:

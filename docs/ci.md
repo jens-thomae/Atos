@@ -31,7 +31,7 @@ Durations are the median (10th–90th percentile) of the last 500 successful run
 
 ## The image paths (`tools/ci/is-image-change.sh`)
 
-The `changes` job in `c1-base.yml` lists the changed paths (`git diff --no-renames`, so a rename counts both its old and new path) and asks the script once per lane. Tested by `tools/ci/test-is-image-change.sh`, which the same job runs first. Docs (`*.md`, `LICENSE*`) never count, except under `.github/` and `tools/`.
+The `changes` job in `c1-base.yml` lists the changed paths with `tools/ci/changed-paths.sh` and asks the script once per lane. A pull request is diffed against its base. A push is diffed over the whole pushed range (`github.event.before..HEAD`), so every commit of a rebase merge or multi-commit push counts. If there is no usable range (a new branch, or a force push), every lane runs. The diff uses `--no-renames` (a rename counts both its old and new path) and `-z` (names with non-ASCII characters are not quoted, so they still match). Both scripts are tested by `tools/ci/test-is-image-change.sh`, which the same job runs first. Docs (`*.md`, `LICENSE*`) never count, except under `.github/` and `tools/`.
 
 | Changed path | PR `build` | `publish` |
 | --- | --- | --- |
@@ -50,7 +50,7 @@ The `publish` list is what the Containerfile copies from the repository (`COPY -
 
 `c1-base.yml` `nightly-report` runs after `nightly` (success or failure, not when cancelled) and calls `tools/ci/nightly-issue.sh` (tested by `tools/ci/test-nightly-issue.sh`):
 
-- failure: comments the run link on the open issue titled **"Nightly image build failed"**, or opens it;
+- failure: comments the run link on the open issue titled **"Nightly image build failed"** that `github-actions[bot]` opened, or opens one. The repository is public, so an issue with the same title opened by anyone else is ignored;
 - success: closes that issue with the run link.
 
 It is the only job in the workflow with `issues: write`, and it runs no build. On a manual run from a branch other than `main` it only prints what it would do. The `nightly` job itself has only `contents: read`: it pushes nothing, and the base mirror is public.

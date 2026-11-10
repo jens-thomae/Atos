@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Run: bash tools/ci/test-is-image-change.sh
 set -eu
-d=$(dirname "$0")
+d=$(cd "$(dirname "$0")" && pwd)
 # check <pr> <publish> <paths>: the expected answer of each lane for one diff.
 check() {
   for lane in pr publish; do
     want=$1; [ "$lane" = publish ] && want=$2
-    got=$(printf '%b' "$3" | bash "$d/is-image-change.sh" "$lane")
+    got=$(printf '%b' "$3" | tr '\n' '\0' | bash "$d/is-image-change.sh" "$lane")
     [ "$got" = "$want" ] || { echo "FAIL $lane: '$3' -> $got, want $want"; exit 1; }
   done
 }
@@ -43,4 +43,33 @@ check false true  'components/c5-apps/x.rs\ncomponents/c3-shell/src/main.rs\n'
 # Rename components/c1-base/x.sh -> docs/x.md: with --no-renames git lists the old path too.
 check true  true  'docs/x.md\ncomponents/c1-base/x.sh\n'
 bash "$d/is-image-change.sh" < /dev/null 2> /dev/null && { echo "FAIL: no lane accepted"; exit 1; }
+# A path with a newline in its name is one path (NUL-separated input).
+check false true  'components/c3-shell/a\nb.rs\n'
+
+# End-to-end with real commits, through changed-paths.sh as c1-base.yml calls it.
+t=$(mktemp -d); trap 'rm -rf "$t" "$t.out"' EXIT
+g() { git -C "$t" -c user.name=t -c user.email=t@t "$@"; }
+lanes() { (cd "$t" && bash "$d/changed-paths.sh" "$@" > "$t.out") || return $?
+  echo "$(bash "$d/is-image-change.sh" pr < "$t.out") $(bash "$d/is-image-change.sh" publish < "$t.out")"; }
+want() { got=$(lanes "${@:2}") || got="exit $?"; [ "$got" = "$1" ] || { echo "FAIL e2e ${*:2}: $got, want $1"; exit 1; }; }
+git init -q "$t"; mkdir -p "$t/components/c1-base" "$t/components/c3-shell/ui" "$t/docs"
+echo a > "$t/components/c1-base/x.sh"; g add -A; g commit -qm base; base=$(g rev-parse HEAD)
+# Rename components/c1-base/x.sh -> docs/x.md: the old path counts.
+g mv components/c1-base/x.sh docs/x.md; g commit -qm rename
+want 'true true'
+# A non-ASCII name: without -z git would print it quoted, and it would match no rule (fail open).
+echo a > "$t/components/c3-shell/ui/ä.slint"; g add -A; g commit -qm umlaut
+want 'false true'
+# A push of two commits (rebase merge): C3, then docs. HEAD^1..HEAD alone sees only docs; the pushed range sees C3.
+before=$(g rev-parse HEAD)
+echo b > "$t/components/c3-shell/ui/ä.slint"; g commit -qam c3; echo b > "$t/docs/y.md"; g add -A; g commit -qm docs
+want 'false false'
+want 'false true' "$before"
+# No usable range: exit 3, the workflow then runs every lane.
+want 'exit 3' 0000000000000000000000000000000000000000
+want 'exit 3' 1234567890123456789012345678901234567890
+want 'exit 3' 'HEAD~1'
+g checkout -q -b side "$base"; g commit -q --allow-empty -m side; forced=$(g rev-parse HEAD); g checkout -q -
+want 'exit 3' "$forced"
+want 'true true' "$base"  # the whole range, the c1-base rename included
 echo ok
