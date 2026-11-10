@@ -12,6 +12,8 @@ Code: `components/c2-compositor/` (crate and binary `atos-comp`). Requirements: 
 | Taken | 2026-11-06 |
 | Method | `git archive` of the tag, committed as a plain snapshot (no upstream history, no submodule, no remote). |
 
+Where things are in the code (for agents with a C2 card): [code-map.md](code-map.md).
+
 Merging later upstream changes, the security watch and the dependency checks: [upstream.md](upstream.md). D-007: we do not contribute upstream.
 
 ## Layout
