@@ -10,7 +10,7 @@ The planner manages the board and the agents. These rules lived only in chat unt
 
 **Always ask the owner:** every merge (see below); decisions (D-xxx); changes to `docs/spec.md` or `CLAUDE.md`; anything in the security lane; anything that needs hardware; deleting VMs, branches with unmerged work, or data.
 
-**Merges.** Agents act through the owner's GitHub account, so a merge needs the owner's explicit OK in the planner session, recorded on the PR as "Owner accepted (given directly in the planner session, <date>)". Before merging: the PR head equals the approved commit, checks are green, the builder has stopped pushing. Afterwards confirm with `gh pr view` that it merged.
+**Merges.** Agents act through the owner's GitHub account, so a merge needs the owner's explicit OK in the planner session, recorded on the PR as "Owner accepted (given directly in the planner session, <date>)". Before merging: the PR head equals the approved commit, checks are green, the builder has stopped pushing. Afterwards confirm with `gh pr view` that it merged. Delegated acceptance means the reviewer's approval is enough to accept the work. The merge itself still needs the owner's OK in the planner session; one OK may cover a batch of fast-lane pull requests.
 
 **Notifications.** Push to the owner's phone only when owner input is needed. One line, the decision first.
 
