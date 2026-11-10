@@ -18,7 +18,7 @@ The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted 
 
 After the KVM test passes on `main`, `c11-installer.yml` uploads the ISO it just tested as the artifact `atos-install-TEST-<commit>`: the ISO, its `.sha256` file and `README-TEST-BUILD.txt`. Find it under the run's **Artifacts** in the Actions tab (download needs a GitHub login; it comes as a zip of about 2.1 GB). Check it with `sha256sum -c atos-install-TEST-*.iso.sha256`. Artifacts expire after 14 days.
 
-**It is a test build.** The image and the ISO's payload are signed with the CI test keys (D-014), which any writer to the repository can read. No release machine trusts them. Release builds come from the owner's offline keys (#77).
+**It is a test build, never a release.** It is signed with test keys (D-014). The Secure Boot test db private key is public: it is committed in the repository ([`secureboot-test/`](../../../components/c1-base/secureboot-test/)), so anyone can sign boot code that a machine with these keys enrolled will boot. The cosign test key that signs the image, and that the installed system's trust policy accepts for updates, is a CI secret that any writer to the repository can read. A test build therefore gives no Secure Boot or signature assurance against anyone: install it only on a test machine you are willing to wipe, never on one you care about. No release machine trusts these keys. Release builds come from the owner's offline keys (#77).
 
 The workflow runs only when installer files change, so a new ISO appears on `main` only after a C11 change. For a fresh ISO with the current `c1-base:latest`, run it by hand on `main` (about 15 minutes):
 

@@ -140,8 +140,13 @@ jobs:
           mv "$HOME/c11/install.iso" "$name.iso"
           sha256sum "$name.iso" > "$name.iso.sha256"
           cat > README-TEST-BUILD.txt <<EOT
-          TEST BUILD - NOT A RELEASE. Signed with the CI test keys (D-014), not the Atos release keys.
-          Anyone who can write to the repository can read those keys. Use it for testing only.
+          TEST BUILD - NOT A RELEASE. Signed with test keys (D-014), not the Atos release keys.
+          The Secure Boot test db private key is public: it is committed in the repository, so anyone can
+          sign boot code that a machine with these keys enrolled will boot. The cosign test key that signs
+          the image (and that the installed system's trust policy accepts for updates) is a CI secret that
+          anyone who can write to the repository can read. This build therefore gives no Secure Boot or
+          signature assurance against anyone. Install it only on a test machine you are willing to wipe,
+          never on one you care about, and never use it as a release.
           Built and tested (install under KVM, two boots) from commit $SHA: $RUN_URL
           Payload: $PAYLOAD@$(sudo podman image inspect --format '{{.Digest}}' "$PAYLOAD")
           Check: sha256sum -c $name.iso.sha256
