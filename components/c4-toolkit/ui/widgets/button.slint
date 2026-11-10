@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A text button: secondary by default, `primary` for the accent fill, plus `destructive` for the
+// destructive fill (the power confirmation). `autofocus` takes the keyboard focus on creation.
+import { Palette, Radius, Size, Type } from "../tokens.slint";
+import { FocusRing } from "focus-ring.slint";
+
+export component Button inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary;
+    in property <bool> destructive;
+    in property <bool> autofocus;
+    callback clicked();
+
+    height: Size.control;
+    border-radius: Radius.control;
+    background: root.primary ? (root.destructive ? (touch.pressed ? Palette.destructive-pressed : touch.has-hover ? Palette.destructive-hover : Palette.destructive) : (touch.pressed ? Palette.accent-pressed : touch.has-hover ? Palette.accent-hover : Palette.accent)) : (touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : Palette.button-secondary);
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        init => {
+            if root.autofocus {
+                self.focus();
+            }
+        }
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Text {
+        accessible-role: none;
+        text: root.label;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: Type.label.size;
+        font-weight: Type.label.weight;
+        color: root.primary ? (root.destructive ? Palette.destructive-ink : Palette.on-accent) : Palette.text;
+    }
+    FocusRing {
+        active: focus.has-focus;
+        radius: parent.border-radius;
+    }
+}

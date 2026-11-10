@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A small pill with one line of text (the control centre's privacy chip). Read as text.
+import { Palette, Radius, Size, Space, Type } from "../tokens.slint";
+
+export component Chip inherits Rectangle {
+    in property <string> label;
+
+    accessible-role: text;
+    accessible-label: root.label;
+    height: Size.control-sm - Space.s1 / 2;
+    width: chip-text.preferred-width + 2 * Space.s3;
+    border-radius: Radius.full;
+    background: Palette.privacy-bg;
+    chip-text := Text {
+        accessible-role: none;
+        text: root.label;
+        font-size: Type.caption.size;
+        font-weight: Type.caption.weight;
+        color: Palette.warning;
+    }
+}

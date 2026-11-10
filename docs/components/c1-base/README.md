@@ -231,9 +231,10 @@ Card #162, D-017. NVIDIA's open kernel modules, built and signed in the `nvidia`
 
 | Event | Result |
 | --- | --- |
-| Pull request (not docs-only) | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`, `nvidia/check.sh`. No registry token, no cosign key. |
-| Merge to `main` (not docs-only) | Build, countme check, `check-seal.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Publishes run one at a time (job-level concurrency group, never cancelled; GitHub keeps only the newest waiting one, which contains the replaced code). `:latest` moves only if the commit is ahead of the one it currently names in its `org.atos.source` label, so it never goes backwards and docs-only merges don't stall it. |
-| Docs-only change (`tools/ci/is-docs-only.sh`) | Skipped. |
+| Pull request that changes the image recipe (`tools/ci/is-image-change.sh pr`), or has the label `full-ci` | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`, `nvidia/check.sh`, boot check. No registry token, no cosign key. Other pull requests skip it; the nightly run covers them ([docs/ci.md](../../ci.md)). |
+| Merge to `main` that changes what ends up in the image (`tools/ci/is-image-change.sh publish`) | Build, countme check, `check-seal.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Publishes run one at a time (job-level concurrency group, never cancelled; GitHub keeps only the newest waiting one, which contains the replaced code). `:latest` moves only if the commit is ahead of the one it currently names in its `org.atos.source` label, so it never goes backwards and skipped merges don't stall it. |
+| Nightly (02:00 UTC) and manual dispatch | `main` built from scratch, the pull-request checks and boot check. Nothing pushed. A failure opens or comments on the issue "Nightly image build failed"; the next green run closes it. |
+| Anything else (docs, C5 to C11, other tools) | Skipped. |
 
 **Public pulls (owner step, once).** A package pushed from a private repository starts private. After the first push to `main`, set the package to public: GitHub → Packages → `atos/c1-base` → Package settings → Change visibility → Public. **This cannot be undone:** a public package cannot be made private again. Then pulls need no account (D-005). The REST API cannot change package visibility.
 

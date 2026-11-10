@@ -3,4 +3,6 @@ fn main() {
     let config = slint_build::CompilerConfiguration::new().with_debug_info(true);
     slint_build::compile_with_config("tests/ui/all.slint", config).unwrap();
     println!("cargo:rerun-if-changed=../ui/tokens.slint");
+    println!("cargo:rerun-if-changed=../ui/widgets.slint");
+    println!("cargo:rerun-if-changed=../ui/widgets");
 }

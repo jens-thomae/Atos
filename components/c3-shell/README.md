@@ -21,6 +21,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `src/control_centre.rs` | Opens, closes and feeds the panel; Settings launch by desktop-entry id |
 | `src/services.rs`, `src/audio.rs`, `src/portal.rs` | D-Bus services (NetworkManager, BlueZ, power-profiles-daemon, logind), the PipeWire client, and the xdg-desktop-portal Settings backend for dark mode |
 | `src/control.rs`, `src/config.rs` | The six tiles as data and the privacy-chip trait; the shell config file (D-010 TOML) |
+| `ui/*.slint` controls | Buttons, rows, tiles, slider, search field and panel come from `components/c4-toolkit/ui/widgets/` ([widgets.md](../../docs/components/c4-toolkit/widgets.md)); the shell files keep layout and `Slot`, `LauncherButton` |
 | `ui/notice.slint`, `src/notice.rs`, `src/notice_ui.rs` | The disk-not-sealed notice (#138), see below |
 | `tests/` | Screenshot and accessibility-tree tests with the C4 harness ([screenshot-tests.md](../../docs/components/c4-toolkit/screenshot-tests.md)) |
 | `e2e/` | End-to-end run on atos-comp (nested in headless sway) and its checks, used by CI |

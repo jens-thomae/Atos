@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A square button with a line icon: the control centre's header buttons and the dock's control
+// centre button. `filled` draws the secondary button fill at rest (the dock); otherwise the
+// fill shows on hover and press only. Set `radius` for another corner radius, `width` and `height` for another size.
+import { Palette, Radius, Size } from "../tokens.slint";
+import { Glyph } from "glyph.slint";
+import { FocusRing } from "focus-ring.slint";
+
+export component IconButton inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    in property <bool> expanded;
+    in property <bool> expandable;
+    in property <bool> filled;
+    in property <length> radius: Radius.control;
+    callback clicked();
+
+    accessible-expandable: root.expandable;
+    accessible-expanded: root.expanded;
+    width: Size.control;
+    height: Size.control;
+    border-radius: root.radius;
+    background: touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : root.filled ? Palette.button-secondary : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Glyph {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        data: root.glyph;
+        color: root.filled ? Palette.text : Palette.text-2;
+    }
+    FocusRing {
+        active: focus.has-focus;
+        radius: parent.border-radius;
+    }
+}

@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A two-line toggle tile with a glyph (the control centre's Wi-Fi, Bluetooth ... tiles). `on` is
+// the accent fill and the checked state; a disabled tile is dimmed and ignores input.
+import { Palette, Radius, Size, Space, Type } from "../tokens.slint";
+import { Glyph } from "glyph.slint";
+import { FocusRing } from "focus-ring.slint";
+
+export component ToggleTile inherits Rectangle {
+    in property <string> name;
+    in property <string> state;
+    // SVG path data on a 24 x 24 grid.
+    in property <string> glyph;
+    in property <bool> on;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: Size.touch + Space.s4;
+    border-radius: Radius.group;
+    opacity: root.enabled ? 1 : Palette.disabled-opacity;
+    background: root.on ? Palette.accent : Palette.group;
+    border-width: root.on ? 0px : Size.hairline;
+    border-color: Palette.line;
+    accessible-role: button;
+    accessible-checkable: true;
+    accessible-checked: root.on;
+    accessible-enabled: root.enabled;
+    accessible-label: root.name + ", " + root.state;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: Space.s3 - Space.s1 / 2;
+        padding-right: Space.s2;
+        spacing: Space.s3 - Space.s1 / 2;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: Size.control + Space.s1 / 2;
+                height: self.width;
+                border-radius: Radius.tile;
+                background: root.on ? Palette.on-accent.with-alpha(0.18) : Palette.field;
+                Glyph {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    data: root.glyph;
+                    color: root.on ? Palette.on-accent : Palette.text-2;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                accessible-role: none;
+                text: root.name;
+                font-size: Type.label.size;
+                font-weight: Type.label.weight;
+                color: root.on ? Palette.on-accent : Palette.text;
+                overflow: elide;
+            }
+            Text {
+                accessible-role: none;
+                text: root.state;
+                font-size: Type.caption.size;
+                color: root.on ? Palette.on-accent.with-alpha(0.82) : Palette.text-3;
+                overflow: elide;
+            }
+        }
+    }
+    FocusRing {
+        active: focus.has-focus;
+        radius: parent.border-radius;
+        ring: Palette.text;
+    }
+}

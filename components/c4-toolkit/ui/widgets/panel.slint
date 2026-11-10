@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// The frosted surface of the shell's panels (dock, control centre, launcher, notice): fill,
+// radius and hairline border from the tokens. Override `background`, `border-radius` or the
+// border colour for a variant (the launcher uses `Radius.dialog`, the notice `Palette.overlay-card`).
+import { Palette, Radius, Size } from "../tokens.slint";
+
+export component Panel inherits Rectangle {
+    background: Palette.panel;
+    border-radius: Radius.overlay;
+    border-width: Size.hairline;
+    border-color: Palette.panel-line;
+}

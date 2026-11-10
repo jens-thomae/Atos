@@ -19,4 +19,6 @@ fn main() {
     )
     .unwrap();
     println!("cargo:rerun-if-changed=../c4-toolkit/ui/tokens.slint");
+    println!("cargo:rerun-if-changed=../c4-toolkit/ui/widgets.slint");
+    println!("cargo:rerun-if-changed=../c4-toolkit/ui/widgets");
 }

@@ -1,0 +1,180 @@
+import "../../fonts/NotoSans-Regular.ttf";
+import { Palette, Radius, Size, Space } from "../../../ui/tokens.slint";
+import { ActionRow, Button, Chip, FocusRing, Glyph, IconButton, IconRow, Panel, RadioRow, SearchField, Slider, ToggleTile } from "../../../ui/widgets.slint";
+
+// One window per shared widget (components/c4-toolkit/ui/widgets/), each with the states that look different.
+
+export component ProbeActionRow inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 240px;
+    height: 60px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        ActionRow { label: "Restart"; }
+    }
+}
+
+export component ProbeButton inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 300px;
+    height: 60px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        HorizontalLayout { spacing: Space.s2;
+            Button { label: "Cancel"; }
+            Button { label: "Save"; primary: true; }
+            Button { label: "Restart"; primary: true; destructive: true; }
+        }
+    }
+}
+
+export component ProbeChip inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 240px;
+    height: 60px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        Chip { label: "Microphone · Meetings"; }
+    }
+}
+
+export component ProbeFocusRing inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 120px;
+    height: 80px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        Rectangle {
+            width: 48px; height: 48px; border-radius: Radius.control; background: Palette.group;
+            accessible-role: button; accessible-label: "Ringed";
+            FocusRing { active: true; radius: parent.border-radius; }
+        }
+    }
+}
+
+export component ProbeGlyph inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 120px;
+    height: 80px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        Rectangle {
+            accessible-role: button; accessible-label: "Glyph host";
+            Glyph { data: "M12 4v8M7.5 6.8a7 7 0 1 0 9 0"; }
+        }
+    }
+}
+
+export component ProbeIconButton inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 200px;
+    height: 80px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        HorizontalLayout { spacing: Space.s2;
+            IconButton { label: "Settings"; glyph: "M4.5 8h8M16.5 8h3M14.5 6v4M4.5 16h3M11.5 16h8M9.5 14v4"; }
+            IconButton { label: "More"; filled: true; radius: Radius.tile; width: Size.touch; height: Size.touch; glyph: "M6 9l6 6 6-6"; }
+        }
+    }
+}
+
+export component ProbeIconRow inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 300px;
+    height: 80px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        IconRow { label: "Files"; initial: "F"; }
+    }
+}
+
+export component ProbePanel inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 200px;
+    height: 100px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        Panel {
+            accessible-role: button; accessible-label: "Panel host";
+        }
+    }
+}
+
+export component ProbeRadioRow inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 300px;
+    height: 80px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        RadioRow { name: "Desk speakers"; detail: "Built-in"; selected: true; }
+    }
+}
+
+export component ProbeSearchField inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 340px;
+    height: 100px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        SearchField { label: "Search apps"; }
+    }
+}
+
+export component ProbeSlider inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 300px;
+    height: 80px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        Slider { label: "Volume"; glyph: "M4 10v4h3l5 4V6L7 10zM16 9.5a4 4 0 0 1 0 5"; value: 0.4; }
+    }
+}
+
+export component ProbeToggleTile inherits Window {
+    in property <bool> dark <=> Palette.dark;
+    width: 420px;
+    height: 110px;
+    background: Palette.window;
+    default-font-family: "Noto Sans";
+    VerticalLayout {
+        padding: Space.s3;
+        alignment: center;
+        HorizontalLayout { spacing: Space.s2;
+            ToggleTile { name: "Wi-Fi"; state: "Home-5G"; on: true; glyph: "M4 10a12 12 0 0 1 16 0M7 13.5a8 8 0 0 1 10 0M10 17a4 4 0 0 1 4 0"; }
+            ToggleTile { name: "Record screen"; state: "Not available yet"; enabled: false; glyph: "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z"; }
+        }
+    }
+}
