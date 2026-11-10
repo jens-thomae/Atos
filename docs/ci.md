@@ -18,7 +18,7 @@ Durations are the median (10th–90th percentile) of the last 500 successful run
 | `ci.yml` (lint, build, tests, budgets) | Always; the `rust` job is skipped for docs-only changes (`tools/ci/is-docs-only.sh`) | Always | Nightly 03:00 UTC, idle CPU over the full window | about 1 min (PR), 6 min (nightly) |
 | `c1-base.yml` `build` (image build, checks, boot check) | Only for image changes (`is-image-change.sh pr`, below) or with the label `full-ci` | Never | Never | 9–21 min |
 | `c1-base.yml` `publish` (build, push, sign, `:latest`) | Never | Only for changes that end up in the image (`is-image-change.sh publish`, below) | Never | 24 min (up to 45) |
-| `c1-base.yml` `nightly` (`main` from scratch, checks, boot check, no push) | Never | Never | Nightly 02:00 UTC, or `gh workflow run c1-base.yml` | about 25 min, estimate (not yet run) |
+| `c1-base.yml` `nightly` (`main` from scratch, checks, boot check, no push) | Never | Never | Nightly 02:00 UTC, or `gh workflow run c1-base.yml` | 38 min (first run, from scratch, on #210) |
 | `c2-compositor.yml` | C2, the toolchain pin or the workflow changed (`paths`) | Same | Never | about 5 min |
 | `c3-shell.yml` | C3, C4, `third_party/slint` or the workflow changed (`paths`); NUC job only with the label `c3-nuc` | Same | Manual | 8–16 min |
 | `slint-fork.yml` | Slint, the fork tooling, C4 UI or the workflow changed (`paths`) | Same | Manual (dry-run rebase) | 3–9 min |
