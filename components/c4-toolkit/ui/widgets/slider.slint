@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A horizontal slider from 0 to 1 with a leading glyph (brightness, volume). Arrow keys and the
+// accessibility actions move it in steps of 5 %; `changed` fires for every change by the user.
+import { Elevation, Palette, Size, Space } from "../tokens.slint";
+import { Glyph } from "glyph.slint";
+
+export component Slider inherits Rectangle {
+    in property <string> label;
+    in property <string> glyph;
+    in property <bool> enabled: true;
+    in-out property <float> value;
+    callback changed(float);
+
+    height: Size.control;
+    opacity: root.enabled ? 1 : Palette.disabled-opacity;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-value: Math.round(root.value * 100) + "%";
+    accessible-value-minimum: 0;
+    accessible-value-maximum: 100;
+    accessible-value-step: 5;
+    accessible-action-set-value(v) => { root.set(v.to-float() / 100); }
+    accessible-action-increment => { root.set(root.value + 0.05); }
+    accessible-action-decrement => { root.set(root.value - 0.05); }
+    forward-focus: focus;
+
+    function set(v: float) {
+        if root.enabled {
+            root.value = Math.max(0, Math.min(1, v));
+            root.changed(root.value);
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == Key.LeftArrow || e.text == Key.DownArrow {
+                root.set(root.value - 0.05);
+                return accept;
+            }
+            if e.text == Key.RightArrow || e.text == Key.UpArrow {
+                root.set(root.value + 0.05);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Space.s3;
+        VerticalLayout {
+            alignment: center;
+            Glyph { data: root.glyph; }
+        }
+        track-area := Rectangle {
+            horizontal-stretch: 1;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: Size.slider-track;
+                border-radius: self.height / 2;
+                background: Palette.track;
+            }
+            Rectangle {
+                x: 0;
+                y: (parent.height - self.height) / 2;
+                height: Size.slider-track;
+                width: root.value * (parent.width - Size.slider-knob) + Size.slider-knob / 2;
+                border-radius: self.height / 2;
+                background: Palette.accent;
+            }
+            Rectangle {
+                x: root.value * (parent.width - self.width);
+                y: (parent.height - self.height) / 2;
+                width: Size.slider-knob;
+                height: Size.slider-knob;
+                border-radius: self.width / 2;
+                background: Palette.knob;
+                drop-shadow-offset-y: Elevation.elevation-0.y;
+                drop-shadow-blur: Elevation.elevation-0.blur;
+                drop-shadow-color: Elevation.elevation-0.color;
+                border-width: focus.has-focus ? Size.focus-ring-width : 0px;
+                border-color: Palette.accent;
+            }
+            TouchArea {
+                enabled: root.enabled;
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        focus.focus();
+                    }
+                }
+                changed pressed => {
+                    if self.pressed { root.set((self.mouse-x - Size.slider-knob / 2) / (self.width - Size.slider-knob)); }
+                }
+                moved => {
+                    if self.pressed { root.set((self.mouse-x - Size.slider-knob / 2) / (self.width - Size.slider-knob)); }
+                }
+            }
+        }
+    }
+}

@@ -2,7 +2,8 @@
 // The control centre (spec §6 C3, C9): quick settings in a panel above the dock-taskbar's right end.
 // Layout after the owner's Control centre mockup on the design canvas; contents agreed on card #65.
 // Values come only from the design tokens (docs/design/tokens.json).
-import { Elevation, Fonts, Palette, Radius, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
+import { Fonts, Palette, Radius, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
+import { ActionRow, Button, Chip, IconButton, Panel, RadioRow, Slider, ToggleTile } from "../../c4-toolkit/ui/widgets.slint";
 export { Palette }
 
 export struct Tile {
@@ -28,345 +29,6 @@ export struct PowerAction {
     name: string,
     // True for actions that lose unsaved work (restart, shut down): the panel asks first.
     confirm: bool,
-}
-
-component Glyph inherits Path {
-    in property <string> data;
-    in property <brush> color: Palette.text-2;
-    accessible-role: none;
-    commands: root.data;
-    viewbox-width: 24;
-    viewbox-height: 24;
-    width: Space.s4 + Space.s1 / 2;
-    height: self.width;
-    fill: transparent;
-    stroke: root.color;
-    stroke-width: Size.hairline * 1.7;
-    stroke-line-cap: round;
-    stroke-line-join: round;
-}
-
-// A small square-ish button used for the header and the output toggle.
-component IconButton inherits Rectangle {
-    in property <string> glyph;
-    in property <string> label;
-    in property <bool> expanded;
-    in property <bool> expandable;
-    callback clicked();
-
-    accessible-expandable: root.expandable;
-    accessible-expanded: root.expanded;
-    width: Size.control;
-    height: Size.control;
-    border-radius: Radius.control;
-    background: touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : transparent;
-    accessible-role: button;
-    accessible-label: root.label;
-    accessible-action-default => { root.clicked(); }
-    forward-focus: focus;
-
-    focus := FocusScope {
-        key-pressed(e) => {
-            if e.text == Key.Return || e.text == Key.Space {
-                root.clicked();
-                return accept;
-            }
-            reject
-        }
-    }
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-    Glyph {
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        data: root.glyph;
-    }
-    Rectangle {
-        border-radius: parent.border-radius;
-        border-width: focus.has-focus ? Size.focus-ring-width : 0px;
-        border-color: Palette.accent;
-    }
-}
-
-component TileButton inherits Rectangle {
-    in property <Tile> tile;
-    callback clicked();
-
-    height: Size.touch + Space.s4;
-    border-radius: Radius.group;
-    opacity: root.tile.enabled ? 1 : Palette.disabled-opacity;
-    background: root.tile.on ? Palette.accent : Palette.group;
-    border-width: root.tile.on ? 0px : Size.hairline;
-    border-color: Palette.line;
-    accessible-role: button;
-    accessible-checkable: true;
-    accessible-checked: root.tile.on;
-    accessible-enabled: root.tile.enabled;
-    accessible-label: root.tile.name + ", " + root.tile.state;
-    accessible-action-default => { if root.tile.enabled { root.clicked(); } }
-    forward-focus: focus;
-
-    focus := FocusScope {
-        enabled: root.tile.enabled;
-        key-pressed(e) => {
-            if e.text == Key.Return || e.text == Key.Space {
-                root.clicked();
-                return accept;
-            }
-            reject
-        }
-    }
-    touch := TouchArea {
-        enabled: root.tile.enabled;
-        clicked => { root.clicked(); }
-    }
-
-    HorizontalLayout {
-        padding-left: Space.s3 - Space.s1 / 2;
-        padding-right: Space.s2;
-        spacing: Space.s3 - Space.s1 / 2;
-        alignment: start;
-
-        VerticalLayout {
-            alignment: center;
-            Rectangle {
-                width: Size.control + Space.s1 / 2;
-                height: self.width;
-                border-radius: Radius.tile;
-                background: root.tile.on ? Palette.on-accent.with-alpha(0.18) : Palette.field;
-                Glyph {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    data: root.tile.glyph;
-                    color: root.tile.on ? Palette.on-accent : Palette.text-2;
-                }
-            }
-        }
-        VerticalLayout {
-            alignment: center;
-            horizontal-stretch: 1;
-            Text {
-                accessible-role: none;
-                text: root.tile.name;
-                font-size: Type.label.size;
-                font-weight: Type.label.weight;
-                color: root.tile.on ? Palette.on-accent : Palette.text;
-                overflow: elide;
-            }
-            Text {
-                accessible-role: none;
-                text: root.tile.state;
-                font-size: Type.caption.size;
-                color: root.tile.on ? Palette.on-accent.with-alpha(0.82) : Palette.text-3;
-                overflow: elide;
-            }
-        }
-    }
-    Rectangle {
-        border-radius: parent.border-radius;
-        border-width: focus.has-focus ? Size.focus-ring-width : 0px;
-        border-color: Palette.text;
-    }
-}
-
-component Slider inherits Rectangle {
-    in property <string> label;
-    in property <string> glyph;
-    in property <bool> enabled: true;
-    in-out property <float> value;
-    callback changed(float);
-
-    height: Size.control;
-    opacity: root.enabled ? 1 : Palette.disabled-opacity;
-    accessible-role: slider;
-    accessible-label: root.label;
-    accessible-enabled: root.enabled;
-    accessible-value: Math.round(root.value * 100) + "%";
-    accessible-value-minimum: 0;
-    accessible-value-maximum: 100;
-    accessible-value-step: 5;
-    accessible-action-set-value(v) => { root.set(v.to-float() / 100); }
-    accessible-action-increment => { root.set(root.value + 0.05); }
-    accessible-action-decrement => { root.set(root.value - 0.05); }
-    forward-focus: focus;
-
-    function set(v: float) {
-        if root.enabled {
-            root.value = Math.max(0, Math.min(1, v));
-            root.changed(root.value);
-        }
-    }
-
-    focus := FocusScope {
-        enabled: root.enabled;
-        key-pressed(e) => {
-            if e.text == Key.LeftArrow || e.text == Key.DownArrow {
-                root.set(root.value - 0.05);
-                return accept;
-            }
-            if e.text == Key.RightArrow || e.text == Key.UpArrow {
-                root.set(root.value + 0.05);
-                return accept;
-            }
-            reject
-        }
-    }
-
-    HorizontalLayout {
-        spacing: Space.s3;
-        VerticalLayout {
-            alignment: center;
-            Glyph { data: root.glyph; }
-        }
-        track-area := Rectangle {
-            horizontal-stretch: 1;
-            Rectangle {
-                y: (parent.height - self.height) / 2;
-                height: Size.slider-track;
-                border-radius: self.height / 2;
-                background: Palette.track;
-            }
-            Rectangle {
-                x: 0;
-                y: (parent.height - self.height) / 2;
-                height: Size.slider-track;
-                width: root.value * (parent.width - Size.slider-knob) + Size.slider-knob / 2;
-                border-radius: self.height / 2;
-                background: Palette.accent;
-            }
-            Rectangle {
-                x: root.value * (parent.width - self.width);
-                y: (parent.height - self.height) / 2;
-                width: Size.slider-knob;
-                height: Size.slider-knob;
-                border-radius: self.width / 2;
-                background: Palette.knob;
-                drop-shadow-offset-y: Elevation.elevation-0.y;
-                drop-shadow-blur: Elevation.elevation-0.blur;
-                drop-shadow-color: Elevation.elevation-0.color;
-                border-width: focus.has-focus ? Size.focus-ring-width : 0px;
-                border-color: Palette.accent;
-            }
-            TouchArea {
-                enabled: root.enabled;
-                pointer-event(e) => {
-                    if e.kind == PointerEventKind.down {
-                        focus.focus();
-                    }
-                }
-                changed pressed => {
-                    if self.pressed { root.set((self.mouse-x - Size.slider-knob / 2) / (self.width - Size.slider-knob)); }
-                }
-                moved => {
-                    if self.pressed { root.set((self.mouse-x - Size.slider-knob / 2) / (self.width - Size.slider-knob)); }
-                }
-            }
-        }
-    }
-}
-
-component OutputRow inherits Rectangle {
-    in property <OutputItem> item;
-    callback clicked();
-
-    height: Size.control + Space.s1;
-    border-radius: Radius.control;
-    background: root.item.selected ? Palette.select : touch.has-hover ? Palette.hover : transparent;
-    accessible-role: radio-button;
-    accessible-checkable: true;
-    accessible-checked: root.item.selected;
-    accessible-label: root.item.detail == "" ? root.item.name : root.item.name + ", " + root.item.detail;
-    accessible-action-default => { root.clicked(); }
-    forward-focus: focus;
-
-    focus := FocusScope {
-        key-pressed(e) => {
-            if e.text == Key.Return || e.text == Key.Space {
-                root.clicked();
-                return accept;
-            }
-            reject
-        }
-    }
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-    HorizontalLayout {
-        padding-left: Space.s2;
-        padding-right: Space.s2;
-        spacing: Space.s2;
-        Text {
-            accessible-role: none;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
-            text: root.item.name;
-            font-size: Type.label.size;
-            font-weight: Type.label.weight;
-            color: root.item.selected ? Palette.accent : Palette.text;
-            overflow: elide;
-        }
-        Text {
-            accessible-role: none;
-            vertical-alignment: center;
-            text: root.item.detail;
-            font-size: Type.caption.size;
-            color: Palette.text-3;
-        }
-    }
-    Rectangle {
-        border-radius: parent.border-radius;
-        border-width: focus.has-focus ? Size.focus-ring-width : 0px;
-        border-color: Palette.accent;
-    }
-}
-
-// Cancel / confirm button of the power confirmation.
-component DialogButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> primary;
-    in property <bool> autofocus;
-    callback clicked();
-
-    height: Size.control;
-    border-radius: Radius.control;
-    background: root.primary ? (touch.pressed ? Palette.destructive-pressed : touch.has-hover ? Palette.destructive-hover : Palette.destructive) : (touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : Palette.button-secondary);
-    accessible-role: button;
-    accessible-label: root.label;
-    accessible-action-default => { root.clicked(); }
-    forward-focus: focus;
-
-    focus := FocusScope {
-        init => {
-            if root.autofocus {
-                self.focus();
-            }
-        }
-        key-pressed(e) => {
-            if e.text == Key.Return || e.text == Key.Space {
-                root.clicked();
-                return accept;
-            }
-            reject
-        }
-    }
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-    Text {
-        accessible-role: none;
-        text: root.label;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        font-size: Type.label.size;
-        font-weight: Type.label.weight;
-        color: root.primary ? Palette.destructive-ink : Palette.text;
-    }
-    Rectangle {
-        border-radius: parent.border-radius;
-        border-width: focus.has-focus ? Size.focus-ring-width : 0px;
-        border-color: Palette.accent;
-    }
 }
 
 // The panel sits in the bottom right corner of a window that covers the whole output, so a click
@@ -440,15 +102,11 @@ export component ControlCentre inherits Window {
             clicked => { root.dismiss(); }
         }
 
-        Rectangle {
+        Panel {
             x: parent.width - self.width - root.edge-gap;
             y: parent.height - self.height - root.dock-clearance - root.edge-gap;
             width: Size.touch * 8 + Space.s3;
             height: content.preferred-height;
-            background: Palette.panel;
-            border-radius: Radius.overlay;
-            border-width: Size.hairline;
-            border-color: Palette.panel-line;
 
             // Clicks on the panel's own padding are not outside clicks.
             TouchArea { }
@@ -461,21 +119,9 @@ export component ControlCentre inherits Window {
                 HorizontalLayout {
                     spacing: Space.s2;
                     alignment: start;
-                    if root.privacy != "": Rectangle {
-                        accessible-role: text;
-                        accessible-label: root.privacy;
-                        height: Size.control-sm - Space.s1 / 2;
-                        width: chip-text.preferred-width + 2 * Space.s3;
+                    if root.privacy != "": Chip {
+                        label: root.privacy;
                         y: (Size.control - self.height) / 2;
-                        border-radius: Radius.full;
-                        background: Palette.privacy-bg;
-                        chip-text := Text {
-                            accessible-role: none;
-                            text: root.privacy;
-                            font-size: Type.caption.size;
-                            font-weight: Type.caption.weight;
-                            color: Palette.warning;
-                        }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     IconButton {
@@ -507,14 +153,15 @@ export component ControlCentre inherits Window {
                     }
                     HorizontalLayout {
                         spacing: Space.s2;
-                        DialogButton {
+                        Button {
                             label: "Cancel";
                             autofocus: true;
                             clicked => { root.confirm = ""; }
                         }
-                        DialogButton {
+                        Button {
                             label: root.confirm-name;
                             primary: true;
+                            destructive: true;
                             clicked => { root.power-action(root.confirm); }
                         }
                     }
@@ -522,50 +169,23 @@ export component ControlCentre inherits Window {
 
                 if root.power-open && root.confirm == "": VerticalLayout {
                     spacing: Space.s1 / 2;
-                    for a in root.power-actions: Rectangle {
-                        height: Size.control + Space.s1;
-                        border-radius: Radius.control;
-                        background: pa-touch.has-hover ? Palette.hover : Palette.group;
-                        accessible-role: button;
-                        accessible-label: a.name;
-                        accessible-action-default => { root.choose(a); }
-                        forward-focus: pa-focus;
-                        pa-focus := FocusScope {
-                            key-pressed(e) => {
-                                if e.text == Key.Return || e.text == Key.Space {
-                                    root.choose(a);
-                                    return accept;
-                                }
-                                reject
-                            }
-                        }
-                        pa-touch := TouchArea {
-                            clicked => { root.choose(a); }
-                        }
-                        Text {
-                            accessible-role: none;
-                            x: Space.s3;
-                            vertical-alignment: center;
-                            text: a.name;
-                            font-size: Type.label.size;
-                            font-weight: Type.label.weight;
-                            color: Palette.text;
-                        }
-                        Rectangle {
-                            border-radius: parent.border-radius;
-                            border-width: pa-focus.has-focus ? Size.focus-ring-width : 0px;
-                            border-color: Palette.accent;
-                        }
+                    for a in root.power-actions: ActionRow {
+                        label: a.name;
+                        clicked => { root.choose(a); }
                     }
                 }
 
                 // Tiles, two columns.
                 GridLayout {
                     spacing: Space.s2;
-                    for t[i] in root.tiles: TileButton {
+                    for t[i] in root.tiles: ToggleTile {
                         row: floor(i / 2);
                         col: mod(i, 2);
-                        tile: t;
+                        name: t.name;
+                        state: t.state;
+                        glyph: t.glyph;
+                        on: t.on;
+                        enabled: t.enabled;
                         clicked => { root.tile-clicked(t.id); }
                     }
                 }
@@ -611,8 +231,10 @@ export component ControlCentre inherits Window {
                         if root.outputs-open: VerticalLayout {
                             spacing: Space.s1 / 2;
                             padding-top: Space.s2;
-                            for o in root.outputs: OutputRow {
-                                item: o;
+                            for o in root.outputs: RadioRow {
+                                name: o.name;
+                                detail: o.detail;
+                                selected: o.selected;
                                 clicked => { root.select-output(o.id); }
                             }
                         }

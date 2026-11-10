@@ -1,48 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // The shell's one notification (#138): the disk is not sealed to the TPM. A card in the top right
 // corner of the output. Values come only from the design tokens (docs/design/tokens.json).
-import { Fonts, Palette, Radius, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
-
-component NoticeButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> primary;
-    callback clicked();
-
-    height: Size.control;
-    border-radius: Radius.control;
-    background: root.primary ? (touch.pressed ? Palette.accent-pressed : touch.has-hover ? Palette.accent-hover : Palette.accent) : (touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : Palette.button-secondary);
-    accessible-role: button;
-    accessible-label: root.label;
-    accessible-action-default => { root.clicked(); }
-    forward-focus: focus;
-
-    focus := FocusScope {
-        key-pressed(e) => {
-            if e.text == Key.Return || e.text == Key.Space {
-                root.clicked();
-                return accept;
-            }
-            reject
-        }
-    }
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-    Text {
-        accessible-role: none;
-        text: root.label;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        font-size: Type.label.size;
-        font-weight: Type.label.weight;
-        color: root.primary ? Palette.on-accent : Palette.text;
-    }
-    Rectangle {
-        border-radius: parent.border-radius;
-        border-width: focus.has-focus ? Size.focus-ring-width : 0px;
-        border-color: Palette.accent;
-    }
-}
+import { Fonts, Palette, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
+import { Button, Panel } from "../../c4-toolkit/ui/widgets.slint";
 
 export component Notice inherits Window {
     in property <string> heading;
@@ -62,10 +22,8 @@ export component Notice inherits Window {
     preferred-width: Space.s7 * 8;
     preferred-height: col.preferred-height + Space.s4 * 2;
 
-    Rectangle {
+    Panel {
         background: Palette.overlay-card;
-        border-radius: Radius.overlay;
-        border-width: Size.hairline;
         border-color: Palette.overlay-card-line;
     }
     col := VerticalLayout {
@@ -88,12 +46,12 @@ export component Notice inherits Window {
             padding-top: Space.s2;
             spacing: Space.s2;
             alignment: end;
-            NoticeButton {
+            Button {
                 label: root.dismiss;
                 width: Space.s7 * 2;
                 clicked => { root.dismissed(); }
             }
-            NoticeButton {
+            Button {
                 label: root.learn-more;
                 primary: true;
                 width: Space.s7 * 2;

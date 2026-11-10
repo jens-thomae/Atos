@@ -3,6 +3,7 @@
 // running window. Values come only from the design tokens (docs/design/tokens.json); the layout
 // follows the owner's Dock mockup on the design canvas (docs/design/README.md).
 import { Fonts, Palette, Radius, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
+import { IconButton, Panel } from "../../c4-toolkit/ui/widgets.slint";
 export { Launcher, AppItem } from "launcher.slint";
 
 export struct DockItem {
@@ -127,52 +128,6 @@ component LauncherButton inherits Rectangle {
     }
 }
 
-// Opens the control centre (#65): two sliders, the quick-settings glyph.
-component ControlCentreButton inherits Rectangle {
-    callback clicked();
-
-    width: Size.touch;
-    height: Size.touch;
-    border-radius: Radius.tile;
-    background: touch.pressed ? Palette.button-secondary-pressed : touch.has-hover ? Palette.button-secondary-hover : Palette.button-secondary;
-    accessible-role: button;
-    accessible-label: "Control centre";
-    accessible-action-default => { root.clicked(); }
-    forward-focus: focus;
-
-    focus := FocusScope {
-        key-pressed(e) => {
-            if e.text == Key.Return || e.text == Key.Space {
-                root.clicked();
-                return accept;
-            }
-            reject
-        }
-    }
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-    Path {
-        accessible-role: none;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        width: Space.s4 + Space.s1 / 2;
-        height: self.width;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: "M4.5 8h8M16.5 8h3M14.5 6v4M4.5 16h3M11.5 16h8M9.5 14v4";
-        fill: transparent;
-        stroke: Palette.text;
-        stroke-width: Size.hairline * 1.7;
-        stroke-line-cap: round;
-    }
-    Rectangle {
-        border-radius: parent.border-radius;
-        border-width: focus.has-focus ? Size.focus-ring-width : 0px;
-        border-color: Palette.accent;
-    }
-}
-
 export component Dock inherits Window {
     in property <[DockItem]> items;
     callback activate(int);
@@ -186,12 +141,7 @@ export component Dock inherits Window {
     default-font-family: Fonts.sans;
     preferred-height: Size.dock-height;
 
-    Rectangle {
-        background: Palette.panel;
-        border-radius: Radius.overlay;
-        border-width: Size.hairline;
-        border-color: Palette.panel-line;
-
+    Panel {
         HorizontalLayout {
             alignment: center;
             padding-left: Space.s3;
@@ -236,7 +186,13 @@ export component Dock inherits Window {
             }
             VerticalLayout {
                 alignment: center;
-                ControlCentreButton {
+                IconButton {
+                    label: "Control centre";
+                    filled: true;
+                    radius: Radius.tile;
+                    width: Size.touch;
+                    height: Size.touch;
+                    glyph: "M4.5 8h8M16.5 8h3M14.5 6v4M4.5 16h3M11.5 16h8M9.5 14v4";
                     clicked => { root.open-control-centre(); }
                 }
             }

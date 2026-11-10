@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A list row with an icon tile and a name (the launcher's apps). Without an `icon` the tile shows
+// `initial`. `current` takes the keyboard focus; `focused` fires when the row gets it.
+import { Palette, Radius, Size, Space, Type } from "../tokens.slint";
+
+export component IconRow inherits Rectangle {
+    in property <string> label;
+    // Empty when no icon was found; the tile then shows `initial`.
+    in property <image> icon;
+    in property <string> initial;
+    in property <bool> current;
+    callback clicked();
+    callback focused();
+
+    height: Space.s7;
+    border-radius: Radius.tile;
+    // The palette mockup's selected row: accent tint with an inset accent line.
+    background: fs.has-focus ? Palette.select : touch.pressed ? Palette.pressed : touch.has-hover ? Palette.hover : transparent;
+    border-width: fs.has-focus ? Size.hairline : 0;
+    border-color: Palette.select-outline;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    changed current => {
+        if self.current {
+            fs.focus();
+        }
+    }
+
+    fs := FocusScope {
+        changed has-focus => {
+            if self.has-focus {
+                root.focused();
+            }
+        }
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: Space.s3;
+        padding-right: Space.s3;
+        spacing: Space.s3;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: Size.control;
+                height: Size.control;
+                border-radius: Radius.control;
+                clip: true;
+                background: root.icon.width > 0 ? transparent : Palette.tab;
+
+                // The row's button carries the name; its parts stay off the accessibility tree.
+                Image {
+                    accessible-role: none;
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.icon;
+                }
+
+                if root.icon.width == 0: Text {
+                    accessible-role: none;
+                    text: root.initial;
+                    color: Palette.text;
+                    font-size: Type.label.size;
+                    font-weight: Type.label.weight;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Text {
+            accessible-role: none;
+            text: root.label;
+            color: Palette.text;
+            font-size: Type.body.size;
+            font-weight: Type.body.weight;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}

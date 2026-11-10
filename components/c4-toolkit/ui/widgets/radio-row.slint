@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// A selectable row with a name and a detail, one of a group (the control centre's sound outputs).
+import { Palette, Radius, Size, Space, Type } from "../tokens.slint";
+import { FocusRing } from "focus-ring.slint";
+
+export component RadioRow inherits Rectangle {
+    in property <string> name;
+    in property <string> detail;
+    in property <bool> selected;
+    callback clicked();
+
+    height: Size.control + Space.s1;
+    border-radius: Radius.control;
+    background: root.selected ? Palette.select : touch.has-hover ? Palette.hover : transparent;
+    accessible-role: radio-button;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+    accessible-label: root.detail == "" ? root.name : root.name + ", " + root.detail;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: Space.s2;
+        padding-right: Space.s2;
+        spacing: Space.s2;
+        Text {
+            accessible-role: none;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            text: root.name;
+            font-size: Type.label.size;
+            font-weight: Type.label.weight;
+            color: root.selected ? Palette.accent : Palette.text;
+            overflow: elide;
+        }
+        Text {
+            accessible-role: none;
+            vertical-alignment: center;
+            text: root.detail;
+            font-size: Type.caption.size;
+            color: Palette.text-3;
+        }
+    }
+    FocusRing {
+        active: focus.has-focus;
+        radius: parent.border-radius;
+    }
+}
