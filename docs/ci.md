@@ -5,7 +5,7 @@ The repository is public, so standard GitHub-hosted runners cost nothing (GitHub
 ## Two lanes
 
 - **Pull request lane (fast).** Each workflow decides from the changed paths whether it can be affected. A shell or toolkit change waits for `CI`, `C3 shell` and `Slint fork` (about 1–15 minutes), not for the image build. The image is built per pull request only when the image recipe itself changes.
-- **Nightly lane (complete).** Every night `main` is built and checked in full: the base image from scratch with its boot check (`c1-base.yml`), the workspace with the full 5-minute idle-CPU window (`ci.yml`), and the budgets on the reference NUC (`perf.yml`). A broken `main` shows up the next morning as an open issue (below), not on the next unrelated pull request.
+- **Nightly lane (complete).** Every night `main` is built and checked in full: the base image from scratch with its boot check (`c1-base.yml`), the workspace with the full 5-minute idle-CPU window (`ci.yml`), and the budgets on the reference NUC (`perf.yml`). A broken image build on `main` shows up the next morning as an open issue (below), not on the next unrelated pull request.
 
 Merges to `main` publish the image for every change that ends up in it, so `:latest` always matches `main`.
 
