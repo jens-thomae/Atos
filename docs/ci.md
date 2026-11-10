@@ -22,7 +22,7 @@ Durations are the median (10th–90th percentile) of the last 500 successful run
 | `c2-compositor.yml` | C2, the toolchain pin or the workflow changed (`paths`) | Same | Never | about 5 min |
 | `c3-shell.yml` | C3, C4, `third_party/slint` or the workflow changed (`paths`); NUC job only with the label `c3-nuc` | Same | Manual | 8–16 min |
 | `slint-fork.yml` | Slint, the fork tooling, C4 UI or the workflow changed (`paths`) | Same | Manual (dry-run rebase) | 3–9 min |
-| `c11-installer.yml` | C11 or the workflow changed (`paths`) | Same | Manual | 11–16 min |
+| `c11-installer.yml` | C11 or the workflow changed (`paths`) | Same, and uploads the tested ISO (below) | Manual; on `main` without `c1-base-ref` it also uploads the ISO | 11–16 min |
 | `audit.yml` (cargo audit, cargo deny) | A manifest, lockfile, policy or the workflow changed (`paths`) | Same | Mondays 05:00 UTC | under 1 min |
 | `base-mirror.yml` | Push to any branch of this repository that changes a base pin | Same | Manual | under 1 min |
 | `perf.yml` (NUC) | Only with the label `perf` (`docs/budgets.md`) | Never | Nightly 01:30 UTC | 6 min (nightly) |
@@ -57,5 +57,6 @@ It is the only job in the workflow with `issues: write`, and it runs no build. O
 ## Other rules
 
 - **Cancel superseded runs.** A new push to a pull request cancels its older run (`ci.yml`, `c1-base.yml`). Runs on `main` and scheduled runs are never cancelled; `publish` runs one at a time. The NUC workflows keep their own concurrency.
-- **Artifacts.** Public visibility makes minutes free, not storage: artifacts still count against the account's storage allowance (GitHub's billing docs, checked 2026-11-10). Every `upload-artifact` step therefore sets `retention-days` (7 or 14), and the installer ISO (about 2 GB) is not uploaded.
+- **Artifacts.** Public visibility makes minutes free, not storage: artifacts still count against the account's storage allowance (GitHub's billing docs, checked 2026-11-10). Every `upload-artifact` step therefore sets `retention-days` (7 or 14). The repository had 617 MB of live artifacts on 2026-11-10, over the 500 MB of GitHub Free, and uploads still worked.
+- **Installer ISO (#202).** `c11-installer.yml` uploads the ISO it has just installed and booted under KVM as the 14-day artifact `atos-install-TEST-<commit>` (ISO, `.sha256`, notice), from pushes to `main` and from manual runs on `main` without `c1-base-ref`, never from a pull request. It is a test build signed with the CI test keys (D-014). An artifact needs no token permission. A release would need `contents: write`, and the ISO (2.01 GiB) is over the 2 GiB per-file limit for release assets. How to download it: `docs/components/c11-installer/README.md`.
 - **Source bundle (`publish`, #85).** Adds about 1 minute to a publish run and about 10 MB per image in the registry (`git archive | gzip` of the tree was 9.5 MB on 2026-11-06).
