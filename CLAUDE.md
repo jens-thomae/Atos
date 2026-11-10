@@ -11,7 +11,8 @@ Read in this order before writing any code:
 3. Your task card (GitHub issue): `gh issue view <number> --comments`. Read the **last handoff note** first.
 4. The spec sections linked on the card, usually §6 (your component) and §7 (quality budgets).
 5. `docs/spec.md` §5 (decisions log) for anything your task touches.
-6. For any UI work: the owner provides the design system when relevant. Use only its values; if it is missing, ask on the card.
+6. `docs/README.md` (what to read for your kind of task) and the component's code map, where one exists.
+7. For any UI work: the owner provides the design system when relevant. Use only its values; if it is missing, ask on the card.
 
 If you have no task card, stop and ask the owner. Do not choose work yourself.
 
@@ -21,7 +22,7 @@ If you have no task card, stop and ask the owner. Do not choose work yourself.
 - **Decided means binding.** Never contradict a _Decided_ entry in the decisions log. If you think one is wrong, add a _Proposed_ entry in a comment on the card and move the card to Blocked.
 - **Never invent requirements.** If the spec or card is silent or ambiguous, write the question on the card, move it to Blocked and stop.
 - **Do not edit `docs/spec.md` or this file.** Propose changes in a card comment; only the owner changes them.
-- **Stay in your component.** Do not modify code owned by another component (C1–C11) unless the card says so.
+- **Stay in your component.** Do not modify code owned by another component (C1–C12) unless the card says so.
 - **Budgets are release blockers.** A change that breaks a quality budget in §7 is not done, even if it works.
 - **Never mark your own work approved.** A separate reviewer agent and the owner accept work.
 
@@ -80,30 +81,41 @@ gh project item-edit ...                # move a card between columns
 gh pr create --fill                     # open a PR from the current branch
 ```
 
-## Repository layout (proposed, update as it is created)
+## Repository layout (update as it is created)
 
 ```
-docs/            spec.md, decisions/, per-component docs
+docs/            spec.md, decisions/, per-component docs, user/ (user docs), index in README.md
 components/      one directory per component, named by ID
   c1-base/  c2-compositor/  c3-shell/  c4-toolkit/  c5-apps/
   c6-search/  c7-software/  c8-settings/  c9-connectivity/
   c10-privacy/  c11-installer/
+  C12 agent integration: not created yet (its first card names the directory)
 tools/           budget checks, screenshot-test harness, scripts
 .github/         issue and PR templates, CI workflows
 ```
 
 ## Commands
 
-Run from the repository root. These are the commands CI (`ci.yml`) runs, in the same order. The toolchain is pinned in `rust-toolchain.toml`; `rustup` installs it on first use.
+The root workspace holds only `tools/budgets`, `tools/tokens` and `components/c11-installer/atos-install`. C2, C3 and the C4 test harness are separate workspaces: `cargo` at the root does not touch them. The toolchain is pinned in `rust-toolchain.toml`; `rustup` installs it on first use. `cargo nextest` is not in rustup: `cargo install --locked --version 0.9.150 cargo-nextest` (CI uses the release binary pinned in `ci.yml`).
 
-```sh
-# lint:    cargo fmt --check && cargo clippy --all-targets -- -D warnings
-# build:   cargo build --release -p budgets
-# test:    cargo nextest run && cargo test --doc
-# budgets: cargo build --release -p budgets && target/release/budgets target/release/budget-test-app --cpu-window 10
-```
+| Where | Lint and test (run in that directory) | CI workflow |
+| --- | --- | --- |
+| Root workspace | `cargo fmt --check && cargo clippy --all-targets -- -D warnings`, then `cargo nextest run && cargo test --doc` | `ci.yml` |
+| C2 `components/c2-compositor` | `cargo build --workspace --locked`, `cargo test --workspace --locked`, `cargo clippy --workspace --all-targets --locked -- -D warnings` (system libraries in the workflow) | `c2-compositor.yml` |
+| C3 `components/c3-shell` | First, from the root: `tools/slint-fork/slint-fork.sh setup`. Then `cargo fmt --check`, `cargo clippy --all-targets --config ../../third_party/slint/patch.toml -- -D warnings`, `cargo nextest run --config ../../third_party/slint/patch.toml` (no `--locked`) | `c3-shell.yml` |
+| C4 harness `components/c4-toolkit/test-harness` | Same `setup`; same three commands with `--config ../../../third_party/slint/patch.toml` | `slint-fork.yml` |
+| C1 `components/c1-base` | `podman build` of the Containerfile, then `check-seal.sh`, `nvidia/check.sh`; `shell-boot-test.sh` needs KVM, so it runs only in CI | `c1-base.yml` |
+| C11 `components/c11-installer` | `atos-install` is in the root workspace; `build-iso.sh` and `vm-test.sh` (install and boot under KVM) run only in CI | `c11-installer.yml` |
 
-`cargo nextest` is not installed by rustup: `cargo install --locked --version 0.9.150 cargo-nextest` (CI uses the release binary pinned in `ci.yml`). `cargo test` also works for a quick run but does not match CI. The budgets command needs Linux (the harness reads `/proc`); for the §7 numbers use `--cpu-window full` and the NUC (`perf.yml`).
+Budgets: `cargo build --release -p budgets && target/release/budgets target/release/budget-test-app --cpu-window 10`. It needs Linux (the harness reads `/proc`); for the §7 numbers use `--cpu-window full` and the NUC (`perf.yml`). On a Mac use the dev VM: `tools/dev-vm/vm run <command>` (`docs/dev-environment.md`).
+
+## Lanes
+
+Every card is in one lane. The planner names it on the card.
+
+- **Fast lane:** only `components/*/ui/**/*.slint`, `docs/design/tokens.json`, the generated `tokens.slint` and screenshot references change. One "polish" card may collect many tweaks from one sitting with the owner: one branch and one PR per sitting, and the handoff note lists what changed. The reviewer checks tokens-only values, the screenshot diffs and the accessibility tests. It merges under the planner delegation above.
+- **Standard lane:** everything else, as described in this file.
+- **Security lane:** permissions, sandboxing, signing, trust policy, network, the C12 broker, CI workflows, and anything under `components/c1-base/` or `components/c11-installer/` that changes what boots or what is trusted. As standard, plus Opus for builder and reviewer, and the owner always accepts.
 
 ## Conventions
 
