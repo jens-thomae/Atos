@@ -102,10 +102,14 @@ ExecStart=/bin/sh -c '{ echo \"$TEST_PASSWORD\"; echo \"$TEST_PASSWORD\"; } | at
 SCREEN_SCRIPT='exec > /dev/'"$SERIAL"' 2>&1
 journalctl -fb -o short-monotonic -u atos-installer.service -u systemd-logind.service | sed "s/^/ATOS-JOURNAL /" &
 cols=$(od -An -tu1 -j1 -N1 /dev/vcsa1 | tr -d " "); echo "ATOS-SCREEN-START cols=${cols:=80}"
-old=
+old= same=0
 while :; do
   s=$(fold -w "$cols" /dev/vcs1 | sed "s/ *$//" | grep -v "^$")
-  [ "$s" = "$old" ] || { echo ATOS-SCREEN-BEGIN; printf "%s\n" "$s" | sed "s/^/ATOS-SCREEN /"; old=$s; }
+  if [ "$s" = "$old" ]; then same=$((same + 1)); else same=0; fi
+  [ "$same" -gt 0 ] || { echo ATOS-SCREEN-BEGIN; printf "%s\n" "$s" | sed "s/^/ATOS-SCREEN /"; old=$s; }
+  # No change for 30 s: what the installer is waiting on, for debugging a stuck test.
+  [ "$same" -ne 30 ] || { echo ATOS-STALL; ps -o pid,pgid,tpgid,stat,wchan:24,args -t tty1; stty -a < /dev/tty1 | head -4
+    for p in $(pgrep -t tty1); do echo "stack $p"; cat /proc/$p/stack; done; } 2>&1 | sed "s/^/ATOS-STALL /"
   sleep 1
 done'
 # shellcheck disable=SC2016 # expands in systemd
@@ -142,7 +146,7 @@ swtpm_up() {
 
 # mon <command>: one QEMU monitor command, one connection (as in c1-base's shell-boot-test.sh; a
 # single long-lived connection lost the typing, run 42681998225).
-mon() { echo "$1" | socat - UNIX-CONNECT:"$WORK/mon.sock" >/dev/null; }
+mon() { echo "$1" | socat - UNIX-CONNECT:"$WORK/mon.sock" >> "$OUT/mon.log"; }
 # type_keys <text>: types <text> and Enter on the guest's keyboard through the QEMU monitor.
 type_keys() {
   local s=$1 c k i
@@ -156,6 +160,7 @@ type_keys() {
       *) echo "type_keys: no key for '$c'" >&2; return 1 ;;
     esac
     mon "sendkey $k"
+    sleep 0.2 # each key is held 100 ms; do not let QEMU's key queue fill up
   done
   mon "sendkey ret"
 }
