@@ -1,6 +1,7 @@
 # C11 installer ISO (docs/components/c11-installer/README.md): builds the amd64 installer image and
 # the ISO with the published c1-base image as offline payload, checks the ISO's contents, then
-# installs it under QEMU with KVM (OVMF Secure Boot firmware in setup mode, swtpm), measures the
+# installs it under QEMU with KVM (OVMF Secure Boot firmware in setup mode, swtpm) through the
+# interactive installer on tty1, typing the answers on the VM's keyboard (#220), measures the
 # install time and boots the result twice: first boot seals LUKS to PCR7, the second unlocks with it.
 # Runs only when installer files change, or by hand (CI minutes, docs/ci.md). Path filtering is
 # fine here: this is not a required check. After the test passes, a push to main (or a manual run on
@@ -91,7 +92,7 @@ jobs:
             grep -qx "'$f'" <<< "$ls" || { echo "missing $f"; exit 1; }
           done
           du -h "$HOME/c11/install.iso"
-      - name: Install with KVM, then boot twice
+      - name: Install interactively with KVM, then boot twice
         env:
           TARGET_IMGREF: ${{ env.PAYLOAD }}
         run: |
@@ -147,7 +148,7 @@ jobs:
           anyone who can write to the repository can read. This build therefore gives no Secure Boot or
           signature assurance against anyone. Install it only on a test machine you are willing to wipe,
           never on one you care about, and never use it as a release.
-          Built and tested (install under KVM, two boots) from commit $SHA: $RUN_URL
+          Built and tested (interactive install under KVM, two boots) from commit $SHA: $RUN_URL
           Payload: $PAYLOAD@$(sudo podman image inspect --format '{{.Digest}}' "$PAYLOAD")
           Check: sha256sum -c $name.iso.sha256
           EOT
@@ -161,7 +162,7 @@ jobs:
           compression-level: 0 # the ISO's squashfs is already compressed
           retention-days: 14
           if-no-files-found: error
-      # The unattended install prints its recovery key to the serial log. It belongs to a throwaway VM
+      # The install's screen, recovery key included, is copied to the serial log. It belongs to a throwaway VM
       # disk that exists only on this runner, so printing it publicly is harmless.
       - name: Serial logs
         if: always()

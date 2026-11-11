@@ -130,12 +130,19 @@ fn candidate_disks() -> Result<Vec<String>, String> {
     Ok(disks)
 }
 
+/// One line from the user. Without input (the terminal went away) the installer stops instead of
+/// taking an empty line as an answer, so it never retries in a loop or restarts on its own.
 fn ask(prompt: &str) -> String {
     print!("{prompt}");
     io::stdout().flush().ok();
     let mut s = String::new();
-    io::stdin().lock().read_line(&mut s).ok();
-    s.trim().to_string()
+    match io::stdin().lock().read_line(&mut s) {
+        Ok(n) if n > 0 => s.trim().to_string(),
+        _ => {
+            eprintln!("\natos-install: no input, stopping");
+            std::process::exit(1)
+        }
+    }
 }
 
 fn choose_disk() -> Result<String, String> {
@@ -367,13 +374,34 @@ fn install(a: &Args) -> Result<(), String> {
     fs::remove_file(KEYFILE).map_err(|e| e.to_string())?;
 
     println!(
-        "\nAtos is installed on {disk} in {} s. Remove the installer media and restart.",
+        "\nAtos is installed on {disk} in {} s.\n\
+         After you press Enter the computer restarts. Remove the installer media then, so it starts Atos.",
         start.elapsed().as_secs()
     );
-    if !a.yes {
-        ask("Press Enter to restart. ");
-    }
     Ok(())
+}
+
+/// Undoes what a failed attempt left mounted or open, so a retry starts clean. Best effort: each
+/// step fails harmlessly when there is nothing to undo.
+fn cleanup() {
+    let quiet = |args: &[&str]| {
+        let _ = Command::new(args[0])
+            .args(&args[1..])
+            .stderr(std::process::Stdio::null())
+            .status();
+    };
+    // Only our bind mount of the target's scratch directory, never the live system's own /var/tmp.
+    let src = Command::new("findmnt")
+        .args(["-no", "SOURCE", "/var/tmp"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    if src.contains("lost+found/var-tmp") {
+        quiet(&["umount", "/var/tmp"]);
+    }
+    quiet(&["umount", "-R", TARGET]);
+    quiet(&["cryptsetup", "close", MAPPER]);
+    fs::remove_file(KEYFILE).ok();
 }
 
 fn write_private(path: &str, data: &[u8]) -> Result<(), String> {
@@ -499,14 +527,35 @@ fn deployment_etc(target: &Path) -> Result<std::path::PathBuf, String> {
     }
 }
 
+/// Interactive (no `--yes`): restarts the machine only after the install has finished and the user
+/// has pressed Enter. After a failure it shows the error and waits for the user to retry or open a
+/// shell; it never restarts on its own (#220). With `--yes` it exits instead and restarts nothing.
 fn main() -> ExitCode {
     let a = parse_args(std::env::args().skip(1));
-    match install(&a) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("atos-install: {e}");
-            ExitCode::FAILURE
+    loop {
+        let err = match install(&a) {
+            Ok(()) if a.yes => return ExitCode::SUCCESS,
+            Ok(()) => {
+                ask("Press Enter to restart. ");
+                return match sh(&["systemctl", "reboot"]) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => {
+                        eprintln!("atos-install: {e}\nRestart the computer with its power button.");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+            Err(e) => e,
+        };
+        eprintln!("atos-install: {err}");
+        if a.yes {
+            return ExitCode::FAILURE;
         }
+        if ask("\nPress Enter to try again, or type \"shell\" for a shell: ") == "shell" {
+            println!("Type \"exit\" to come back to the installer.");
+            let _ = Command::new("/bin/bash").arg("--login").status();
+        }
+        cleanup();
     }
 }
 
@@ -561,6 +610,24 @@ mod tests {
         assert!(ask("a\nb\n").is_err());
         assert!(ask("a\nb\na\nb\na\nb\nc\nc\n").is_err());
         assert!(ask("").is_err());
+    }
+
+    /// #220: the unit must not restart the machine; `ExecStartPost` ran as soon as the installer
+    /// had started. Only `main` restarts, after the user confirms.
+    #[test]
+    fn installer_unit_never_restarts() {
+        let unit = include_str!("../../atos-installer.service");
+        let lines = unit.lines().filter(|l| !l.starts_with('#'));
+        assert!(
+            lines
+                .clone()
+                .all(|l| !l.contains("reboot") && !l.starts_with("ExecStartPost"))
+        );
+        assert!(
+            lines
+                .clone()
+                .any(|l| l == "ExecStart=/usr/bin/atos-install")
+        );
     }
 
     #[test]
