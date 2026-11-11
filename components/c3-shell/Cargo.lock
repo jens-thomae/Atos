@@ -333,6 +333,7 @@ dependencies = [
  "smithay-client-toolkit",
  "toml_edit",
  "wayland-backend",
+ "wayland-protocols",
  "zbus",
 ]
 

@@ -33,6 +33,8 @@ sctk = { package = "smithay-client-toolkit", version = "=0.19.2", default-featur
 wayland-backend = { version = "=0.3.17", features = ["client_system"] }
 glutin = { version = "=0.32.3", default-features = false, features = ["egl", "wayland"] }
 raw-window-handle = "=0.6.2"
+# Already in the tree through sctk; fractional-scale is a staging protocol, viewporter stable.
+wayland-protocols = { version = "=0.32.13", default-features = false, features = ["client", "staging"] }
 # Client bindings of atos-comp's toplevel protocols (MIT, System76). Same commit as
 # components/c2-compositor/Cargo.lock, so client and compositor read the same protocol XML.
 # Not on crates.io; pinned by full commit.
