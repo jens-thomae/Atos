@@ -13,16 +13,19 @@ export struct DockItem {
     icon: image,
     initial: string,
     focused: bool,
+    minimized: bool,
 }
 
 component Slot inherits Rectangle {
     in property <DockItem> item;
     callback activate();
+    // The icon's rectangle in the dock's window; the compositor animates minimising into it.
+    callback geometry(length, length, length, length);
 
     width: Size.dock-slot-w;
     height: Size.dock-slot-h;
     accessible-role: button;
-    accessible-label: root.item.focused ? root.item.title + ", focused" : root.item.title + ", running";
+    accessible-label: root.item.minimized ? root.item.title + ", minimised" : root.item.focused ? root.item.title + ", focused" : root.item.title + ", running";
     accessible-action-default => { root.activate(); }
     forward-focus: focus;
 
@@ -48,6 +51,9 @@ component Slot inherits Rectangle {
         border-radius: Radius.tile;
         clip: true;
         background: root.item.icon.width > 0 ? transparent : Palette.button-secondary;
+
+        init => { root.geometry(self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
+        changed absolute-position => { root.geometry(self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
 
         // The slot's button carries the name; its parts stay off the accessibility tree.
         Image {
@@ -131,6 +137,7 @@ component LauncherButton inherits Rectangle {
 export component Dock inherits Window {
     in property <[DockItem]> items;
     callback activate(int);
+    callback slot-rect(int, length, length, length, length);
     callback open-launcher();
     callback open-control-centre();
     // Gap between the dock and the screen edges; the shell sets it as the layer surface's margin.
@@ -173,6 +180,7 @@ export component Dock inherits Window {
                 Slot {
                     item: item;
                     activate => { root.activate(item.id); }
+                    geometry(x, y, w, h) => { root.slot-rect(item.id, x, y, w, h); }
                 }
             }
 
