@@ -100,6 +100,20 @@ jobs:
             grep -qx "'$f'" <<< "$ls" || { echo "missing $f"; exit 1; }
           done
           du -h "$HOME/c11/install.iso"
+      # #248: the live system, the GRUB menu and the volume name Atos, not Fedora. The ISO keeps Fedora's
+      # signed shim and GRUB binaries (and their EFI/fedora path), which are not the system's identity.
+      - name: The installer calls itself Atos, not Fedora (#248)
+        run: |
+          sudo components/c1-base/check-identity.sh localhost/atos-installer
+          iso=$HOME/c11/install.iso
+          for f in $(xorriso -indev "$iso" -find / -type f -name grub.cfg 2>/dev/null | tr -d "'"); do
+            xorriso -osirrox on -indev "$iso" -extract "$f" "$RUNNER_TEMP/grub.cfg" 2>/dev/null
+            echo "$f:" && grep -E '^\s*menuentry' "$RUNNER_TEMP/grub.cfg"
+            # Only the title is shown; `--class fedora` is lorax's theme icon class, not text.
+            if grep -E '^\s*menuentry' "$RUNNER_TEMP/grub.cfg" | cut -d"'" -f2 | grep -qi fedora; then echo "::error::$f has a Fedora menu entry"; exit 1; fi
+            rm -f "$RUNNER_TEMP/grub.cfg"
+          done
+          if xorriso -indev "$iso" -pvd_info 2>/dev/null | grep -i fedora; then echo "::error::the ISO's volume descriptor names Fedora"; exit 1; fi
       - name: Refuse without a TPM, install interactively with KVM, then boot twice
         env:
           TARGET_IMGREF: ${{ env.PAYLOAD }}

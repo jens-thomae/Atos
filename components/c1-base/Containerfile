@@ -101,6 +101,13 @@ FROM ${BASE} AS base
 # D-005: no call home. Fedora's anonymous countme counter runs from this timer.
 RUN systemctl mask rpm-ostree-countme.timer
 
+# Identity (#248): Atos, built on Fedora, is not Fedora. Fedora's trademark guidelines ask a derived
+# system to remove fedora-release*; generic-release is Fedora's trademark-free replacement. Its
+# placeholder os-release and system-release are replaced by usr/lib/ (COPY usr/ below). It also
+# removes console-login-helper-messages-issuegen, which needs /etc/issue.d from fedora-release-common.
+RUN dnf -y install --allowerasing generic-release \
+    && rm -rf /run/dnf /var/lib/dnf /var/cache/* /var/log/*
+
 # Session: greetd autologins `atos` into atos-comp; the compositor starts Xwayland itself.
 # xterm is the X11 test client until a native X11 app is in the suite. Cleanup of /var/cache etc. is in the next step.
 RUN dnf -y install --setopt=install_weak_deps=False greetd greetd-selinux \

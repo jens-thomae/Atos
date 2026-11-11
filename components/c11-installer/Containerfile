@@ -35,6 +35,9 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       grub2-efi-*-cdboot dracut-live implantisomd5 xorrisofs squashfs-tools \
     && dnf clean all \
     && mkdir -p /boot/efi && cp -ra /usr/lib/efi/*/*/EFI /boot/efi
+# Identity (#248): the live system calls itself Atos too, with c1-base's files (see c1-base's Containerfile).
+RUN dnf -y install --allowerasing generic-release && dnf clean all
+COPY --from=repo components/c1-base/usr/lib/os-release components/c1-base/usr/lib/fedora-release /usr/lib/
 COPY dracut-40-iso.conf /usr/lib/dracut/dracut.conf.d/40-iso.conf
 RUN set -xe; kver=$(ls /usr/lib/modules); env DRACUT_NO_XATTR=1 dracut -f /usr/lib/modules/$kver/initramfs.img "$kver"
 COPY iso.yaml /usr/lib/image-builder/bootc/iso.yaml

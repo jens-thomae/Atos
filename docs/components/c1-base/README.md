@@ -22,6 +22,7 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
 0. **`nvidia`** (not shipped): builds NVIDIA's open kernel modules from the tag in `components/c1-base/nvidia/UPSTREAM` against exactly the base image's kernel and signs them with the TEST db key. Only the four signed `.ko` files go into `base`. See [nvidia.md](nvidia.md).
 1. **`base`**
    - `systemctl mask rpm-ostree-countme.timer`: turns off Fedora's anonymous countme counter (D-005). CI checks that `systemctl is-enabled` reports `masked`.
+   - Identity (#248, [below](#identity-atos-built-on-fedora)): `generic-release` replaces `fedora-release*`; [`usr/lib/os-release`](../../../components/c1-base/usr/lib/os-release) and `usr/lib/fedora-release` name Atos.
    - Installs `systemd-boot-unsigned` and removes `bootupd`, `shim-*` and `grub2-efi-*`. Sealed images boot systemd-boot signed with our key, not Fedora's shim and GRUB (D-014). Without bootupd, `bootc install` picks systemd-boot.
    - [`usr/lib/bootc/install/80-atos-rootfs.toml`](../../../components/c1-base/usr/lib/bootc/install/80-atos-rootfs.toml): the root filesystem is ext4. Sealing needs fs-verity, and XFS, Fedora's default, has none.
    - [`usr/lib/bootc/kargs.d/10-atos-rw.toml`](../../../components/c1-base/usr/lib/bootc/kargs.d/10-atos-rw.toml): `rw`, as bootc's own sealed test images use. composefs keeps `/usr` read-only.
@@ -45,6 +46,46 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
 7. **Final image**: `rootfs` plus the UKI in `/boot/EFI/Linux/<kver>.efi`. `/boot` is outside the digest; Secure Boot checks the UKI instead.
 
 [`check-seal.sh`](../../../components/c1-base/check-seal.sh) checks the result, and CI runs it on every build. First, `sbverify` checks that the UKI and `systemd-boot*.efi.signed` are signed by the test `db.crt`; this catches an output that silently stopped being signed. Second, it checks the digest the way `bootc install` will: it imports the image's OCI layers into a scratch composefs repository, computes the digest, and checks that the UKI carries it.
+
+## Identity: Atos, built on Fedora
+
+Card #248 (owner decision, 2026-11-11): the system calls itself Atos and names Fedora only as the base it is built from. User page: [atos-and-fedora.md](../../user/atos-and-fedora.md).
+
+**Mechanism.** Fedora's trademark guidelines ([source](https://gitlab.com/fedora/legal/fedora-legal-docs/-/blob/main/modules/ROOT/pages/trademarks.adoc), last changed 2024-12-05) let a distribution that mixes Fedora packages with its own use them if `fedora-logos`, `fedora-release` and `fedora-release-notes` are removed; replacements of its own without Fedora's marks are allowed. Fedora ships `generic-release` for exactly that. Its files are placeholders (`NAME=Generic`, joke home and bug URLs), so the `base` stage swaps the packages (`dnf install --allowerasing generic-release`) and `COPY usr/` then overwrites the two files that say what the system is:
+
+| File | Content | Read by |
+| --- | --- | --- |
+| [`/usr/lib/os-release`](../../../components/c1-base/usr/lib/os-release) (`/etc/os-release`) | `NAME="Atos"`, `ID=atos`, `ID_LIKE=fedora`, `VERSION_ID=45`, `PRETTY_NAME="Atos 45"`, `DEFAULT_HOSTNAME="atos"`, repository URLs, `SUPPORT_END` | systemd (boot greeting, default host name), `/etc/issue` (`\S`), bootc (boot entry name and title), `ukify` (the UKI's `.osrel`), dracut (the initrd's os-release), any program asking what system it runs on |
+| `/usr/lib/fedora-release` (`/etc/system-release`, `/etc/redhat-release`) | `Atos release 45` | tools that read `system-release` |
+
+The installer's live system ([C11](../c11-installer/README.md)) copies the same two files.
+
+Choices, flagged for the owner on #248:
+
+- **Version.** `45`, the version the image showed before; Fedora's codename (*Forty Five*) is dropped. A product version scheme is a separate decision.
+- **URLs.** `HOME_URL` is the repository, `BUG_REPORT_URL` its issues. No documentation, support or privacy URL, no `LOGO` (no Atos logo yet), no `ANSI_COLOR` (would need a design token), no `CPE_NAME` (Atos has no CPE vendor name).
+- **`SUPPORT_END=2027-12-08`** is kept: the date Fedora 45, and so this base, stops getting updates.
+- **`ID_LIKE=fedora`** (proposal): programs that do not know `atos` fall back to it. In the image, `sos report` picks its distribution policy from `NAME`, `ID` or `ID_LIKE`; scripts and installers that support "Fedora and alikes" do the same. Without it, they treat Atos as an unknown distribution.
+- **Side effect:** `generic-release` has no `/etc/issue.d`, so `console-login-helper-messages-issuegen` (IP addresses and SSH host keys on the text login prompt) is removed with `fedora-release-common`.
+
+**What still names Fedora, and why.** Package names and their `.fc45` release tags (also in the kernel version and the UKI's file name), the dnf repositories (`/usr/share/dnf5/repos.d/fedora*.repo`) and the RPM `%fedora`/`%dist` macros, Fedora's IMA keys, SELinux module and AppStream IDs (`org.fedoraproject.*`), licence files, file names such as `50-redhat.conf`, `/usr/lib/fedora-release` (the path `system-release` points to; its content says Atos), `ID_LIKE=fedora`, and the docs' statement that Atos is built on Fedora. The installer ISO keeps Fedora's signed shim and GRUB (and their `EFI/fedora` path): they boot the media with Secure Boot on stock firmware ([C11](../c11-installer/README.md)).
+
+**CI check.** [`check-identity.sh`](../../../components/c1-base/check-identity.sh) fails if `fedora-release*`, `fedora-logos` or `fedora-release-notes` is installed, if a Fedora icon is in the image, if `os-release`, `system-release` or `issue` names Fedora or Red Hat (except `ID_LIKE=fedora`), or if the UKI's `.osrel` differs from the image's os-release. `c1-base.yml` runs it on every build and nightly; `c11-installer.yml` runs it on the installer image and checks the ISO's GRUB menu entries and volume descriptor.
+
+**Update from an image before #248.** bootc names a deployment's boot entry `bootc_<ID>-<VERSION_ID>-<n>.conf` with the title `<PRETTY_NAME> <VERSION_ID>`, both from the new image's os-release, and rewrites the booted entry under the new `ID` when it stages an update (`bootc rollback` uses the fixed id `bootc`). The previous entry keeps its old title. The version floor (#75) reads the image's version label, not os-release, so it is unaffected. Tested in the dev VM (`atos-c1`, aarch64, 2026-11-11) with dev-1 built from `main` at 3aded45 (Fedora identity) and dev-2 and dev-bad from this change; the update loop is `sealed.sh update install stage apply previous rollback back` with those images (built by hand, below), logs in `tools/dev-vm/out/sealed/`:
+
+| Step | Result |
+| --- | --- |
+| `stage` (dev-1 runs `bootc upgrade`) | *Welcome to Fedora Linux 45 (Forty Five)!*, `os="Fedora Linux 45 (Forty Five)" host=fedora`; dev-2 staged in 463 s, 972.7 MB received (the identity layer is early in `base`, so every later `base` layer is new, as for a package bump) |
+| `apply` | *Welcome to Atos 45!*, booted the counted entry `bootc_atos-45-1+2-1.conf`, `os="Atos 45" host=atos`; the health check passed (*login prompt up: boot is good*) and `systemd-bless-boot` removed the counter |
+| `previous` | the menu lists *Atos 45 45* and *Fedora Linux 45 (Forty Five) 45*; the second boots dev-1 (Fedora) |
+| `rollback` | dev-2 boots without a counter; `bootc rollback`: *Next boot: rollback deployment* |
+| `back` | dev-1 (Fedora) is the default again, `rollback:` dev-2 |
+| automatic rollback (`sealed.sh counting install bad`): dev-1 stages dev-bad, an Atos image whose login prompt exits at once | dev-bad staged as `bootc_atos-45-1+3.conf`; after its three failed boots `bootctl` shows *tries: 0 left; 3 done* and systemd-boot boots dev-1 (Fedora, `counter=none`) by itself |
+
+The host name follows `DEFAULT_HOSTNAME` (`fedora`, then `atos`) because the installer writes no `/etc/hostname`; a host name the user set stays.
+
+dev-1 is not the published amd64 image but the same source built for aarch64 (the dev VM cannot boot amd64), as for #55. dev-2 and dev-bad are the images `sealed.sh` builds (`IMAGE_VERSION=dev-2`; dev-bad also links `agreety` to `false`), from this branch; dev-1 is built from a `git archive` of `main` and tagged `localhost/c1-base:dev-1` first, so `sealed.sh update` without its `images` step uses it.
 
 ## Session: greetd login into atos-comp
 
@@ -213,7 +254,7 @@ The boot times only show that nothing hangs; under emulation they are not compar
 Notes:
 
 - **What an update downloads.** A change anywhere in `base` changes the composefs digest, so the UKI (about 108.6 MB compressed) changes with every update. Until #111, the other large layer was the `kernel` stage's `split-kernel-and-rootfs` output: the kernel and initramfs, which the `rootfs` stage then deleted, so it shipped in every image and every update. See [Image and update size](#image-and-update-size-111).
-- **Boot entries.** bootc writes one systemd-boot entry per deployment: `bootc_fedora-45-0.conf` (default, sort key `bootc-fedora-0`) and `bootc_fedora-45-1.conf`. Both show the same title, *Fedora Linux 45 (Forty Five) 45 (45)*; nothing marks the second one as the previous version ([#112](https://github.com/jens-thomae/Atos/issues/112)). The menu is hidden (timeout 0, since bootc 1.17.1 ignores an image `loader.conf`) and opens when a key is held during boot.
+- **Boot entries.** bootc writes one systemd-boot entry per deployment: `bootc_fedora-45-0.conf` (default, sort key `bootc-fedora-0`) and `bootc_fedora-45-1.conf`. Both show the same title, *Fedora Linux 45 (Forty Five) 45 (45)*; nothing marks the second one as the previous version ([#112](https://github.com/jens-thomae/Atos/issues/112)). Since #248 the names and titles say Atos (`bootc_atos-45-0.conf`, *Atos 45 45 (45)*), see [Identity](#identity-atos-built-on-fedora). The menu is hidden (timeout 0, since bootc 1.17.1 ignores an image `loader.conf`) and opens when a key is held during boot.
 - **Booting the previous entry from the menu does not change the default.** The next plain boot starts dev-2 again. While booted from the menu, `bootc status` reports `bootOrder: rollback` and `rollbackQueued: true`, although no rollback was asked for.
 - **Firmware boot order.** After the first boots, AAVMF tries its built-in EFI Shell before the disk. Secure Boot refuses the shell (*Security Violation*) and the firmware moves on to the disk. `sealed.sh` ignores that line.
 - **Logs:** `tools/dev-vm/out/sealed/update-{stage,apply,previous,rollback,back}.log`.

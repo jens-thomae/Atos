@@ -125,6 +125,9 @@ jobs:
       - &nvidia
         name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
         run: components/c1-base/nvidia/check.sh c1-base
+      - &identity
+        name: The image calls itself Atos, not Fedora (#248)
+        run: components/c1-base/check-identity.sh c1-base
       - &wireless
         name: Wi-Fi and Bluetooth packages, iwd backend, no connectivity check, unit states (#231)
         run: components/c1-base/check-wireless.sh c1-base
@@ -311,6 +314,7 @@ jobs:
       - *session
       - *seal
       - *nvidia
+      - *identity
       - *wireless
       - *boot
       - *screenshots
