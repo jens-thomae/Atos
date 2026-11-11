@@ -81,20 +81,27 @@ pub fn list() -> Vec<Toplevel> {
     })
 }
 
-/// Asks the compositor to activate (raise and focus) the window. A no-op without the
-/// management protocol or a seat.
+/// Asks the compositor to activate (raise and focus) the window, restoring it first when it is
+/// minimised (the dock and the Alt+Tab switcher both use this). A no-op without the management
+/// protocol or a seat.
 pub fn activate(id: u32) {
     TOPLEVELS.with(|t| {
         let t = t.borrow();
-        let cosmic = t
-            .entries
-            .iter()
-            .find(|e| e.pending.id == id)
-            .and_then(|e| e.cosmic.as_ref());
+        let entry = t.entries.iter().find(|e| e.pending.id == id);
+        let restore = entry.is_some_and(|e| needs_restore(&e.pending));
+        let cosmic = entry.and_then(|e| e.cosmic.as_ref());
         if let (Some(m), Some(c), Some(s)) = (&t.manager, cosmic, seat()) {
+            if restore {
+                m.unset_minimized(c);
+            }
             m.activate(c, &s);
         }
     });
+}
+
+/// Activating a minimised window restores it first; the compositor does not do that itself.
+fn needs_restore(t: &Toplevel) -> bool {
+    t.minimized
 }
 
 /// What a dock click does to a window.
@@ -120,12 +127,7 @@ pub fn dock_click(id: u32) {
     };
     match click_action(&t) {
         Click::Minimize => with_cosmic(id, |m, c| m.set_minimized(c)),
-        Click::Focus => {
-            if t.minimized {
-                with_cosmic(id, |m, c| m.unset_minimized(c));
-            }
-            activate(id);
-        }
+        Click::Focus => activate(id),
     }
 }
 
@@ -153,6 +155,11 @@ fn with_cosmic(
             f(m, c);
         }
     });
+}
+
+/// Asks the compositor to close the window (a request to the app, as the window's close button).
+pub fn close(id: u32) {
+    with_cosmic(id, |m, c| m.close(c));
 }
 
 fn changed() {
@@ -310,7 +317,7 @@ fn has_state(state: &[u8], wanted: zcosmic_toplevel_handle_v1::State) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Click, Toplevel, click_action, has_state};
+    use super::{Click, Toplevel, click_action, has_state, needs_restore};
     use cosmic_protocols::toplevel_info::v1::client::zcosmic_toplevel_handle_v1::State;
 
     #[test]
@@ -335,5 +342,15 @@ mod tests {
         assert_eq!(click_action(&w(false, false)), Click::Focus);
         assert_eq!(click_action(&w(false, true)), Click::Focus);
         assert_eq!(click_action(&w(true, true)), Click::Focus);
+    }
+
+    #[test]
+    fn alt_tab_activation_restores_a_minimised_window() {
+        let w = |minimized| Toplevel {
+            minimized,
+            ..Toplevel::default()
+        };
+        assert!(needs_restore(&w(true)));
+        assert!(!needs_restore(&w(false)));
     }
 }

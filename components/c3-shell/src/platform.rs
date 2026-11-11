@@ -114,6 +114,16 @@ thread_local! {
     static OUTPUT_HOOK: RefCell<Option<OutputHook>> = const { RefCell::new(None) };
     static FRAME_HOOKS: RefCell<Vec<FrameHook>> = const { RefCell::new(Vec::new()) };
     static SCALE_HOOKS: RefCell<Vec<ScaleHook>> = const { RefCell::new(Vec::new()) };
+    static MODIFIER_HOOK: RefCell<Option<ModifierHook>> = const { RefCell::new(None) };
+}
+
+type ModifierHook = Box<dyn Fn(bool)>;
+
+/// Calls `hook` with whether Alt or Super is held whenever the compositor reports the modifiers
+/// to a surface of ours (also right after it gives us the keyboard). The window switcher (#226)
+/// activates its selection when this turns false.
+pub fn on_modifiers(hook: impl Fn(bool) + 'static) {
+    MODIFIER_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
 }
 
 /// Calls `hook` with the window whenever the compositor reports a frame of it as shown
@@ -1146,9 +1156,15 @@ impl KeyboardHandler for State {
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: Modifiers,
+        modifiers: Modifiers,
         _: u32,
     ) {
+        let held = modifiers.alt || modifiers.logo;
+        MODIFIER_HOOK.with(|h| {
+            if let Some(h) = &*h.borrow() {
+                h(held)
+            }
+        });
     }
 }
 

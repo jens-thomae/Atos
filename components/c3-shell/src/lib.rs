@@ -7,6 +7,7 @@ pub mod config;
 pub mod control;
 pub mod icons;
 pub mod notice;
+pub mod switcher_model;
 
 slint::include_modules!();
 
@@ -45,5 +46,24 @@ pub fn dock_item(
         initial: initial(title),
         focused,
         minimized,
+    }
+}
+
+/// The window switcher's view of one tile. `icon` is empty when the app has none (`icons::load`).
+/// `windows` is how many windows the app has; more than one shows a stacked look.
+pub fn switcher_item(
+    title: &str,
+    app_name: &str,
+    windows: usize,
+    icon: slint::Image,
+    preview: slint::Image,
+) -> SwitcherItem {
+    SwitcherItem {
+        title: title.into(),
+        app_name: app_name.into(),
+        icon,
+        preview,
+        initial: initial(if title.is_empty() { app_name } else { title }),
+        windows: windows as i32,
     }
 }
