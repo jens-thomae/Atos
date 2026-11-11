@@ -101,7 +101,7 @@ fn new_dock(
 ) -> Result<Dock, Box<dyn std::error::Error>> {
     let dock = platform::with_output(output, Dock::new)?;
     dock.set_items(items.clone().into());
-    dock.on_activate(|id| toplevels::activate(id as u32));
+    dock.on_activate(|id| toplevels::dock_click(id as u32));
     dock.on_open_launcher(launcher::toggle);
     dock.on_open_control_centre(control_centre::toggle);
     // Bottom of the output, floating: the gap to the screen edges comes from the tokens.
@@ -129,7 +129,7 @@ fn update(items: &VecModel<DockItem>, list: &[toplevels::Toplevel], icons: &mut 
                 .entry(t.app_id.clone())
                 .or_insert_with(|| atos_shell::icons::load(&t.app_id, px))
                 .clone();
-            dock_item(t.id, &t.title, &t.app_id, t.activated, icon)
+            dock_item(t.id, &t.title, &t.app_id, t.activated, t.minimized, icon)
         })
         .collect();
     while items.row_count() > new.len() {

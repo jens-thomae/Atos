@@ -27,6 +27,7 @@ pub struct Toplevel {
     pub title: String,
     pub app_id: String,
     pub activated: bool,
+    pub minimized: bool,
 }
 
 struct Entry {
@@ -91,6 +92,58 @@ pub fn activate(id: u32) {
             .and_then(|e| e.cosmic.as_ref());
         if let (Some(m), Some(c), Some(s)) = (&t.manager, cosmic, seat()) {
             m.activate(c, &s);
+        }
+    });
+}
+
+/// What a dock click does to a window.
+#[derive(Debug, PartialEq)]
+pub enum Click {
+    Minimize,
+    /// Restores a minimised window (a no-op for a normal one) and focuses it.
+    Focus,
+}
+
+pub fn click_action(t: &Toplevel) -> Click {
+    if t.activated && !t.minimized {
+        Click::Minimize
+    } else {
+        Click::Focus
+    }
+}
+
+/// A dock click on window `id`: minimise it when it has focus, else restore and focus it.
+pub fn dock_click(id: u32) {
+    let Some(t) = list().into_iter().find(|t| t.id == id) else {
+        return;
+    };
+    match click_action(&t) {
+        Click::Minimize => with_cosmic(id, |m, c| m.set_minimized(c)),
+        Click::Focus => {
+            if t.minimized {
+                with_cosmic(id, |m, c| m.unset_minimized(c));
+            }
+            activate(id);
+        }
+    }
+}
+
+fn with_cosmic(
+    id: u32,
+    f: impl FnOnce(
+        &zcosmic_toplevel_manager_v1::ZcosmicToplevelManagerV1,
+        &zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1,
+    ),
+) {
+    TOPLEVELS.with(|t| {
+        let t = t.borrow();
+        let cosmic = t
+            .entries
+            .iter()
+            .find(|e| e.pending.id == id)
+            .and_then(|e| e.cosmic.as_ref());
+        if let (Some(m), Some(c)) = (&t.manager, cosmic) {
+            f(m, c);
         }
     });
 }
@@ -215,8 +268,12 @@ impl Dispatch<zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1, u32> for Stat
         _: &QueueHandle<Self>,
     ) {
         if let zcosmic_toplevel_handle_v1::Event::State { state } = event {
-            let activated = parse_activated(&state);
-            with_entry(*ext_id, |e| e.pending.activated = activated);
+            let activated = has_state(&state, zcosmic_toplevel_handle_v1::State::Activated);
+            let minimized = has_state(&state, zcosmic_toplevel_handle_v1::State::Minimized);
+            with_entry(*ext_id, |e| {
+                e.pending.activated = activated;
+                e.pending.minimized = minimized;
+            });
             changed();
         }
     }
@@ -234,25 +291,42 @@ impl Dispatch<zcosmic_toplevel_manager_v1::ZcosmicToplevelManagerV1, ()> for Sta
     }
 }
 
-/// The state array is native-endian u32 values (wl_array); 2 is `activated`.
-fn parse_activated(state: &[u8]) -> bool {
-    let activated = zcosmic_toplevel_handle_v1::State::Activated as u32;
+/// The state array is native-endian u32 values (wl_array).
+fn has_state(state: &[u8], wanted: zcosmic_toplevel_handle_v1::State) -> bool {
+    let wanted = wanted as u32;
     state
         .as_chunks::<4>()
         .0
         .iter()
-        .any(|c| u32::from_ne_bytes(*c) == activated)
+        .any(|c| u32::from_ne_bytes(*c) == wanted)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_activated;
+    use super::{Click, Toplevel, click_action, has_state};
+    use cosmic_protocols::toplevel_info::v1::client::zcosmic_toplevel_handle_v1::State;
 
     #[test]
-    fn activated_is_found_in_the_state_array() {
+    fn states_are_found_in_the_state_array() {
         let bytes = |v: &[u32]| v.iter().flat_map(|x| x.to_ne_bytes()).collect::<Vec<u8>>();
-        assert!(parse_activated(&bytes(&[0, 2])));
-        assert!(!parse_activated(&bytes(&[0, 1, 3])));
-        assert!(!parse_activated(&[]));
+        assert!(has_state(&bytes(&[0, 2]), State::Activated));
+        assert!(!has_state(&bytes(&[0, 1, 3]), State::Activated));
+        assert!(has_state(&bytes(&[0, 1, 3]), State::Minimized));
+        assert!(!has_state(&[], State::Minimized));
+    }
+
+    #[test]
+    fn dock_click_cases() {
+        let w = |activated, minimized| Toplevel {
+            activated,
+            minimized,
+            ..Toplevel::default()
+        };
+        // Focused: minimise. Not focused: focus. Minimised: restore and focus (also if the
+        // compositor still reports it activated).
+        assert_eq!(click_action(&w(true, false)), Click::Minimize);
+        assert_eq!(click_action(&w(false, false)), Click::Focus);
+        assert_eq!(click_action(&w(false, true)), Click::Focus);
+        assert_eq!(click_action(&w(true, true)), Click::Focus);
     }
 }

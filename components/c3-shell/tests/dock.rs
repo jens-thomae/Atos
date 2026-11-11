@@ -30,6 +30,7 @@ fn dock() -> (Dock, Rc<Cell<i32>>) {
             "Report.txt",
             "org.atos.TextEditor",
             false,
+            false,
             icon("circle.svg"),
         ),
         dock_item(
@@ -37,9 +38,17 @@ fn dock() -> (Dock, Rc<Cell<i32>>) {
             "Notes.txt",
             "org.atos.TextEditor",
             false,
+            false,
             icon("circle.svg"),
         ),
-        dock_item(9, "Downloads", "org.atos.Files", true, icon("square.svg")),
+        dock_item(
+            9,
+            "Downloads",
+            "org.atos.Files",
+            true,
+            false,
+            icon("square.svg"),
+        ),
     ])));
     let clicked = Rc::new(Cell::new(0));
     let c = clicked.clone();
@@ -162,7 +171,22 @@ fn click_activates_the_window() {
 #[test]
 fn window_without_icon_or_title_falls_back() {
     init();
-    let item = dock_item(1, "", "org.example.app", false, Image::default());
+    let item = dock_item(1, "", "org.example.app", false, false, Image::default());
     assert_eq!(item.title, "org.example.app");
     assert_eq!(item.initial, "O");
+}
+
+#[test]
+fn minimised_window_says_so() {
+    init();
+    let ui = Dock::new().unwrap();
+    ui.set_items(ModelRc::new(VecModel::from(vec![dock_item(
+        1,
+        "Notes.txt",
+        "org.atos.TextEditor",
+        false,
+        true,
+        Image::default(),
+    )])));
+    find_by_label(&ui, "Notes.txt, minimised").expect("minimised label");
 }

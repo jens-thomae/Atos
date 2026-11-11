@@ -13,6 +13,7 @@ export struct DockItem {
     icon: image,
     initial: string,
     focused: bool,
+    minimized: bool,
 }
 
 component Slot inherits Rectangle {
@@ -22,7 +23,7 @@ component Slot inherits Rectangle {
     width: Size.dock-slot-w;
     height: Size.dock-slot-h;
     accessible-role: button;
-    accessible-label: root.item.focused ? root.item.title + ", focused" : root.item.title + ", running";
+    accessible-label: root.item.minimized ? root.item.title + ", minimised" : root.item.focused ? root.item.title + ", focused" : root.item.title + ", running";
     accessible-action-default => { root.activate(); }
     forward-focus: focus;
 

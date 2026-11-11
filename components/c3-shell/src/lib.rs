@@ -34,6 +34,7 @@ pub fn dock_item(
     title: &str,
     app_id: &str,
     focused: bool,
+    minimized: bool,
     icon: slint::Image,
 ) -> DockItem {
     let title = if title.is_empty() { app_id } else { title };
@@ -43,5 +44,6 @@ pub fn dock_item(
         icon,
         initial: initial(title),
         focused,
+        minimized,
     }
 }
