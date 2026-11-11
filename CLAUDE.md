@@ -23,7 +23,7 @@ If you have no task card, stop and ask the owner. Do not choose work yourself.
 - **Never invent requirements.** If the spec or card is silent or ambiguous, write the question on the card, move it to Blocked and stop.
 - **Do not edit `docs/spec.md` or this file.** Propose changes in a card comment; only the owner changes them.
 - **Stay in your component.** Do not modify code owned by another component (C1–C12) unless the card says so.
-- **Budgets are release blockers.** A change that breaks a quality budget in §7 is not done, even if it works.
+- **Budgets gate phases and releases, not pull requests.** The §7 budgets are measured nightly on `main`; a clear regression becomes a card. A pull request is not blocked by a budget unless its card asks for a budget check.
 - **Never mark your own work approved.** A separate reviewer agent and the owner accept work.
 
 ## Session protocol
@@ -32,7 +32,7 @@ If you have no task card, stop and ask the owner. Do not choose work yourself.
 2. Move the card to **In progress** and comment a plan of at most 3 lines.
 3. Create a branch named after the card: `T-<issue number>-<short-slug>`, for example `T-142-files-split-view`.
 4. Implement in small commits. Commit messages: `T-142: <imperative summary>`.
-5. Run tests, lints and the budget checks for the component (see Commands).
+5. Run tests and lints for the component (see Commands). Run the budget check only if the card asks for it.
 6. Open a pull request with `gh pr create` using the template. Link the card (`Closes #142`). Move the card to **Review**.
 7. Post the handoff note on the card (template below) and end the session.
 
@@ -54,7 +54,7 @@ If you run out of context or time before finishing, skip to step 7. A clear hand
 
 - Acceptance criteria on the card are met.
 - Tests exist and pass in CI.
-- Quality budgets (§7) still pass.
+- Budget checks are run only if the card asks for them. Otherwise the nightly run on `main` covers §7.
 - UI changes follow the design system and have screenshot tests.
 - Affected docs are updated (component docs only; propose spec changes, don't make them).
 - A reviewer agent approved the PR, and the owner accepted it.
@@ -63,7 +63,7 @@ If you run out of context or time before finishing, skip to step 7. A clear hand
 ## Roles
 
 - **Builder:** implements one card on its own branch. The default role unless the owner says otherwise.
-- **Reviewer:** checks a PR against its card, the spec and the budgets. Comments with _Approve_ or _Request changes_ and specific reasons. Never fixes the code itself and never reviews its own work.
+- **Reviewer:** checks a PR against its card and the spec, and runs a budget check only if the card asks for one. Comments with _Approve_ or _Request changes_ and specific reasons. Never fixes the code itself and never reviews its own work.
 - **Planner:** turns a roadmap phase (§8) into cards using the task template. Writes no production code.
 - **Docs:** keeps component docs and the glossary in sync with merged work.
 
@@ -107,7 +107,7 @@ The root workspace holds only `tools/budgets`, `tools/tokens` and `components/c1
 | C1 `components/c1-base` | From the root: `podman build --build-context repo=. -t c1-base components/c1-base`, then `components/c1-base/check-seal.sh c1-base` and `components/c1-base/nvidia/check.sh c1-base`. `shell-boot-test.sh` needs KVM, so it runs only in CI | `c1-base.yml` |
 | C11 `components/c11-installer` | `atos-install` is in the root workspace; `build-iso.sh` and `vm-test.sh` (install and boot under KVM) run only in CI | `c11-installer.yml` |
 
-Budgets: `cargo build --release -p budgets && target/release/budgets target/release/budget-test-app --cpu-window 10`. It needs Linux (the harness reads `/proc`); for the §7 numbers use `--cpu-window full` and the NUC (`perf.yml`). On a Mac use the dev VM: `tools/dev-vm/vm run <command>` (`docs/dev-environment.md`).
+Budgets (only when the card asks for them): `cargo build --release -p budgets && target/release/budgets target/release/budget-test-app --cpu-window 10`. It needs Linux (the harness reads `/proc`); for the §7 numbers use `--cpu-window full` and the NUC (`perf.yml`). On a Mac use the dev VM: `tools/dev-vm/vm run <command>` (`docs/dev-environment.md`).
 
 ## Lanes
 
