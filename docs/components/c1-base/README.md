@@ -71,7 +71,20 @@ Choices, flagged for the owner on #248:
 
 **CI check.** [`check-identity.sh`](../../../components/c1-base/check-identity.sh) fails if `fedora-release*`, `fedora-logos` or `fedora-release-notes` is installed, if a Fedora icon is in the image, if `os-release`, `system-release` or `issue` names Fedora or Red Hat (except `ID_LIKE=fedora`), or if the UKI's `.osrel` differs from the image's os-release. `c1-base.yml` runs it on every build and nightly; `c11-installer.yml` runs it on the installer image and checks the ISO's GRUB menu entries and volume descriptor.
 
-**Update from an image before #248.** RESULTS_PLACEHOLDER
+**Update from an image before #248.** bootc names a deployment's boot entry `bootc_<ID>-<VERSION_ID>-<n>.conf` with the title `<PRETTY_NAME> <VERSION_ID>`, both from the new image's os-release, and rewrites the booted entry under the new `ID` when it stages an update (`bootc rollback` uses the fixed id `bootc`). The previous entry keeps its old title. The version floor (#75) reads the image's version label, not os-release, so it is unaffected. Tested in the dev VM (`atos-c1`, aarch64, 2026-11-11) with dev-1 built from `main` at 3aded45 (Fedora identity) and dev-2 and dev-bad from this change; the update loop is `sealed.sh update install stage apply previous rollback back` with those images (built by hand, below), logs in `tools/dev-vm/out/sealed/`:
+
+| Step | Result |
+| --- | --- |
+| `stage` (dev-1 runs `bootc upgrade`) | *Welcome to Fedora Linux 45 (Forty Five)!*, `os="Fedora Linux 45 (Forty Five)" host=fedora`; dev-2 staged in 463 s, 972.7 MB received (the identity layer is early in `base`, so every later `base` layer is new, as for a package bump) |
+| `apply` | *Welcome to Atos 45!*, booted the counted entry `bootc_atos-45-1+2-1.conf`, `os="Atos 45" host=atos`; the health check passed (*login prompt up: boot is good*) and `systemd-bless-boot` removed the counter |
+| `previous` | the menu lists *Atos 45 45* and *Fedora Linux 45 (Forty Five) 45*; the second boots dev-1 (Fedora) |
+| `rollback` | dev-2 boots without a counter; `bootc rollback`: *Next boot: rollback deployment* |
+| `back` | dev-1 (Fedora) is the default again, `rollback:` dev-2 |
+| automatic rollback (`sealed.sh counting install bad`): dev-1 stages dev-bad, an Atos image whose login prompt exits at once | COUNTING_PLACEHOLDER |
+
+The host name follows `DEFAULT_HOSTNAME` (`fedora`, then `atos`) because the installer writes no `/etc/hostname`; a host name the user set stays.
+
+dev-1 is not the published amd64 image but the same source built for aarch64 (the dev VM cannot boot amd64), as for #55. dev-2 and dev-bad are the images `sealed.sh` builds (`IMAGE_VERSION=dev-2`; dev-bad also links `agreety` to `false`), from this branch; dev-1 is built from a `git archive` of `main` and tagged `localhost/c1-base:dev-1` first, so `sealed.sh update` without its `images` step uses it.
 
 ## Session: greetd login into atos-comp
 
