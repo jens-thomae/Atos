@@ -14,4 +14,9 @@ run none failure | grep -q '^gh issue create --title Nightly image build failed 
 [ "$(run open success)" = 'gh issue close 9 --comment Green again: https://run/1' ] || { echo "FAIL close"; exit 1; }
 [ -z "$(run none success)" ] || { echo "FAIL success without issue"; exit 1; }
 run open cancelled 2> /dev/null && { echo "FAIL: cancelled accepted"; exit 1; }
+# Perf regressions (perf.yml): own title, text from BODY_FILE; the image build issue (9) is not theirs.
+perf() { TITLE="Nightly perf regression" BODY_FILE=/b run "$@"; }
+[ "$(perf open failure)" = "gh issue create --title Nightly perf regression --body-file /b" ] || { echo "FAIL perf open"; exit 1; }
+printf '[{"number":4,"title":"Nightly perf regression","author":%s}]' "$bot" > "$t/perf"
+[ "$(perf perf failure)" = "gh issue comment 4 --body-file /b" ] || { echo "FAIL perf comment"; exit 1; }
 echo ok
