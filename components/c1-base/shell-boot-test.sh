@@ -114,7 +114,7 @@ journalctl -b _COMM=atos-comp -o short-monotonic --no-pager | sed "s/^/DIAG comp
 # Wi-Fi and Bluetooth (#231), after the idle numbers: the VM has no radio, so only the software side. NetworkManager
 # loaded its Wi-Fi plugin, bluetoothd runs without an adapter (bluetooth.service needs /sys/class/bluetooth, which the
 # module creates; with no adapter nothing loads it) and bluetoothctl talks to it, and none of
-# NetworkManager, iwd and bluetoothd listens on a socket.
+# NetworkManager, iwd and bluetoothd listens on a socket; their state directories (known networks, pairings) are 0700.
 echo "ATOS-IWD $(systemctl is-active iwd.service)"
 journalctl -b -u NetworkManager -o cat --no-pager | grep -q "Loaded device plugin: NMWifiFactory" \
   && echo ATOS-NM-WIFI-PLUGIN || echo ATOS-CHECK-FAIL NetworkManager did not load its Wi-Fi plugin
@@ -122,6 +122,8 @@ modprobe bluetooth && systemctl start bluetooth.service && timeout 10 bluetoothc
   && echo ATOS-BLUETOOTHCTL-OK || echo ATOS-CHECK-FAIL bluetoothctl cannot talk to bluetoothd
 l=$(ss -Hltunp | grep -E "\"(NetworkManager|iwd|bluetoothd)\"" || true)
 [ -z "$l" ] && echo ATOS-WIRELESS-NO-LISTENERS || echo "ATOS-CHECK-FAIL listening: $l"
+m=$(stat -c "%a" /var/lib/iwd /var/lib/ead /var/lib/bluetooth | tr "\n" " ")
+[ "$m" = "700 700 700 " ] && echo ATOS-WIRELESS-STATE-0700 || echo "ATOS-CHECK-FAIL state dir modes (iwd ead bluetooth): $m"
 sleep 6
 systemctl poweroff --no-block'
 # shellcheck disable=SC2016 # systemd expands it
@@ -205,7 +207,7 @@ tr -d '\r' <"$OUT/boot.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS
 for s in login dock launcher nudged; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
 fail() { echo "::error::$*"; exit 1; }
 for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING \
-         ATOS-NM-WIFI-PLUGIN ATOS-BLUETOOTHCTL-OK ATOS-WIRELESS-NO-LISTENERS; do
+         ATOS-NM-WIFI-PLUGIN ATOS-BLUETOOTHCTL-OK ATOS-WIRELESS-NO-LISTENERS ATOS-WIRELESS-STATE-0700; do
   grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the serial log"
 done
 grep -aqE 'ATOS-CHECK-FAIL' "$OUT/boot.log" && fail "guest check failed"

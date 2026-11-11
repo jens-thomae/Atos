@@ -3,7 +3,7 @@
 # 1. NetworkManager's Wi-Fi plugin, iwd, bluez and wireless-regdb are installed, wpa_supplicant is not;
 # 2. NetworkManager uses iwd and has no connectivity check (D-005); iwd leaves addresses and DNS to NetworkManager;
 # 3. bluez pairs only through an agent and never re-pairs silently;
-# 4. NetworkManager, iwd and bluetooth are enabled, ead (iwd's Ethernet 802.1X daemon) is not;
+# 4. NetworkManager, iwd and bluetooth are enabled, ead (iwd's Ethernet 802.1X daemon) is not; their state dirs are 0700;
 # 5. the regulatory database and Intel, Realtek, MediaTek, Qualcomm and Broadcom Wi-Fi/Bluetooth firmware are present.
 # What runs (plugin loaded, no listening sockets) is checked by shell-boot-test.sh in the booted image.
 # Rootless podman is enough. Usage: check-wireless.sh <image>
@@ -31,6 +31,12 @@ echo "ok: bluez defaults: no pairing without an agent, no silent re-pairing, dis
 for s in NetworkManager iwd bluetooth; do [ "$(systemctl is-enabled "$s.service")" = enabled ] || fail "$s.service not enabled"; done
 [ "$(systemctl is-enabled ead.service || true)" = disabled ] || fail "ead.service not disabled"
 echo "ok: NetworkManager, iwd and bluetooth enabled; ead disabled"
+
+# Known networks and pairings are secrets: tmpfiles.d creates (and at every boot re-applies) these modes.
+for d in iwd ead bluetooth; do
+  grep -qxE "d /var/lib/$d 0700 root root - -" /usr/lib/tmpfiles.d/atos-wireless.conf || fail "/var/lib/$d not 0700 in tmpfiles.d"
+done
+echo "ok: /var/lib/iwd, /var/lib/ead and /var/lib/bluetooth are 0700"
 
 fw=/usr/lib/firmware
 for f in regulatory.db regulatory.db.p7s "iwlwifi-*" "intel/ibt-*" "rtw89/rtw8852b_fw*" "rtl_bt/rtl8852bu_fw*" \
