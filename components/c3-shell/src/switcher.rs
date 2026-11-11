@@ -37,7 +37,7 @@ struct State {
     previews: HashMap<u32, slint::Image>,
     /// When the open request arrived; taken by the panel's first frame.
     opened_at: Option<Instant>,
-    /// When the panel was shown; taken by the first preview.
+    /// When the panel's first frame was on screen; taken by the first preview.
     shown_at: Option<Instant>,
 }
 
@@ -69,7 +69,12 @@ pub fn init() {
         let opened = STATE.with(|s| {
             let mut s = s.borrow_mut();
             let mine = s.ui.as_ref().is_some_and(|u| std::ptr::eq(u.window(), w));
-            if mine { s.opened_at.take() } else { None }
+            if !mine {
+                return None;
+            }
+            let t = s.opened_at.take()?;
+            s.shown_at = Some(Instant::now());
+            Some(t)
         });
         if let Some(t) = opened {
             let now = std::time::SystemTime::now()
@@ -78,6 +83,8 @@ pub fn init() {
             println!("SWITCHER_OPEN_MS {:.1}", t.elapsed().as_secs_f64() * 1000.);
             println!("SWITCHER_SHOWN_NS {}", now.as_nanos());
             std::io::stdout().flush().ok();
+            // The panel is on screen: now the tiles fill in as frames arrive.
+            previews();
         }
     });
     platform::on_modifiers(|held| {
@@ -170,11 +177,8 @@ fn open(forward: bool) {
         s.keyboard = false;
         s.opening += 1;
         s.opened_at = Some(started);
-        s.shown_at = Some(Instant::now());
         s.opening
     });
-    // After the panel is shown: frames fill the tiles in as they arrive.
-    previews();
     // Without the keyboard (another client holds it) nothing would ever see Alt released.
     slint::Timer::single_shot(std::time::Duration::from_secs(1), move || {
         let stuck = STATE.with(|s| {
@@ -205,11 +209,13 @@ fn close() {
     });
 }
 
-/// Captures every window of the open switcher (new ones too) at the tiles' preview size.
+/// Captures every window of the open switcher (new ones too) at the tiles' preview size. Only
+/// once the panel's first frame is on screen: captures and scaling run on this thread, so
+/// starting them earlier delayed that frame (by about 25 ms with ten windows on the owner's PC).
 fn previews() {
     let Some((ids, size)) = STATE.with(|s| {
         let s = s.borrow();
-        let ui = s.ui.as_ref().filter(|_| s.shown)?;
+        let ui = s.ui.as_ref().filter(|_| s.shown && s.opened_at.is_none())?;
         let scale = ui.window().scale_factor();
         let size = (
             (ui.get_preview_width() * scale).ceil() as u32,
