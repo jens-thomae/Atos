@@ -178,6 +178,9 @@ export component Switcher inherits Window {
     // W: close the selected window.
     callback close-window();
 
+    // What a screen reader hears when focus is on the switcher: it changes with the selection.
+    property <string> selection-label: root.selected >= 0 && root.selected < root.items.length ? "\{root.items[root.selected].title}, \{root.items[root.selected].app-name}" : "";
+
     property <length> tile-w: Space.s7 * 3.5 + 2 * Space.s2;
     // Padding, preview, gap, the title line and the app line.
     property <length> tile-h: Space.s7 * 2.5 + 3 * Space.s2 + Type.label.line-height + Type.caption.line-height + Space.s1;
@@ -203,6 +206,8 @@ export component Switcher inherits Window {
     }
 
     keys := FocusScope {
+        accessible-role: list;
+        accessible-label: "Window switcher, selected: \{root.selection-label}";
         capture-key-pressed(e) => {
             if e.text == Key.Escape {
                 root.cancel();
@@ -274,6 +279,8 @@ export component Switcher inherits Window {
             }
 
             hints := HorizontalLayout {
+                accessible-role: text;
+                accessible-label: "Alt Tab next, Shift back, backtick same app, W close window, Escape cancel";
                 y: parent.height - self.preferred-height - Space.s3;
                 alignment: center;
                 spacing: Space.s4;

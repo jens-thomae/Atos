@@ -128,7 +128,7 @@ fn open() {
 }
 
 /// Hides the launcher; while hidden, clears the search for the next opening.
-fn close() {
+pub fn close() {
     let was_shown = STATE.with(|s| std::mem::take(&mut s.borrow_mut().shown));
     let Some(ui) = ui().filter(|_| was_shown) else {
         return;

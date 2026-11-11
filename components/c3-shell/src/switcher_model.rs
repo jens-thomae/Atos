@@ -67,6 +67,10 @@ pub struct Switcher {
     pub groups: Vec<Group>,
     pub tile: usize,
     pub win: usize,
+    /// Windows asked to close during this opening: hidden until the compositor's list drops them,
+    /// but never removed from the shell's own list, so an app that refuses to close comes back
+    /// at the next opening.
+    hidden: Vec<u32>,
 }
 
 impl Switcher {
@@ -77,6 +81,7 @@ impl Switcher {
             tile: usize::from(groups.len() > 1),
             groups,
             win: 0,
+            hidden: Vec::new(),
         }
     }
 
@@ -99,6 +104,11 @@ impl Switcher {
         }
     }
 
+    /// Hides `id` from the tiles for this opening.
+    pub fn hide(&mut self, id: u32) {
+        self.hidden.push(id);
+    }
+
     pub fn selected(&self) -> Option<&Win> {
         self.groups.get(self.tile)?.windows.get(self.win)
     }
@@ -108,7 +118,12 @@ impl Switcher {
     pub fn update(&mut self, ordered: &[Win]) {
         let id = self.selected().map(|w| w.id);
         let was = self.tile;
-        self.groups = group(ordered);
+        let shown: Vec<Win> = ordered
+            .iter()
+            .filter(|w| !self.hidden.contains(&w.id))
+            .cloned()
+            .collect();
+        self.groups = group(&shown);
         let found = id.and_then(|id| {
             self.groups
                 .iter()
@@ -183,6 +198,19 @@ mod tests {
         assert_eq!(s.selected().unwrap().id, 4);
         s.same_app();
         assert_eq!(s.selected().unwrap().id, 2);
+    }
+
+    #[test]
+    fn a_window_asked_to_close_is_hidden_only_for_this_opening() {
+        let wins = [w(1, "a"), w(2, "b"), w(3, "c")];
+        let mut s = Switcher::open(&wins);
+        s.hide(2);
+        s.update(&wins); // the app refused: the list is unchanged
+        let tiles: Vec<u32> = s.groups.iter().flat_map(|g| ids(&g.windows)).collect();
+        assert_eq!(tiles, [1, 3]);
+        assert_eq!(s.selected().unwrap().id, 3);
+        // The next opening starts from the full list again.
+        assert_eq!(Switcher::open(&wins).groups.len(), 3);
     }
 
     #[test]

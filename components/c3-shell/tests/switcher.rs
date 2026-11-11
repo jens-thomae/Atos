@@ -82,6 +82,23 @@ fn names_every_tile_with_its_windows() {
         ]
     );
     assert!(find_by_label(&ui, "Open windows").is_some());
+    // The key hints are exposed, and the focused element's label follows the selection.
+    assert!(
+        find_by_label(
+            &ui,
+            "Alt Tab next, Shift back, backtick same app, W close window, Escape cancel"
+        )
+        .is_some()
+    );
+    assert!(
+        find_by_label(
+            &ui,
+            "Window switcher, selected: release-notes.md, Text Editor"
+        )
+        .is_some()
+    );
+    ui.set_selected(3);
+    assert!(find_by_label(&ui, "Window switcher, selected: ~/src/shell, Terminal").is_some());
 }
 
 #[test]

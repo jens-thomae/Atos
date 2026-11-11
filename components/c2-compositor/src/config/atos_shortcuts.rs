@@ -83,8 +83,10 @@ pub fn apply(
         .entry(System::Launcher)
         .or_insert_with(|| LAUNCHER_COMMAND.to_string());
     for (system, command) in SWITCHER_COMMANDS {
-        // Replaces the COSMIC default, which starts a program the image does not have.
-        system_actions.insert(system, command.to_string());
+        // A command the user set themselves stays.
+        system_actions
+            .entry(system)
+            .or_insert_with(|| command.to_string());
     }
 }
 

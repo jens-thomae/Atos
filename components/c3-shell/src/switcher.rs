@@ -27,6 +27,10 @@ struct State {
     icons: HashMap<String, slint::Image>,
     /// App names by desktop file ID, read when the switcher first opens.
     names: Option<HashMap<String, String>>,
+    /// The panel has seen a keyboard event of its own since opening.
+    keyboard: bool,
+    /// Counts openings, so an old timer does not cancel a newer panel.
+    opening: u32,
 }
 
 thread_local! {
@@ -53,6 +57,7 @@ pub fn init() {
     });
     STATE.with(|s| s.borrow_mut().ui = Some(ui));
     platform::on_modifiers(|held| {
+        STATE.with(|s| s.borrow_mut().keyboard = true);
         if !held && STATE.with(|s| s.borrow().shown) {
             drop(slint::invoke_from_event_loop(commit));
         }
@@ -98,6 +103,8 @@ fn open(forward: bool) {
     let Some(ui) = STATE.with(|s| s.borrow().ui.as_ref().map(|u| u.clone_strong())) else {
         return;
     };
+    // Both want the exclusive keyboard.
+    crate::launcher::close();
     let ready = STATE.with(|s| {
         let s = &mut *s.borrow_mut();
         if s.wins.is_empty() {
@@ -124,7 +131,23 @@ fn open(forward: bool) {
     if let Err(e) = platform::with_placement(placement, || ui.show()) {
         return eprintln!("switcher: {e}");
     }
-    STATE.with(|s| s.borrow_mut().shown = true);
+    let opening = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.shown = true;
+        s.keyboard = false;
+        s.opening += 1;
+        s.opening
+    });
+    // Without the keyboard (another client holds it) nothing would ever see Alt released.
+    slint::Timer::single_shot(std::time::Duration::from_secs(1), move || {
+        let stuck = STATE.with(|s| {
+            let s = s.borrow();
+            s.shown && s.opening == opening && !s.keyboard
+        });
+        if stuck {
+            close();
+        }
+    });
 }
 
 fn close() {
@@ -148,9 +171,9 @@ fn close_window() {
     let id = STATE.with(|s| s.borrow().sel.selected().map(|w| w.id));
     if let Some(id) = id {
         toplevels::close(id);
-        // Gone from the tiles at once; the compositor's list follows when the app has closed it.
-        STATE.with(|s| s.borrow_mut().wins.retain(|w| w.id != id));
-        edit(|_| {});
+        // Gone from the tiles at once, for this opening only: the compositor's list follows
+        // when the app has closed it, and an app that refuses stays in the shell's list.
+        edit(|s| s.hide(id));
     }
 }
 
