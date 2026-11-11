@@ -5,8 +5,13 @@
 #   images   builds c1-base dev-1 (as in the repo) and dev-2 (plus IMAGE_VERSION=dev-2, VM-only),
 #            pushes both to a registry in this VM; :latest points at dev-1
 #   iso      builds the installer image and the ISO with dev-1 as offline payload
-#   install  boots the ISO under QEMU (AAVMF Secure Boot firmware in setup mode, swtpm TPM 2.0)
-#            and installs to an empty 20 GB disk, unattended; prints the time it took
+#   install  boots the unmodified ISO under QEMU (Secure Boot firmware in setup mode, swtpm TPM 2.0)
+#            and installs to an empty 20 GB disk through the interactive installer on tty1, as a
+#            person does (#220): a test unit copies the screen to the serial log, and the host types
+#            each answer on the VM's keyboard when its question shows. Prints the time it took. The
+#            payload must be the installer's default reference (CI's is); see `unattended`
+#   unattended  not in CI: the same install with `atos-install --yes --target-imgref` in a test
+#            unit and the installer unit off; the dev VM's payload is a local registry reference
 #   enrol    not in `all`: enrols the TEST keys into the firmware variables (x86_64 CI, where
 #            OVMF refuses systemd-boot's own enrolment); needs virt-fw-vars
 #   boot     first boot of the installed disk: systemd-boot enrols the TEST keys and resets, the
@@ -90,6 +95,45 @@ StandardError=tty
 TTYPath=/dev/$SERIAL
 ExecStart=/bin/sh -c '{ echo \"$TEST_PASSWORD\"; echo \"$TEST_PASSWORD\"; } | atos-install --disk /dev/vda --yes --target-imgref $TARGET_IMGREF && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
 
+# The interactive install (#220): the ISO runs unchanged. This test-only unit copies what tty1 shows
+# (/dev/vcs1, the console's text) to the serial log whenever it changes, prefixed ATOS-SCREEN, and
+# the installer unit's and logind's journal with it; the host reads the questions from there.
+# shellcheck disable=SC2016 # expands in the guest
+SCREEN_SCRIPT='exec > /dev/'"$SERIAL"' 2>&1
+journalctl -fb -o short-monotonic -u atos-installer.service -u systemd-logind.service | sed "s/^/ATOS-JOURNAL /" &
+cols=$(od -An -tu1 -j1 -N1 /dev/vcsa1 | tr -d " ")
+old=
+while :; do
+  s=$(fold -w "$cols" /dev/vcs1 | sed "s/ *$//" | grep -v "^$")
+  [ "$s" = "$old" ] || { echo ATOS-SCREEN-BEGIN; printf "%s\n" "$s" | sed "s/^/ATOS-SCREEN /"; old=$s; }
+  sleep 1
+done'
+# shellcheck disable=SC2016 # expands in systemd
+SCREEN_UNIT='[Unit]
+Description=Atos installer test: tty1 to the serial log (test only)
+[Service]
+Type=exec
+ImportCredential=atos.*
+ExecStart=/bin/sh -c "exec sh $$CREDENTIALS_DIRECTORY/atos.screen"'
+# The questions atos-install asks on tty1, in order, and what a person answers (#220).
+QUESTIONS=('Install Atos on disk number:' 'Type "erase" to continue:' 'Password for the administrator account'
+  'Type the password again:' 'written the recovery key down' 'Press Enter to restart')
+asked=0
+# answer_installer <log>: types the answer to the next question once the screen shows it.
+answer_installer() {
+  local a
+  [ "$asked" -lt ${#QUESTIONS[@]} ] && grep -aqF "${QUESTIONS[asked]}" "$1" || return 0
+  case $asked in
+    0) a=$(tr -d '\r' < "$1" | grep -aoE '[0-9]+\) /dev/vda ' | tail -n 1); a=${a%%)*} ;; # the empty disk's number
+    1) a=erase ;;
+    2 | 3) a=$TEST_PASSWORD ;;
+    *) a= ;; # Enter
+  esac
+  type_keys "$a"
+  asked=$((asked + 1))
+  echo "answered question $asked of ${#QUESTIONS[@]} on tty1"
+}
+
 swtpm_up() {
   mkdir -p "$TPM"
   swtpm socket --tpm2 --tpmstate dir="$TPM" --ctrl type=unixio,path="$WORK/swtpm.sock" \
@@ -142,12 +186,13 @@ qemu_run() {
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
   local pid=$! typed=
-  local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|[Pp]assphrase for|recovery key for'
+  local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|Press Enter to try again|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
     m=$(tr -d '\r' < "$log" 2>/dev/null | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
     [ -z "$m" ] || { echo "HALT on: $m"; kill "$pid"; break; }
     if [ -z "$typed" ] && grep -aq ATOS-LOGIN-READY "$log"; then login_tty1 && typed=1; fi
-    sleep 5
+    [ -z "${INTERACTIVE:-}" ] || answer_installer "$log"
+    sleep "${POLL:-5}"
   done
   wait "$pid" || true
   tr -d '\r' < "$log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -av 'EFI Internal Shell' \
@@ -224,11 +269,41 @@ step_iso() {
   PAYLOAD="$GUEST_REG:latest" OUTDIR="$WORK" BASE="${BASE:-}" "$HERE/build-iso.sh"
 }
 
-step_install() {
+# An empty disk, a new TPM and fresh firmware variables: setup mode, as on a machine prepared for key
+# enrolment.
+fresh_machine() {
   rm -f "$DISK" "$VARS" && truncate -s 20G "$DISK"
   rm -rf "$TPM"
-  # Fresh firmware variables: setup mode, as on a machine prepared for key enrolment.
   cp "$VARS0" "$VARS"
+}
+# shellcheck disable=SC2054 # commas are QEMU option syntax
+CDROM=(-device virtio-scsi-pci,id=scsi0 -drive if=none,id=cd,format=raw,media=cdrom,readonly=on,file="$ISO"
+  -device scsi-cd,drive=cd,bootindex=0)
+
+step_install() {
+  # atos-install has no question for the image: it installs its built-in default (#220).
+  local default=ghcr.io/jens-thomae/atos/c1-base:latest creds t0
+  [ "$TARGET_IMGREF" = "$default" ] || { echo "install: the payload must be $default; use unattended" >&2; exit 1; }
+  fresh_machine
+  mapfile -d '' creds < <(
+    cred systemd.extra-unit.atos-screen.service "$SCREEN_UNIT"
+    cred systemd.unit-dropin.multi-user.target~atos-screen $'[Unit]\nWants=atos-screen.service'
+    cred atos.screen "$SCREEN_SCRIPT"
+    # The serial getty hangs up the serial tty the screen unit writes to.
+    cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent')
+  t0=$(date +%s)
+  # -no-reboot: the restart the user confirms ends QEMU, and so does any restart before it.
+  INTERACTIVE=1 POLL=1 qemu_run "$OUT/install.log" -no-reboot -nic none "${CDROM[@]}" "${creds[@]}"
+  local t=$(($(date +%s) - t0))
+  [ "$asked" -eq ${#QUESTIONS[@]} ] || { echo "install: QEMU ended after $asked of ${#QUESTIONS[@]} answers" >&2; exit 1; }
+  grep -aq 'ATOS-SCREEN Atos is installed on /dev/vda' "$OUT/install.log"
+  grep -aq 'reboot: Restarting system' "$OUT/install.log"
+  ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" || { echo "the password is in the install log" >&2; exit 1; }
+  echo "ATOS-INSTALL-TIME qemu_start_to_poweroff=${t}s"
+}
+
+step_unattended() {
+  fresh_machine
   local creds t0
   mapfile -d '' creds < <(
     cred systemd.extra-unit.atos-install-test.service "$INSTALL_UNIT"
@@ -239,9 +314,7 @@ step_install() {
     cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent')
   t0=$(date +%s)
   # shellcheck disable=SC2054
-  qemu_run "$OUT/install.log" -nic none \
-    -device virtio-scsi-pci,id=scsi0 -drive if=none,id=cd,format=raw,media=cdrom,readonly=on,file="$ISO" \
-    -device scsi-cd,drive=cd,bootindex=0 "${creds[@]}"
+  qemu_run "$OUT/install.log" -nic none "${CDROM[@]}" "${creds[@]}"
   grep -aq ATOS-INSTALL-OK "$OUT/install.log"
   grep -aq 'Password for the administrator account' "$OUT/install.log"
   ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" || { echo "the password is in the install log" >&2; exit 1; }
@@ -282,7 +355,8 @@ step_nosb() {
 }
 
 case "${1:-}" in
-  images|iso|install|enrol|boot|reboot|stage|apply|nosb) "step_$1" ;;
-  all) for s in images iso install boot reboot stage apply nosb; do "step_$s"; done ;;
-  *) sed -n '2,21p' "$0" >&2; exit 2 ;;
+  images|iso|install|unattended|enrol|boot|reboot|stage|apply|nosb) "step_$1" ;;
+  # The dev VM's payload is a local registry reference, which the interactive path cannot name.
+  all) for s in images iso unattended boot reboot stage apply nosb; do "step_$s"; done ;;
+  *) sed -n '2,26p' "$0" >&2; exit 2 ;;
 esac
