@@ -213,7 +213,7 @@ fn close() {
 /// once the panel's first frame is on screen: captures and scaling run on this thread, so
 /// starting them earlier delayed that frame (by about 25 ms with ten windows on the owner's PC).
 fn previews() {
-    let Some((ids, size)) = STATE.with(|s| {
+    let Some((ids, size, max)) = STATE.with(|s| {
         let s = s.borrow();
         let ui = s.ui.as_ref().filter(|_| s.shown && s.opened_at.is_none())?;
         let scale = ui.window().scale_factor();
@@ -221,7 +221,13 @@ fn previews() {
             (ui.get_preview_width() * scale).ceil() as u32,
             (ui.get_preview_height() * scale).ceil() as u32,
         );
-        Some((s.wins.iter().map(|w| w.id).collect::<Vec<_>>(), size))
+        // The panel covers its output: its logical size bounds what a capture may be (atos-comp
+        // captures windows in logical pixels). A window larger than that output keeps the
+        // placeholder.
+        // ponytail: the switcher's output only; a window on a larger second output is refused.
+        let out = ui.window().size().to_logical(scale);
+        let max = (out.width.ceil() as u32, out.height.ceil() as u32);
+        Some((s.wins.iter().map(|w| w.id).collect::<Vec<_>>(), size, max))
     }) else {
         return;
     };
@@ -235,7 +241,7 @@ fn previews() {
         .into_iter()
         .filter(|id| !minimized.contains(id))
         .collect();
-    capture::start(&ids, size, preview_arrived);
+    capture::start(&ids, size, max, preview_arrived);
 }
 
 /// A window's frame arrived: show it in its tile if that tile shows this window.

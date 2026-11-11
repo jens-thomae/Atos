@@ -13,7 +13,7 @@
 use std::cell::RefCell;
 use std::time::Duration;
 
-use atos_shell::preview::{Order, downscale};
+use atos_shell::preview::{self, Buffer, downscale};
 use sctk::globals::ProvidesBoundGlobal;
 use sctk::reexports::client::globals::GlobalList;
 use sctk::reexports::client::protocol::{wl_buffer, wl_shm};
@@ -42,11 +42,14 @@ struct Capture {
     id: u32,
     source: source::ExtImageCaptureSourceV1,
     session: session::ExtImageCopyCaptureSessionV1,
-    /// Constraints as the session last sent them; used from its next `done`.
+    /// Constraints as the session last sent them; used from its next `done`. Untrusted: the
+    /// window's client controls its size (`preview::buffer` checks them).
     size: (u32, u32),
     format: Option<wl_shm::Format>,
-    /// The buffer and its constraints, kept across frames.
-    buffer: Option<(RawPool, wl_buffer::WlBuffer, (u32, u32), wl_shm::Format)>,
+    /// The next constraint event starts a new batch (after a `done`): forget the old formats.
+    fresh: bool,
+    /// The buffer and its shape, kept across frames.
+    buffer: Option<(RawPool, wl_buffer::WlBuffer, Buffer)>,
     frame: Option<frame::ExtImageCopyCaptureFrameV1>,
     /// A frame was asked for (timer pending or in flight).
     busy: bool,
@@ -61,9 +64,14 @@ struct Captures {
     list: Vec<Capture>,
     /// Physical tile size the frames are scaled to.
     target: (u32, u32),
+    /// Largest capture accepted, per side: the output's size in the compositor's capture
+    /// coordinates (logical pixels).
+    max: (u32, u32),
     hook: Option<Hook>,
     /// Counts `stop`s, so a timer from an earlier opening does nothing.
     generation: u32,
+    /// Windows whose capture was refused or stopped: not tried again until `stop`.
+    refused: Vec<u32>,
 }
 
 thread_local! {
@@ -81,8 +89,14 @@ pub fn bind(globals: &GlobalList, qh: &QueueHandle<State>) {
 }
 
 /// Starts capturing the windows `ids` that are not captured yet; `hook(id, image)` gets each
-/// frame, scaled to cover `target` (physical pixels). Returns at once: frames arrive later.
-pub fn start(ids: &[u32], target: (u32, u32), hook: impl Fn(u32, slint::Image) + 'static) {
+/// frame, scaled to cover `target` (physical pixels). A window larger than `max` (logical
+/// pixels, the output's size) is not captured. Returns at once: frames arrive later.
+pub fn start(
+    ids: &[u32],
+    target: (u32, u32),
+    max: (u32, u32),
+    hook: impl Fn(u32, slint::Image) + 'static,
+) {
     CAPTURES.with(|c| {
         let c = &mut *c.borrow_mut();
         let (Some(qh), Some(sources), Some(manager), Some(_)) =
@@ -91,9 +105,10 @@ pub fn start(ids: &[u32], target: (u32, u32), hook: impl Fn(u32, slint::Image) +
             return;
         };
         c.target = target;
+        c.max = max;
         c.hook = Some(Box::new(hook));
         for &id in ids {
-            if c.list.iter().any(|x| x.id == id) {
+            if c.list.iter().any(|x| x.id == id) || c.refused.contains(&id) {
                 continue;
             }
             let Some(handle) = toplevels::handle(id) else {
@@ -107,6 +122,7 @@ pub fn start(ids: &[u32], target: (u32, u32), hook: impl Fn(u32, slint::Image) +
                 session,
                 size: (0, 0),
                 format: None,
+                fresh: false,
                 buffer: None,
                 frame: None,
                 busy: false,
@@ -121,6 +137,7 @@ pub fn stop() {
         let c = &mut *c.borrow_mut();
         c.hook = None;
         c.generation += 1;
+        c.refused.clear();
         for x in c.list.drain(..) {
             drop_capture(x);
         }
@@ -143,49 +160,68 @@ fn remove(id: u32) {
         let mut c = c.borrow_mut();
         if let Some(i) = c.list.iter().position(|x| x.id == id) {
             drop_capture(c.list.remove(i));
+            c.refused.push(id);
         }
     });
 }
 
 /// Asks for the next frame of window `id`, with a buffer that fits the session's constraints.
+/// Constraints the shell refuses (`preview::buffer`), or a buffer it cannot allocate, end the
+/// window's session: its tile keeps the placeholder, and nothing reaches the compositor that it
+/// would answer with a protocol error (which would disconnect the shell).
 fn capture(id: u32) {
-    CAPTURES.with(|c| {
+    let refused = CAPTURES.with(|c| {
         let c = &mut *c.borrow_mut();
+        let max = c.max;
         let (Some(qh), Some(shm)) = (c.qh.clone(), c.shm.clone()) else {
-            return;
+            return false;
         };
         let Some(x) = c.list.iter_mut().find(|x| x.id == id) else {
-            return;
+            return false;
         };
-        let (Some(format), (w, h)) = (x.format, x.size) else {
-            return;
-        };
-        if x.frame.is_some() || w == 0 || h == 0 {
-            return;
+        if x.frame.is_some() {
+            return false;
         }
-        if x.buffer
-            .as_ref()
-            .is_none_or(|b| b.2 != (w, h) || b.3 != format)
-        {
-            if let Some((_, old, ..)) = x.buffer.take() {
+        let Some(format) = x.format else {
+            // No usable format offered.
+            return true;
+        };
+        let Some(shape) = preview::buffer(x.size.0, x.size.1, u32::from(format), max) else {
+            return true;
+        };
+        if x.buffer.as_ref().is_none_or(|b| b.2 != shape) {
+            if let Some((_, old, _)) = x.buffer.take() {
                 old.destroy();
             }
-            let Ok(mut pool) = RawPool::new((w * h * 4) as usize, &Shm(shm)) else {
-                return;
+            let Ok(mut pool) = RawPool::new(shape.len, &Shm(shm)) else {
+                return true;
             };
-            let buffer = pool.create_buffer(0, w as i32, h as i32, (w * 4) as i32, format, (), &qh);
-            x.buffer = Some((pool, buffer, (w, h), format));
+            // Each value fits i32: `shape.len` does, and it is the largest.
+            let buffer = pool.create_buffer(
+                0,
+                shape.w as i32,
+                shape.h as i32,
+                shape.stride as i32,
+                format,
+                (),
+                &qh,
+            );
+            x.buffer = Some((pool, buffer, shape));
         }
-        let Some((_, buffer, ..)) = &x.buffer else {
-            return;
+        let Some((_, buffer, _)) = &x.buffer else {
+            return true;
         };
         let f = x.session.create_frame(&qh, id);
         f.attach_buffer(buffer);
-        f.damage_buffer(0, 0, w as i32, h as i32);
+        f.damage_buffer(0, 0, shape.w as i32, shape.h as i32);
         f.capture();
         x.frame = Some(f);
         x.busy = true;
+        false
     });
+    if refused {
+        remove(id);
+    }
 }
 
 /// The frame of window `id` is in its buffer: scale it and hand it on, then ask for the next.
@@ -197,20 +233,15 @@ fn ready(id: u32) {
         if let Some(f) = x.frame.take() {
             f.destroy();
         }
-        let (pool, _, (w, h), format) = x.buffer.as_mut()?;
-        let (order, opaque) = match *format {
-            wl_shm::Format::Abgr8888 => (Order::Rgba, false),
-            wl_shm::Format::Xbgr8888 => (Order::Rgba, true),
-            wl_shm::Format::Argb8888 => (Order::Bgra, false),
-            _ => (Order::Bgra, true),
-        };
+        let (pool, _, b) = x.buffer.as_mut()?;
+        let b = *b;
         let image = downscale(
             pool.mmap(),
-            *w,
-            *h,
-            *w * 4,
-            order,
-            opaque,
+            b.w,
+            b.h,
+            b.stride,
+            b.order,
+            b.opaque,
             target.0,
             target.1,
         );
@@ -239,7 +270,8 @@ fn later(id: u32, generation: u32) {
         let current = CAPTURES.with(|c| {
             let mut c = c.borrow_mut();
             let current = c.generation == generation;
-            if let Some(x) = c.list.iter_mut().find(|x| x.id == id) {
+            // A timer from an earlier opening leaves a newer capture of the window alone.
+            if current && let Some(x) = c.list.iter_mut().find(|x| x.id == id) {
                 x.busy = false;
             }
             current
@@ -276,9 +308,13 @@ impl Dispatch<session::ExtImageCopyCaptureSessionV1, u32> for State {
         _: &QueueHandle<Self>,
     ) {
         let id = *id;
+        // The first constraint event after a `done` starts a new batch: earlier formats go.
         let with = |f: &dyn Fn(&mut Capture)| {
             CAPTURES.with(|c| {
                 if let Some(x) = c.borrow_mut().list.iter_mut().find(|x| x.id == id) {
+                    if std::mem::take(&mut x.fresh) {
+                        x.format = None;
+                    }
                     f(x)
                 }
             })
@@ -289,22 +325,23 @@ impl Dispatch<session::ExtImageCopyCaptureSessionV1, u32> for State {
                 format: WEnum::Value(f),
             } => with(&|x| {
                 // Formats whose bytes `preview::downscale` reads; the 8-bit RGBA ones first.
-                let rank = |f: Option<wl_shm::Format>| match f {
-                    Some(wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888) => 2,
-                    Some(wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888) => 1,
-                    _ => 0,
-                };
+                let rank =
+                    |f: Option<wl_shm::Format>| f.map_or(0, |f| preview::format_rank(f.into()));
                 if rank(Some(f)) > rank(x.format) {
                     x.format = Some(f);
                 }
             }),
+            // Other formats (unknown codes) are ignored, as are dmabuf constraints.
+            session::Event::ShmFormat { .. } => with(&|_| {}),
             // Constraints are complete: the first frame, or a new buffer after a resize.
             session::Event::Done => {
                 let idle = CAPTURES.with(|c| {
-                    c.borrow()
-                        .list
-                        .iter()
-                        .any(|x| x.id == id && x.frame.is_none() && !x.busy)
+                    let mut c = c.borrow_mut();
+                    let x = c.list.iter_mut().find(|x| x.id == id);
+                    x.is_some_and(|x| {
+                        x.fresh = true;
+                        x.frame.is_none() && !x.busy
+                    })
                 });
                 if idle {
                     capture(id);
