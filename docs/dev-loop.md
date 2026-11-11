@@ -8,7 +8,7 @@ The steps are in the **Owner set-up (final)** comment on #201. Agents never run 
 
 - a dedicated ed25519 key on the Mac and a `Host` alias for the PC in `~/.ssh/config` (`push` accepts nothing else as a host);
 - the public key in `/var/home/atos/.ssh/authorized_keys` with `restrict`;
-- `/etc/ssh/sshd_config.d/10-atos-dev.conf`: keys only, no root, only `atos`, and only from the home network (`AllowUsers atos@<LAN>/24`). The image ships sshd enabled, accepting passwords on every address, with no firewall (#242), so this drop-in is what makes it key-only and LAN-only.
+- `/etc/ssh/sshd_config.d/10-atos-dev.conf`: keys only, no root, only `atos`, and only from the home network: `AddressFamily inet` (sshd does not listen on IPv6, where a global address would reach it from the internet; IPv4 is behind the router's NAT) and `AllowUsers atos@<LAN>` (`<LAN>` with its mask, e.g. `192.168.1.0/24`). The image ships sshd enabled, accepting passwords on every address, with no firewall (#242), so this drop-in is what makes it key-only and LAN-only.
 
 **Once per boot, at the PC** (D-015: making `/usr` writable needs the admin password every time):
 
