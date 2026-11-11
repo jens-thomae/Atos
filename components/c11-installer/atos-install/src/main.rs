@@ -226,9 +226,69 @@ fn wipe(s: String) {
     std::hint::black_box(&b);
 }
 
+const TPM_HOWTO: &str = "\
+Most computers have a TPM 2.0, but it is often turned off. Restart the computer, open the\n\
+firmware setup (often F2, F10, Del or Esc right after switching on) and turn on the setting\n\
+called TPM, fTPM (AMD), PTT (Intel) or Security Device. Then start the installer again.";
+
+/// #222: the TPM 2.0 the enrolment (`systemd-cryptenroll --tpm2-device=auto`) will use, checked
+/// before the disk question. `auto` takes the only TPM 2.0 resource manager (`/dev/tpmrm*`) that
+/// `--tpm2-device=list` shows and refuses when there is none or more than one. The kernel's
+/// `tpm_version_major` per TPM (`/sys/class/tpm/tpm*`) tells TPM 1.2 apart from none at all.
+fn tpm_problem(list: &str, versions: &[String]) -> Option<String> {
+    let devices: Vec<&str> = list
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .filter(|d| d.starts_with("/dev/tpmrm"))
+        .collect();
+    let v2 = versions.iter().any(|v| v == "2");
+    match devices.len() {
+        1 if v2 => None,
+        0 if !v2 && versions.iter().any(|v| v == "1") => Some(format!(
+            "this computer's TPM is version 1.2, and Atos needs a TPM 2.0 to encrypt the disk.\n\
+             Nothing has been changed on any disk.\n\
+             Some computers can switch their TPM to 2.0 in the firmware setup.\n{TPM_HOWTO}"
+        )),
+        0 | 1 => Some(format!(
+            "this computer has no TPM 2.0 turned on, and Atos needs one to encrypt the disk.\n\
+             Nothing has been changed on any disk.\n{TPM_HOWTO}"
+        )),
+        _ => Some(format!(
+            "this computer has more than one TPM 2.0 ({}), and the installer can use only one.\n\
+             Nothing has been changed on any disk.\n\
+             Turn all but one off in the firmware setup, then start the installer again.",
+            devices.join(", ")
+        )),
+    }
+}
+
+fn check_tpm() -> Result<(), String> {
+    let out = Command::new("systemd-cryptenroll")
+        .arg("--tpm2-device=list")
+        .output()
+        .map_err(|e| format!("systemd-cryptenroll: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "listing the TPMs failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let versions = fs::read_dir("/sys/class/tpm")
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|e| fs::read_to_string(e.path().join("tpm_version_major")).ok())
+        .map(|v| v.trim().to_string())
+        .collect::<Vec<_>>();
+    tpm_problem(&String::from_utf8_lossy(&out.stdout), &versions).map_or(Ok(()), Err)
+}
+
 fn install(a: &Args) -> Result<(), String> {
     let arch = std::env::consts::ARCH;
     let root_type = root_type(arch).ok_or_else(|| format!("unsupported architecture {arch}"))?;
+    // Before anything is asked or written (#222): without the TPM the enrolment below would fail
+    // only after the disk was erased and a recovery key shown.
+    check_tpm()?;
     let disk = match &a.disk {
         Some(d) => d.clone(),
         None => choose_disk()?,
@@ -628,6 +688,35 @@ mod tests {
                 .clone()
                 .any(|l| l == "ExecStart=/usr/bin/atos-install")
         );
+    }
+
+    /// `systemd-cryptenroll --tpm2-device=list` as systemd prints it (a table; with no device only
+    /// "No suitable TPM2 devices found." on standard error) and `tpm_version_major` per TPM.
+    #[test]
+    fn tpm_check() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let one = "PATH        DEVICE      DRIVER \n/dev/tpmrm0 MSFT0101:00 tpm_tis\n";
+        // TPM 2.0 present (QEMU's tpm-tis with swtpm, as in the KVM test).
+        assert_eq!(tpm_problem(one, &v(&["2"])), None);
+        // None: no TPM, or turned off in the firmware.
+        let none = tpm_problem("", &[]).unwrap();
+        assert!(none.contains("no TPM 2.0") && none.contains("fTPM") && none.contains("PTT"));
+        assert!(none.contains("Nothing has been changed"));
+        // TPM 1.2: the kernel has tpm0, but there is no resource manager for it.
+        let old = tpm_problem("", &v(&["1"])).unwrap();
+        assert!(old.contains("version 1.2") && old.contains("Security Device"));
+        // A tpmrm device the kernel does not call 2.0 is not trusted to work.
+        assert!(tpm_problem(one, &v(&["1"])).unwrap().contains("no TPM 2.0"));
+        assert!(tpm_problem(one, &[]).is_some());
+        // Two: `--tpm2-device=auto` refuses to choose.
+        let two = format!("{one}/dev/tpmrm1 STM0125:00  tpm_tis_spi\n");
+        assert!(
+            tpm_problem(&two, &v(&["2", "2"]))
+                .unwrap()
+                .contains("/dev/tpmrm0, /dev/tpmrm1")
+        );
+        // The header and the "no device" note are never taken for a device.
+        assert!(tpm_problem("No suitable TPM2 devices found.\n", &v(&["2"])).is_some());
     }
 
     #[test]
