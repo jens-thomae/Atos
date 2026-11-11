@@ -95,6 +95,21 @@ pub fn activate(id: u32) {
     });
 }
 
+/// Asks the compositor to close the window (a request to the app, as the window's close button).
+pub fn close(id: u32) {
+    TOPLEVELS.with(|t| {
+        let t = t.borrow();
+        let cosmic = t
+            .entries
+            .iter()
+            .find(|e| e.pending.id == id)
+            .and_then(|e| e.cosmic.as_ref());
+        if let (Some(m), Some(c)) = (&t.manager, cosmic) {
+            m.close(c);
+        }
+    });
+}
+
 fn changed() {
     let list = list();
     ON_CHANGE.with(|h| {

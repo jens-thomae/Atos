@@ -21,6 +21,11 @@ use tracing::warn;
 const DEFAULT_LAUNCHER: [&str; 2] = ["Super", "Super+slash"];
 /// The command `System(Launcher)` runs (#64).
 const LAUNCHER_COMMAND: &str = "atos-shell --launcher";
+/// The commands the window switcher's actions run (#226): the shell draws it.
+const SWITCHER_COMMANDS: [(System, &str); 2] = [
+    (System::WindowSwitcher, "atos-shell --switcher next"),
+    (System::WindowSwitcherPrevious, "atos-shell --switcher prev"),
+];
 
 pub fn path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
@@ -77,6 +82,10 @@ pub fn apply(
     system_actions
         .entry(System::Launcher)
         .or_insert_with(|| LAUNCHER_COMMAND.to_string());
+    for (system, command) in SWITCHER_COMMANDS {
+        // Replaces the COSMIC default, which starts a program the image does not have.
+        system_actions.insert(system, command.to_string());
+    }
 }
 
 /// Reads the file (if any) and applies it.
@@ -142,6 +151,11 @@ mod tests {
         );
         assert_eq!(keys, want(&["Super+space"]));
         assert_eq!(a[&System::Launcher], LAUNCHER_COMMAND);
+        assert_eq!(a[&System::WindowSwitcher], "atos-shell --switcher next");
+        assert_eq!(
+            a[&System::WindowSwitcherPrevious],
+            "atos-shell --switcher prev"
+        );
     }
 
     #[test]

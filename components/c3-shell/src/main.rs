@@ -11,6 +11,7 @@ mod notice_ui;
 mod platform;
 mod portal;
 mod services;
+mod switcher;
 mod toplevels;
 
 use std::cell::RefCell;
@@ -25,6 +26,10 @@ use slint::{ComponentHandle, Model, VecModel};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("--launcher") {
         return launcher::request();
+    }
+    if std::env::args().nth(1).as_deref() == Some("--switcher") {
+        let forward = std::env::args().nth(2).as_deref() != Some("prev");
+        return launcher::request_switcher(forward);
     }
     slint::platform::set_platform(Box::new(platform::WaylandPlatform::new()?))
         .map_err(|e| format!("{e:?}"))?;
@@ -47,7 +52,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     {
         let refresh = refresh.clone();
-        toplevels::on_change(move |list| refresh(list));
+        toplevels::on_change(move |list| {
+            switcher::windows_changed(&list);
+            refresh(list)
+        });
     }
     {
         let refresh = refresh.clone();
@@ -80,6 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(why.unwrap_or_else(|| "no output".into()));
     }
     launcher::init();
+    switcher::init();
     {
         let docks = docks.clone();
         control_centre::init(move |dark| {

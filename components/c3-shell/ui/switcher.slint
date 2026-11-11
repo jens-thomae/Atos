@@ -1,0 +1,288 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// The Alt+Tab window switcher (#226): one tile per app on a panel over a dimmed output, and a row
+// of key hints. After the owner's mockups (docs/design/mockups/window-switcher-*). Values come only
+// from the design tokens; the tile's preview size is a multiple of Space.s7 (there is no switcher
+// size token yet). The mockups' blurred backdrop needs a compositor blur: the scrim dims instead.
+import { Elevation, Fonts, Palette, Radius, Size, Space, Type } from "../../c4-toolkit/ui/tokens.slint";
+import { Panel } from "../../c4-toolkit/ui/widgets.slint";
+
+export struct SwitcherItem {
+    // The selected window's title and the app's name.
+    title: string,
+    app-name: string,
+    // Empty when no icon was found; the tile then shows `initial`.
+    icon: image,
+    // The window's picture; empty until the shell has one (the tile then shows the icon large).
+    preview: image,
+    initial: string,
+    // Windows of the app; more than one shows a stack and "· N windows".
+    windows: int,
+}
+
+component KeyCap inherits Rectangle {
+    in property <string> key;
+    in property <string> verb;
+
+    width: capr.width + Space.s2 + label.preferred-width;
+    height: capr.height;
+
+    capr := Rectangle {
+        x: 0px;
+        width: cap.preferred-width + 2 * Space.s2;
+        height: cap.preferred-height + Space.s1;
+        border-radius: Radius.tiny;
+        background: Palette.group;
+        border-width: Size.hairline;
+        border-color: Palette.key-line;
+        cap := Text {
+            accessible-role: none;
+            text: root.key;
+            color: Palette.text;
+            font-size: Type.caption.size;
+            font-weight: Type.caption.weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    label := Text {
+        accessible-role: none;
+        x: capr.width + Space.s2;
+        height: parent.height;
+        text: root.verb;
+        color: Palette.text-2;
+        font-size: Type.caption.size;
+        vertical-alignment: center;
+    }
+}
+
+component Tile inherits Rectangle {
+    in property <SwitcherItem> item;
+    in property <bool> current;
+    callback clicked();
+
+    property <length> preview-w: Space.s7 * 3.5;
+    property <length> preview-h: Space.s7 * 2.5;
+    property <length> badge: Size.dock-tile;
+
+    width: root.preview-w + 2 * Space.s2;
+    border-radius: Radius.group;
+    background: root.current ? Palette.select : touch.has-hover ? Palette.hover : transparent;
+    border-width: root.current ? Size.focus-ring-width : 0px;
+    border-color: Palette.accent;
+    accessible-role: list-item;
+    accessible-label: root.item.windows > 1 ? "\{root.item.title}, \{root.item.app-name}, \{root.item.windows} windows" : "\{root.item.title}, \{root.item.app-name}";
+    accessible-item-selectable: true;
+    accessible-item-selected: root.current;
+    accessible-action-default => { root.clicked(); }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    VerticalLayout {
+        padding: Space.s2;
+        spacing: Space.s2;
+
+        Rectangle {
+            height: root.preview-h;
+
+            // The stack behind a preview of an app with several windows.
+            if root.item.windows > 1: Rectangle {
+                x: Space.s2;
+                y: -Space.s1;
+                width: parent.width - 2 * Space.s2;
+                height: parent.height;
+                border-radius: Radius.control;
+                background: Palette.tab;
+            }
+
+            Rectangle {
+                border-radius: Radius.control;
+                clip: true;
+                background: Palette.window;
+                border-width: Size.hairline;
+                border-color: Palette.panel-line;
+
+                Image {
+                    accessible-role: none;
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.item.preview;
+                    image-fit: cover;
+                }
+
+                // No picture yet: the app's icon, large, or its initial.
+                if root.item.preview.width == 0: Image {
+                    accessible-role: none;
+                    width: Space.s7 + Space.s4;
+                    height: self.width;
+                    source: root.item.icon;
+                }
+                if root.item.preview.width == 0 && root.item.icon.width == 0: Text {
+                    accessible-role: none;
+                    text: root.item.initial;
+                    color: Palette.text-2;
+                    font-size: Type.display.size;
+                    font-weight: Type.display.weight;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // With a picture, the icon sits on its lower left corner.
+            if root.item.preview.width > 0: Image {
+                accessible-role: none;
+                x: -Space.s1;
+                y: parent.height - self.height + Space.s1;
+                width: root.badge;
+                height: root.badge;
+                source: root.item.icon;
+            }
+        }
+
+        VerticalLayout {
+            padding-left: root.item.preview.width > 0 ? root.badge - Space.s2 : 0px;
+            Text {
+                accessible-role: none;
+                text: root.item.title;
+                color: Palette.text;
+                font-size: Type.label.size;
+                font-weight: Type.headline.weight;
+                overflow: elide;
+            }
+            Text {
+                accessible-role: none;
+                text: root.item.windows > 1 ? "\{root.item.app-name} · \{root.item.windows} windows" : root.item.app-name;
+                color: Palette.text-2;
+                font-size: Type.caption.size;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+export component Switcher inherits Window {
+    in property <[SwitcherItem]> items;
+    // The selected tile.
+    in property <int> selected;
+    in property <string> font-family: Fonts.sans;
+    // Click on a tile.
+    callback pick(int);
+    // Return: take the selection.
+    callback confirm();
+    callback cancel();
+    // Left and right arrows: -1 or 1.
+    callback move(int);
+    // Backtick: the next window of the selected app.
+    callback same-app();
+    // W: close the selected window.
+    callback close-window();
+
+    property <length> tile-w: Space.s7 * 3.5 + 2 * Space.s2;
+    // Padding, preview, gap, the title line and the app line.
+    property <length> tile-h: Space.s7 * 2.5 + 3 * Space.s2 + Type.label.line-height + Type.caption.line-height + Space.s1;
+
+    title: "Window switcher";
+    background: Palette.scrim;
+    default-font-family: root.font-family;
+    forward-focus: keys;
+
+    changed selected => {
+        // Keep the selected tile in view when the row scrolls.
+        let left = root.selected * (root.tile-w + Space.s2);
+        if left < -strip.content-x {
+            strip.content-x = -left;
+        } else if left + root.tile-w > -strip.content-x + strip.width {
+            strip.content-x = strip.width - left - root.tile-w;
+        }
+    }
+
+    // A click outside the panel cancels.
+    TouchArea {
+        clicked => { root.cancel(); }
+    }
+
+    keys := FocusScope {
+        capture-key-pressed(e) => {
+            if e.text == Key.Escape {
+                root.cancel();
+                return accept;
+            }
+            if e.text == Key.Return {
+                root.confirm();
+                return accept;
+            }
+            if e.text == Key.LeftArrow {
+                root.move(-1);
+                return accept;
+            }
+            if e.text == Key.RightArrow {
+                root.move(1);
+                return accept;
+            }
+            if e.text == "`" {
+                root.same-app();
+                return accept;
+            }
+            if e.text == "w" || e.text == "W" {
+                root.close-window();
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            x: panel.x;
+            y: panel.y;
+            width: panel.width;
+            height: panel.height;
+            border-radius: panel.border-radius;
+            drop-shadow-offset-y: Elevation.elevation-3-far.y;
+            drop-shadow-blur: Elevation.elevation-3-far.blur;
+            drop-shadow-color: Elevation.elevation-3-far.color;
+        }
+
+        panel := Panel {
+            width: min(root.items.length * (root.tile-w + Space.s2) - Space.s2 + 2 * Space.s4, root.width - 2 * Space.s5);
+            height: strip.height + hints.preferred-height + 3 * Space.s3;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: Radius.dialog;
+            drop-shadow-offset-y: Elevation.elevation-3-near.y;
+            drop-shadow-blur: Elevation.elevation-3-near.blur;
+            drop-shadow-color: Elevation.elevation-3-near.color;
+
+            // Clicks inside the panel do not reach the scrim.
+            TouchArea { }
+
+            strip := Flickable {
+                x: Space.s4;
+                y: Space.s3;
+                width: parent.width - 2 * Space.s4;
+                height: root.tile-h;
+                content-width: root.items.length * (root.tile-w + Space.s2) - Space.s2;
+                accessible-role: list;
+                accessible-label: "Open windows";
+
+                for item[i] in root.items: Tile {
+                    x: i * (root.tile-w + Space.s2);
+                    height: strip.height;
+                    item: item;
+                    current: i == root.selected;
+                    clicked => { root.pick(i); }
+                }
+            }
+
+            hints := HorizontalLayout {
+                y: parent.height - self.preferred-height - Space.s3;
+                alignment: center;
+                spacing: Space.s4;
+                KeyCap { key: "Alt Tab"; verb: "Next"; }
+                KeyCap { key: "Shift"; verb: "Back"; }
+                KeyCap { key: "`"; verb: "Same app"; }
+                KeyCap { key: "W"; verb: "Close window"; }
+                KeyCap { key: "Esc"; verb: "Cancel"; }
+            }
+        }
+    }
+}
