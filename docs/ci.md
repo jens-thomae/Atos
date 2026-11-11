@@ -54,8 +54,23 @@ The `publish` list is what the Containerfile copies from the repository (`COPY -
 
 It is the only job in the workflow with `issues: write`, and it runs no build. On a manual run from a branch other than `main` it only prints what it would do. The `nightly` job itself has only `contents: read`: it pushes nothing, and the base mirror is public.
 
+## Nightly perf regressions
+
+`perf.yml` reuses the same script. On a scheduled run, when `compare` finds a regression against the previous nightly (`docs/budgets.md`), it writes the issue text with `tools/ci/perf-regression-body.sh` (tested by `tools/ci/test-perf-regression-body.sh`): the regressed metrics, the two runs compared, the commits between them and the table. The `regression-report` job then calls `tools/ci/nightly-issue.sh` with the title **"Nightly perf regression"** and that text:
+
+- regression: comments on the open issue with that title that `github-actions[bot]` opened, or opens one;
+- no regression, or no earlier nightly to compare with: nothing changes. The issue does not close itself: `compare` checks only against the night before, so a regression that stays shows as "ok" the next night. The planner closes it (`docs/planner.md`).
+
+`regression-report` runs on a GitHub-hosted runner, never on the NUC, and only for scheduled runs; a pull request labelled `perf` never writes an issue. It is the only job in the workflow with `issues: write` (plus `contents: read` to check out `tools/ci`). Commit subjects in the text keep only letters, digits and plain punctuation, the tables lose Markdown and HTML specials, and run ids and commit hashes are checked; the text reaches `gh` as a file, never through a shell command.
+
 ## Other rules
 
+- **Network retries (#246).** Mirrors, DNS and ghcr.io fail now and then on the runners (an `apt-get` that could not resolve the Ubuntu mirror failed PR #235's boot test five times, after the image had built). So:
+  - `apt-get` runs with `-o Acquire::Retries=8` (apt waits longer between each try). The image and installer jobs install every runner package they need in one step before the long build, so a mirror outage fails the job in a few minutes, not after it.
+  - `tools/ci/retry.sh <command>` runs a command up to 3 times, 15 s then 30 s apart (`RETRY_ATTEMPTS`, `RETRY_DELAY`), and exits with the last try's status, so a real error still fails. It wraps `podman login`, the payload pull in `c11-installer.yml`, the NVIDIA source clone and every `podman build` of the image and the installer, with `RETRY_ATTEMPTS=2` for builds: a second try rebuilds only the layer that failed (`dnf`, `curl` or the layer cache), the finished ones come from local storage. A real build error therefore runs its failing layer twice. Tested by `tools/ci/test-retry.sh` in the `changes` job of `c1-base.yml`.
+  - `curl` downloads use `--retry 5 --retry-all-errors`.
+  - Not retried: Push, Sign and Verify-then-tag in `publish`, and `base-mirror.yml`'s copy. A step that publishes, signs or tags runs once; Those commands keep only the retries built into the tools themselves. The publish build's `--cache-to` writes the layer cache, which nothing signed reads, so its retry is allowed.
+  - A real DNS or mirror outage cannot be reproduced on demand, so these paths were tested by the unit test and normal runs only.
 - **Cancel superseded runs.** A new push to a pull request cancels its older run (`ci.yml`, `c1-base.yml`). Runs on `main` and scheduled runs are never cancelled; `publish` runs one at a time. The NUC workflows keep their own concurrency.
 - **Artifacts.** Public visibility makes minutes free, not storage: artifacts still count against the account's storage allowance (GitHub's billing docs, checked 2026-11-10). Every `upload-artifact` step therefore sets `retention-days` (7 or 14). The repository had 617 MB of live artifacts on 2026-11-10, over the 500 MB of GitHub Free, and uploads still worked.
 - **Installer ISO (#202).** `c11-installer.yml` uploads the ISO it has just installed and booted under KVM as the 14-day artifact `atos-install-TEST-<commit>` (ISO, `.sha256`, notice), from pushes to `main` and from manual runs on `main` without `c1-base-ref`, never from a pull request. It is a test build signed with the CI test keys (D-014). An artifact needs no token permission. A release would need `contents: write`, and the ISO (2.01 GiB) is over the 2 GiB per-file limit for release assets. How to download it: `docs/components/c11-installer/README.md`.

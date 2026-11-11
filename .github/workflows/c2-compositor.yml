@@ -38,8 +38,8 @@ jobs:
 
       - name: System libraries
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libudev-dev libgbm-dev libxkbcommon-dev \
+          sudo apt-get -o Acquire::Retries=8 update
+          sudo apt-get -o Acquire::Retries=8 install -y --no-install-recommends libudev-dev libgbm-dev libxkbcommon-dev \
             libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev \
             libdisplay-info-dev libpixman-1-dev libfontconfig-dev pkg-config clang
 
