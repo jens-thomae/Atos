@@ -9,7 +9,8 @@
 # (components/c1-base/Containerfile) with rootless podman and installs it into its /usr overlay.
 # Refuses unless /usr on <host> is a writable `bootc usr-overlay` (D-015). Never asks for a password
 # (BatchMode), never calls sudo or bootc, and writes only the two binaries in the overlay and its
-# cache in ~/.cache/atos-dev-push. A reboot of <host> undoes the install.
+# cache in ~/.cache/atos-dev-push. A reboot of <host> undoes the install; the cache, the podman
+# images and the atos-dev-push-* volumes stay (cleanup: docs/dev-loop.md).
 set -euo pipefail
 
 cache=.cache/atos-dev-push   # relative to the remote home: /var/home/atos/.cache/atos-dev-push
@@ -20,7 +21,7 @@ overlay_ok() { case $1 in "overlay rw,"*upperdir=*) return 0 ;; *) return 1 ;; e
 
 # True if $1 is a literal name on a `Host` line of the ssh config $2 (no patterns, users or ports).
 alias_ok() {
-  case $1 in "" | *[!A-Za-z0-9_-]*) return 1 ;; esac
+  case $1 in "" | -* | *[!A-Za-z0-9_-]*) return 1 ;; esac
   awk -v h="$1" 'tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i == h) f = 1 } END { exit !f }' "$2"
 }
 
@@ -40,8 +41,9 @@ builder() { # <stage>
 in_builder() { # <stage> <command>
   local src
   src=$(realpath ~/"$cache"/src) # /var/home/atos/…: the path the live shell watches (a symlinked /home fails in the container)
-  podman run --rm --security-opt label=disable \
-    -v "$src:/src" -v "$src:$src" -v "$HOME/$cache/target:/target" \
+  # :z, not :Z: :Z gives each container its own category and so relabels all of target/ on every run.
+  podman run --rm \
+    -v "$src:/src:z" -v "$src:$src:z" -v "$HOME/$cache/target:/target:z" \
     -v atos-dev-push-rustup:/opt/rustup -v atos-dev-push-registry:/opt/cargo/registry -v atos-dev-push-git:/opt/cargo/git \
     -e CARGO_TARGET_DIR=/target -e CARGO_PROFILE_RELEASE_LTO=false -e CARGO_PROFILE_RELEASE_INCREMENTAL=true \
     -e CARGO_TERM_COLOR=never -e SRC="$src" "atos-dev-push-$1" sh -euc "$2"

@@ -17,7 +17,8 @@ t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
 printf 'Host github.com\n  User git\nhost atos-pc other\n  HostName 192.168.1.20\nHost *\n  ServerAliveInterval 30\n' >"$t/config"
 alias_ok atos-pc "$t/config" || fail "configured alias refused"
 alias_ok other "$t/config" || fail "second name on a Host line refused"
-for h in 192.168.1.20 atos 'atos-pc;id' 'root@atos-pc' '*' '-oProxyCommand=x' ''; do
+printf 'Host -Fx\n' >>"$t/config"  # a leading - would be read as an ssh option
+for h in -Fx 192.168.1.20 atos 'atos-pc;id' 'root@atos-pc' '*' '-oProxyCommand=x' ''; do
   alias_ok "$h" "$t/config" && fail "'$h' accepted"
 done
 # The builder is the image's own stage up to its first COPY: base pin, dnf packages, rustup; no source.
