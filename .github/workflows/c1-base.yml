@@ -119,6 +119,9 @@ jobs:
       - &nvidia
         name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
         run: components/c1-base/nvidia/check.sh c1-base
+      - &identity
+        name: The image calls itself Atos, not Fedora (#248)
+        run: components/c1-base/check-identity.sh c1-base
       # #186: install the image, boot it with KVM and Secure Boot, check the dock, the launcher and a shell restart,
       # keep screenshots. Last: it removes the image from podman's storage to make room for the install.
       - &boot
@@ -297,6 +300,7 @@ jobs:
       - *session
       - *seal
       - *nvidia
+      - *identity
       - *boot
       - *screenshots
 

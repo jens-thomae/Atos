@@ -6,7 +6,7 @@ The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted 
 
 | Path | What |
 | --- | --- |
-| [`components/c11-installer/Containerfile`](../../../components/c11-installer/Containerfile) | The live installer system: `fedora-bootc` (same pinned base as c1-base), the live-boot dracut module, Fedora's shim and GRUB for the media, and `atos-install`, started on tty1 |
+| [`components/c11-installer/Containerfile`](../../../components/c11-installer/Containerfile) | The live installer system: `fedora-bootc` (same pinned base as c1-base), the live-boot dracut module, Fedora's shim and GRUB for the media, and `atos-install`, started on tty1. It calls itself Atos: `generic-release` and c1-base's `os-release` and `system-release` (#248, [C1 Identity](../c1-base/README.md#identity-atos-built-on-fedora)); `c11-installer.yml` checks it, the GRUB menu entries and the ISO's volume descriptor |
 | [`atos-install/`](../../../components/c11-installer/atos-install/) | The installer, a text-mode Rust binary (std only, no dependencies). It drives standard tools: `sfdisk`, `cryptsetup`, `systemd-cryptenroll`, `mkfs`, `podman` and `bootc install to-filesystem` |
 | [`install-policy.json`](../../../components/c11-installer/install-policy.json) | The install-only trust policy (#176, below), at `/usr/share/atos-install/` on the ISO |
 | [`firstboot/`](../../../components/c11-installer/firstboot/) | `atos-tpm-seal`, the first-boot unit that binds the disk to Secure Boot (below) |

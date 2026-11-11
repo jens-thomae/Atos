@@ -92,7 +92,8 @@ ExecStart=/bin/sh -c "systemctl is-system-running --wait >/dev/null; echo ATOS-R
 # shellcheck disable=SC2016 # expands in the guest
 BOOTINFO='v=$(sed -n s/^IMAGE_VERSION=//p /usr/lib/os-release)
 e=$(tail -c +5 /sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f 2>/dev/null | tr -d "\000")
-echo "ATOS-BOOT image=${v:-dev-1} counter=${e:-none}"'
+n=$(sed -n s/^PRETTY_NAME=//p /usr/lib/os-release)
+echo "ATOS-BOOT image=${v:-dev-1} counter=${e:-none} os=${n} host=$(cat /proc/sys/kernel/hostname)"'
 # shellcheck disable=SC2016 # systemd expands it
 BOOTINFO_UNIT='[Unit]
 Description=Atos boot info (dev VM only)
@@ -258,7 +259,9 @@ while True:
         pass
     if picked:
         continue
-    if b"Fedora Linux" in seen:  # the menu lists the entries by their title
+    # The menu lists the entries by their title: PRETTY_NAME, "Atos 45" (#248), or, for an entry
+    # of an image from before #248, "Fedora Linux 45 (Forty Five)".
+    if b"Atos 45" in seen or b"Fedora Linux" in seen:
         time.sleep(2)
         s.send(b"\x1b[B")
         time.sleep(1)

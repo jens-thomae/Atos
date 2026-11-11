@@ -1,0 +1,10 @@
+NAME="Atos"
+ID=atos
+ID_LIKE=fedora
+VERSION="45"
+VERSION_ID=45
+PRETTY_NAME="Atos 45"
+DEFAULT_HOSTNAME="atos"
+HOME_URL="https://github.com/jens-thomae/Atos"
+BUG_REPORT_URL="https://github.com/jens-thomae/Atos/issues"
+SUPPORT_END=2027-12-08
