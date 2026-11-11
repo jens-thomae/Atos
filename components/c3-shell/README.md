@@ -16,6 +16,7 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 | `src/accesskit.rs` | The spike's AccessKit port (modified copy of a Slint file, GPL-3.0-only, D-013) |
 | `src/toplevels.rs` | Running windows: `ext-foreign-toplevel-list-v1` for the list, atos-comp's `zcosmic_toplevel_info_v1` (v2+) for the activated state, `zcosmic_toplevel_manager_v1.activate` on click |
 | `src/icons.rs` | App icon from the app ID: `Icon=` of `<app_id>.desktop`, then hicolor and `pixmaps` in the XDG data directories and Flatpak's export directories |
+| `ui/switcher.slint`, `src/switcher.rs`, `src/switcher_model.rs` | The Alt+Tab window switcher (#226), after the owner's mockups in `docs/design/mockups/`; `switcher_model` is the display-free order, grouping and selection |
 | `ui/control-centre.slint` | The control centre panel, after the owner's Control centre mockup; `ui/shell.slint` is the one file `build.rs` compiles (dock and control centre) |
 | `src/control_centre.rs` | Opens, closes and feeds the panel; Settings launch by desktop-entry id |
 | `src/services.rs`, `src/audio.rs`, `src/portal.rs` | D-Bus services (NetworkManager, BlueZ, power-profiles-daemon, logind), the PipeWire client, and the xdg-desktop-portal Settings backend for dark mode |
@@ -28,6 +29,14 @@ Requirements: [`docs/spec.md` §6 C3 Shell](../../docs/spec.md#c3-shell). Decisi
 ## In the image (#186)
 
 The c1-base build compiles `atos-shell` in its own `shell` stage (our pinned Slint through `tools/slint-fork/slint-fork.sh setup`, thin LTO) and installs it as `/usr/bin/atos-shell`, with `data/atos.portal`. The session wrapper `usr/libexec/atos/atos-session` (C1) starts it next to atos-comp and restarts it after a crash; see "Session" in the [C1 README](../../docs/components/c1-base/README.md). CI boots the image and checks the dock, the launcher and the restart there.
+
+## Window switcher behaviour (#226)
+
+- atos-comp's `System(WindowSwitcher)` and `System(WindowSwitcherPrevious)` (Alt+Tab, Alt+Shift+Tab, and the Super variants) run `atos-shell --switcher next|prev`, which reaches the running shell over the launcher's socket.
+- The first request opens a panel over the output (overlay layer, exclusive keyboard) on the previous app; while it is open the compositor still matches Alt+Tab and sends the next request. Releasing Alt and Super (`platform::on_modifiers`) activates the selection; Esc or a click outside cancels; arrows move; backtick picks the next window of the selected app; W asks the app to close the selected window (`zcosmic_toplevel_manager_v1.close`).
+- One tile per app (`app_id`), most recently used first. The shell keeps the history itself from the activated state it sees, so windows already open when it started keep opening order until first used.
+- **Previews:** tiles show the app icon large. Window previews need an ext-image-copy-capture client in the shell (atos-comp already offers the toplevel capture source to unsandboxed clients); not built yet, the tile has the slot (`SwitcherItem.preview`).
+- The mockups' blurred backdrop needs a compositor-side blur; the panel sits on `Palette.scrim` for now.
 
 ## Dock-taskbar behaviour (#63)
 
