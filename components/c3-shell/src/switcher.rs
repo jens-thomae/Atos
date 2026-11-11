@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use atos_shell::switcher_model::{Mru, Switcher as Selection, Win};
-use atos_shell::{Switcher, SwitcherItem, apps, icons, switcher_item};
+use atos_shell::{Palette, Switcher, SwitcherItem, apps, icons, switcher_item};
 use sctk::shell::wlr_layer::Anchor;
 use slint::{ComponentHandle, VecModel};
 
@@ -62,6 +62,13 @@ pub fn init() {
             drop(slint::invoke_from_event_loop(commit));
         }
     });
+}
+
+/// Dark mode was switched (the control centre's tile): the switcher has its own `Palette`.
+pub fn set_dark(dark: bool) {
+    if let Some(ui) = STATE.with(|s| s.borrow().ui.as_ref().map(|u| u.clone_strong())) {
+        ui.global::<Palette>().set_dark(dark);
+    }
 }
 
 /// The compositor's window list changed: remember who is active, refresh an open switcher.

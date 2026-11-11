@@ -24,10 +24,15 @@ fn icon(name: &str) -> Image {
 }
 
 fn switcher() -> Switcher {
+    switcher_with(4)
+}
+
+/// The first `n` of four windows.
+fn switcher_with(n: usize) -> Switcher {
     let ui = Switcher::new().unwrap();
     ui.window().set_size(LogicalSize::new(1000., 400.));
     let item = |t, a, n, i: Image| switcher_item(t, a, n, i, Image::default());
-    ui.set_items(ModelRc::new(VecModel::from(vec![
+    let all = vec![
         item("Design", "Files", 2, icon("square.svg")),
         item("release-notes.md", "Text Editor", 1, icon("circle.svg")),
         item(
@@ -37,17 +42,24 @@ fn switcher() -> Switcher {
             icon("circle.svg"),
         ),
         item("~/src/shell", "Terminal", 1, Image::default()),
-    ])));
-    ui.set_selected(1);
+    ];
+    ui.set_items(ModelRc::new(VecModel::from(
+        all.into_iter().take(n).collect::<Vec<_>>(),
+    )));
+    ui.set_selected(usize::from(n > 1) as i32);
     ui.show().unwrap();
     ui
 }
 
 fn shot(dark: bool, name: &str) {
+    shot_n(4, dark, name);
+}
+
+fn shot_n(n: usize, dark: bool, name: &str) {
     init();
     // Creating it registers the bundled font for the whole process.
     let _font = test_font::FontLoader::new().unwrap();
-    let ui = switcher();
+    let ui = switcher_with(n);
     ui.set_font_family("Noto Sans".into());
     ui.global::<Palette>().set_dark(dark);
     assert_screenshot(&ui, env!("CARGO_MANIFEST_DIR"), name);
@@ -61,6 +73,26 @@ fn renders_light() {
 #[test]
 fn renders_dark() {
     shot(true, "switcher-dark");
+}
+
+#[test]
+fn renders_one_window() {
+    shot_n(1, false, "switcher-1");
+}
+
+#[test]
+fn renders_one_window_dark() {
+    shot_n(1, true, "switcher-1-dark");
+}
+
+#[test]
+fn renders_two_windows() {
+    shot_n(2, false, "switcher-2");
+}
+
+#[test]
+fn renders_two_windows_dark() {
+    shot_n(2, true, "switcher-2-dark");
 }
 
 #[test]
