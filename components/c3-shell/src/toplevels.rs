@@ -79,6 +79,17 @@ pub fn list() -> Vec<Toplevel> {
     })
 }
 
+/// The window's ext handle, for its capture source (`capture.rs`).
+pub fn handle(id: u32) -> Option<ext_handle::ExtForeignToplevelHandleV1> {
+    TOPLEVELS.with(|t| {
+        t.borrow()
+            .entries
+            .iter()
+            .find(|e| e.pending.id == id)
+            .map(|e| e.handle.clone())
+    })
+}
+
 /// Asks the compositor to activate (raise and focus) the window. A no-op without the
 /// management protocol or a seat.
 pub fn activate(id: u32) {

@@ -181,6 +181,9 @@ export component Switcher inherits Window {
     // What a screen reader hears when focus is on the switcher: it changes with the selection.
     property <string> selection-label: root.selected >= 0 && root.selected < root.items.length ? "\{root.items[root.selected].title}, \{root.items[root.selected].app-name}" : "";
 
+    // The tile's preview size: the shell scales captured windows to it (#266).
+    out property <length> preview-width: Space.s7 * 3.5;
+    out property <length> preview-height: Space.s7 * 2.5;
     property <length> tile-w: Space.s7 * 3.5 + 2 * Space.s2;
     // Padding, preview, gap, the title line and the app line.
     property <length> tile-h: Space.s7 * 2.5 + 3 * Space.s2 + Type.label.line-height + Type.caption.line-height + Space.s1;

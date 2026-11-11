@@ -5,6 +5,7 @@
 
 mod accesskit;
 mod audio;
+mod capture;
 mod control_centre;
 mod launcher;
 mod notice_ui;

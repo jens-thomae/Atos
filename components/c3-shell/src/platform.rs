@@ -223,6 +223,7 @@ impl WaylandPlatform {
         let compositor = CompositorState::bind(&global_list, &qh)?;
         let layer_shell = LayerShell::bind(&global_list, &qh)?;
         toplevels::bind(&global_list, &qh);
+        crate::capture::bind(&global_list, &qh);
         let fractional = global_list
             .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
             .ok()

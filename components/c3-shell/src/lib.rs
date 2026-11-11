@@ -7,6 +7,7 @@ pub mod config;
 pub mod control;
 pub mod icons;
 pub mod notice;
+pub mod preview;
 pub mod switcher_model;
 
 slint::include_modules!();
