@@ -100,7 +100,7 @@ ExecStart=/bin/sh -c '{ echo \"$TEST_PASSWORD\"; echo \"$TEST_PASSWORD\"; } | at
 # the installer unit's and logind's journal with it; the host reads the questions from there.
 # shellcheck disable=SC2016 # expands in the guest
 SCREEN_SCRIPT='exec > /dev/'"$SERIAL"' 2>&1
-journalctl -fb -o short-monotonic -u atos-installer.service -u systemd-logind.service | sed "s/^/ATOS-JOURNAL /" &
+journalctl -fb -o short-monotonic | grep --line-buffered -aiE "atos-installer|getty|autovt|vconsole|logind|tty1|plymouth|drm|fbcon|console" | sed "s/^/ATOS-JOURNAL /" &
 cols=$(od -An -tu1 -j1 -N1 /dev/vcsa1 | tr -d " "); echo "ATOS-SCREEN-START cols=${cols:=80}"
 old= same=0
 while :; do
@@ -109,7 +109,9 @@ while :; do
   [ "$same" -gt 0 ] || { echo ATOS-SCREEN-BEGIN; printf "%s\n" "$s" | sed "s/^/ATOS-SCREEN /"; old=$s; }
   # No change for 30 s: what the installer is waiting on, for debugging a stuck test.
   [ "$same" -ne 30 ] || { echo ATOS-STALL; ps -o pid,pgid,tpgid,stat,wchan:24,args -t tty1; stty -a < /dev/tty1 | head -4
-    for p in $(pgrep -t tty1); do echo "stack $p"; cat /proc/$p/stack; done; } 2>&1 | sed "s/^/ATOS-STALL /"
+    for p in $(pgrep -t tty1); do echo "stack $p"; cat /proc/$p/stack; done
+    systemctl show atos-installer.service -p ActiveState,Result,ExecMainCode,ExecMainStatus,NRestarts
+    systemctl list-units --all --no-legend "getty@*" "autovt@*"; } 2>&1 | sed "s/^/ATOS-STALL /"
   sleep 1
 done'
 # shellcheck disable=SC2016 # expands in systemd
