@@ -57,6 +57,7 @@ Every change against `epoch-1.11.0`. Behaviour changes: the renamed state direct
 ### Behaviour changes
 
 - The seat starts on the output under the pointer (which starts at the origin), not on the first output found (#195, `src/backend/mod.rs` `initial_output`). Upstream took the first output in DRM device order, which comes from smithay's `HashMap` of udev devices and changes between boots. With two outputs, about every second boot then opened output-less layer surfaces such as the launcher on the output the pointer was not on.
+- Default scale of a new output (#225, `src/backend/kms/device.rs` `calculate_scale`, `scale_from_dpi`). Upstream clamped any panel with a shorter side of 2000 px or more to at least 200 %. Now one pixel-density rule: ppi / 108 in 25 % steps, 100 % to 250 %, at least 800 logical pixels on the short side (27-inch 4K gets 150 %). An output with no usable physical size (0 × 0 EDID) gets 100 % (upstream: 200 % above 1600 px). An eDP panel is never treated as a TV. `scale_from_dpi` lost its `step_size` parameter, so an upstream merge conflicts there on purpose. Saved scales in `outputs.ron` are not touched.
 
 ### Deliberately not renamed (not "make no behaviour changes")
 
