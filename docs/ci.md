@@ -54,6 +54,15 @@ The `publish` list is what the Containerfile copies from the repository (`COPY -
 
 It is the only job in the workflow with `issues: write`, and it runs no build. On a manual run from a branch other than `main` it only prints what it would do. The `nightly` job itself has only `contents: read`: it pushes nothing, and the base mirror is public.
 
+## Nightly perf regressions
+
+`perf.yml` reuses the same script. On a scheduled run, when `compare` finds a regression against the previous nightly (`docs/budgets.md`), it writes the issue text with `tools/ci/perf-regression-body.sh` (tested by `tools/ci/test-perf-regression-body.sh`): the regressed metrics, the two runs compared, the commits between them and the table. The `regression-report` job then calls `tools/ci/nightly-issue.sh` with the title **"Nightly perf regression"** and that text:
+
+- regression: comments on the open issue with that title that `github-actions[bot]` opened, or opens one;
+- no regression, or no earlier nightly to compare with: nothing changes. The issue does not close itself: `compare` checks only against the night before, so a regression that stays shows as "ok" the next night. The planner closes it (`docs/planner.md`).
+
+`regression-report` runs on a GitHub-hosted runner, never on the NUC, and only for scheduled runs; a pull request labelled `perf` never writes an issue. It is the only job in the workflow with `issues: write` (plus `contents: read` to check out `tools/ci`). Commit subjects in the text keep only letters, digits and plain punctuation, the tables lose Markdown and HTML specials, and run ids and commit hashes are checked; the text reaches `gh` as a file, never through a shell command.
+
 ## Other rules
 
 - **Cancel superseded runs.** A new push to a pull request cancels its older run (`ci.yml`, `c1-base.yml`). Runs on `main` and scheduled runs are never cancelled; `publish` runs one at a time. The NUC workflows keep their own concurrency.
