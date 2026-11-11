@@ -193,7 +193,7 @@ qemu_run() {
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
   local pid=$! typed=
-  local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|Press Enter to try again|[Pp]assphrase for|recovery key for'
+  local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|Press Enter to try again|Started (kmsconvt|autovt|getty)@tty1|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
     m=$(tr -d '\r' < "$log" 2>/dev/null | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
     [ -z "$m" ] || { echo "HALT on: $m"; kill "$pid"; break; }
