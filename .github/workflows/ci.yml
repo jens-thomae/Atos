@@ -40,6 +40,7 @@ jobs:
       - run: bash tools/ci/test-mirror-base.sh
       - run: bash tools/ci/test-perf-regression-body.sh
       - run: bash tools/dev-push/test.sh
+      - run: bash tools/dev-pc/test.sh
       - id: diff
         shell: bash
         run: |
