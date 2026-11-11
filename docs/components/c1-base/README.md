@@ -80,7 +80,7 @@ Choices, flagged for the owner on #248:
 | `previous` | the menu lists *Atos 45 45* and *Fedora Linux 45 (Forty Five) 45*; the second boots dev-1 (Fedora) |
 | `rollback` | dev-2 boots without a counter; `bootc rollback`: *Next boot: rollback deployment* |
 | `back` | dev-1 (Fedora) is the default again, `rollback:` dev-2 |
-| automatic rollback (`sealed.sh counting install bad`): dev-1 stages dev-bad, an Atos image whose login prompt exits at once | COUNTING_PLACEHOLDER |
+| automatic rollback (`sealed.sh counting install bad`): dev-1 stages dev-bad, an Atos image whose login prompt exits at once | dev-bad staged as `bootc_atos-45-1+3.conf`; after its three failed boots `bootctl` shows *tries: 0 left; 3 done* and systemd-boot boots dev-1 (Fedora, `counter=none`) by itself |
 
 The host name follows `DEFAULT_HOSTNAME` (`fedora`, then `atos`) because the installer writes no `/etc/hostname`; a host name the user set stays.
 
