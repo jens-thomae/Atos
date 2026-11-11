@@ -56,7 +56,7 @@ jobs:
             components/c4-toolkit/test-harness
 
       # Slint's documented Linux build dependencies (spikes/d006-slint/README.md).
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfontconfig-dev libxkbcommon-dev
+      - run: sudo apt-get -o Acquire::Retries=8 update && sudo apt-get -o Acquire::Retries=8 install -y --no-install-recommends libfontconfig-dev libxkbcommon-dev
 
       - name: Fetch the pinned Slint and apply the patch queue
         run: tools/slint-fork/slint-fork.sh setup
@@ -79,7 +79,7 @@ jobs:
           NEXTEST_VERSION: 0.9.150
           NEXTEST_SHA256: b0959bc64232974224cf9fb22c915845398c0e8668fa7831eb5b43fb1eef781f
         run: |
-          curl -fsSL -o nextest.tar.gz "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o nextest.tar.gz "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
           echo "${NEXTEST_SHA256}  nextest.tar.gz" | sha256sum --check
           tar -xzf nextest.tar.gz -C ~/.cargo/bin
           rm nextest.tar.gz

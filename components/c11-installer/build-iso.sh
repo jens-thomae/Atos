@@ -11,7 +11,8 @@ IB=ghcr.io/osbuild/image-builder-cli@sha256:27d349fee2944029a9e47f5b8db5f4bf6839
 build_arg=()
 [ -z "${BASE:-}" ] || build_arg=(--build-arg "BASE=$BASE")
 
-sudo podman build "${build_arg[@]}" --build-context repo="$HERE/../.." -t localhost/atos-installer "$HERE"
+# One retry for network failures inside the build (#246); finished layers come from local storage.
+RETRY_ATTEMPTS=2 "$HERE/../../tools/ci/retry.sh" sudo podman build "${build_arg[@]}" --build-context repo="$HERE/../.." -t localhost/atos-installer "$HERE"
 mkdir -p "$OUTDIR/ib"
 # image-builder's podman 5 rewrites the shared storage's default network backend to netavark,
 # which breaks the host's podman 4 (Ubuntu 24.04: CNI). Put it back afterwards.
