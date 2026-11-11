@@ -50,7 +50,7 @@ virt-fw-vars --input "$W/vars.fd" --output "$W/vars.new" --set-pk "$G" "$W/PK.pe
   --add-kek "$G" "$W/KEK.pem" --add-db "$G" "$W/db.pem" --secure-boot
 mv "$W/vars.new" "$W/vars.fd"
 
-# Runs in the guest once the session is up. Markers on the serial port tell the host when to take
+# Runs in the guest once the session is up. Markers on the test port tell the host when to take
 # a screenshot; the sleeps after them give it time.
 # shellcheck disable=SC2016 # expands in the guest
 CHECK='
@@ -60,7 +60,7 @@ wait_for() { for _ in $(seq 240); do eval "$1" && return 0; sleep 0.5; done; ret
 # #195 evidence: count page-flip (vblank) events and the scanout flushes sent to QEMU per CRTC, from boot on.
 T=/sys/kernel/tracing
 { echo 16384 >$T/buffer_size_kb; for e in drm/drm_vblank_event_queued drm/drm_vblank_event_delivered virtio_gpu/virtio_gpu_cmd_queue; do echo 1 >$T/events/$e/enable; done; } 2>/dev/null || echo "DIAG tracing unavailable"
-# diag <tag>: DRM devices, connectors, planes, flip counts and atos-comp'"'"'s threads, on the serial log only (DIAG <tag> lines).
+# diag <tag>: DRM devices, connectors, planes, flip counts and atos-comp'"'"'s threads, on the test log only (DIAG <tag> lines).
 diag() {
   { ls -l /sys/class/drm; for c in /sys/class/drm/card*-*; do echo "$c $(cat $c/status) $(cat $c/enabled) $(head -1 $c/modes)"; done
     for f in /sys/kernel/debug/dri/*/state; do echo "== $f"; grep -E "plane\[|crtc\[|fb=|crtc-pos|active|enable" $f; done
@@ -130,20 +130,19 @@ UNIT='[Unit]
 Description=Atos shell check (CI only)
 ConditionPathExists=!/etc/initrd-release
 After=multi-user.target atos-session-check.service
+# Its own virtio-serial port, not the serial port: kernel messages on ttyS0 split markers mid-line (#261).
+# A virtio port is never a kernel console. Its output (markers, DIAG lines) is boot.log; the serial port is serial.log.
+Requires=dev-virtio\x2dports-atos.test.device
+After=dev-virtio\x2dports-atos.test.device
 [Service]
 Type=exec
 ImportCredential=atos.*
-# The serial port, not the console: on x86_64 the kernel console is tty0 (the UKI has no console=).
-StandardOutput=tty
-StandardError=tty
-TTYPath=/dev/ttyS0
+StandardOutput=file:/dev/virtio-ports/atos.test
 ExecStart=/bin/sh ${CREDENTIALS_DIRECTORY}/atos.check'
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 mapfile -d '' creds < <(
   cred systemd.extra-unit.atos-shell-check.service "$UNIT"
   cred systemd.unit-dropin.multi-user.target~atos-shell-check $'[Unit]\nWants=atos-shell-check.service'
-  # The serial getty would hang up the tty the unit writes to.
-  cred 'systemd.unit-dropin.serial-getty@ttyS0.service~test' $'[Unit]\nConditionPathExists=/nonexistent'
   cred atos.check "$CHECK"
   # The locked image user gets this password when systemd-sysusers creates it on first boot (#187).
   # Fedora's systemd-sysusers.service imports only root's password credentials, hence the drop-in.
@@ -158,7 +157,9 @@ timeout "$tmo" qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash0
   "${acc[@]}" -smp 4 -m 4G -display none -vga none -device virtio-gpu-pci -nic none \
   -drive if=pflash,format=raw,readonly=on,file=$F/OVMF_CODE_4M.secboot.fd -drive if=pflash,format=raw,file="$W/vars.fd" \
   -drive if=virtio,format=raw,file="$W/disk.raw" \
-  -monitor unix:"$W/mon.sock",server=on,wait=off -serial file:"$OUT/boot.log" "${creds[@]}" &
+  -monitor unix:"$W/mon.sock",server=on,wait=off -serial file:"$OUT/serial.log" \
+  -device virtio-serial-pci -chardev file,id=test,path="$OUT/boot.log" -device virtserialport,chardev=test,name=atos.test \
+  "${creds[@]}" &
 pid=$!
 # type_keys <text>: types it and Enter through the monitor (US layout; letters, digits, space).
 type_keys() {
@@ -197,16 +198,16 @@ while kill -0 "$pid" 2>/dev/null; do
   [ -n "$pressed" ] || { grep -q ATOS-PRESS-SUPER <<<"$l" && { mon "sendkey meta_l"; pressed=1; }; }
   [[ " ${shots[*]} " == *" dock "* ]] || { grep -q ATOS-DOCK-UP <<<"$l" && { sleep 3; shot dock; }; }
   [[ " ${shots[*]} " == *" launcher "* ]] || { grep -q ATOS-LAUNCHER-OPEN <<<"$l" && launcher_shot; }
-  grep -aqE "$halt" "$OUT/boot.log" && { kill "$pid"; break; }
+  grep -aqE "$halt" "$OUT/boot.log" "$OUT/serial.log" 2>/dev/null && { kill "$pid"; break; }
   sleep 1
 done
 wait "$pid" || true
-tr -d '\r' <"$OUT/boot.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS-|Secure Boot|session-check|boot is (good|bad)' || true
+cat "$OUT/serial.log" "$OUT/boot.log" | tr -d '\r' | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS-|Secure Boot|session-check|boot is (good|bad)' || true
 
 for s in login dock launcher nudged; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
 fail() { echo "::error::$*"; exit 1; }
 for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING; do
-  grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the serial log"
+  grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the test log"
 done
 grep -aqE 'ATOS-CHECK-FAIL' "$OUT/boot.log" && fail "guest check failed"
 rss=$(tr -d '\r' <"$OUT/boot.log" | sed -n 's/^ATOS-SHELL-RSS-KB \([0-9]*\).*/\1/p' | head -1)
@@ -221,6 +222,6 @@ echo "idle desktop RAM ${idle} MB (PSS ${pss} kB + SUnreclaim ${slab} kB; budget
 echo "shell RSS ${rss:?} KB (share 307200)"
 [ "$rss" -le 307200 ] || fail "shell RSS over its 300 MB share"
 [ "$idle" -le 800 ] || fail "idle desktop RAM $idle MB over 800 MB"
-grep -aq ATOS-NVIDIA-SLEEP-DIR-OK "$OUT/boot.log" || fail "NVIDIA suspend file check (#223) missing from the serial log"
+grep -aq ATOS-NVIDIA-SLEEP-DIR-OK "$OUT/boot.log" || fail "NVIDIA suspend file check (#223) missing from the test log"
 # Pixels: the screen is not one colour (dock), and the open launcher changes the picture a lot (scrim).
 python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/launcher.ppm"
