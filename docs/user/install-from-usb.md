@@ -7,7 +7,7 @@
 ## What you need
 
 - The installer image (`atos-install-….iso`) written to a USB stick of at least 4 GB, for example with Fedora Media Writer, balenaEtcher or `dd`. Writing it erases the stick.
-- A computer with a TPM 2.0 (most computers from the last years have one; in the firmware setup it may be called TPM, fTPM, PTT or Security Device, and it must be on). The installer stops with an error without it.
+- A computer with a TPM 2.0 (most computers from the last years have one; in the firmware setup it may be called TPM, fTPM, PTT or Security Device, and it must be on). The installer checks this first and, without one, stops before it asks for a disk.
 - **Secure Boot turned off** in the firmware setup. Atos cannot yet set up its own Secure Boot keys during the install, so with Secure Boot on the installed system does not start. See [Turning Secure Boot off and on](secure-boot-off-and-on.md) for what that means for your disk.
 - Paper and a pen for the recovery key.
 
@@ -16,6 +16,7 @@ The install needs no network and no account.
 ## Installing
 
 1. Plug in the stick and start the computer from it (often F12, F8 or Esc opens the boot menu). Choose **Install Atos**.
+   If the installer says the computer has no TPM 2.0 turned on, nothing has been changed on any disk. Restart, open the firmware setup (often F2, F10, Del or Esc right after switching on), turn on the setting called TPM, fTPM (AMD), PTT (Intel) or Security Device, and start the installer again. If it says the TPM is version 1.2, the computer cannot run Atos unless its firmware setup can switch the TPM to 2.0.
 2. After a short wait the screen lists the disks it can install to. Type the number of the disk and press Enter. The stick itself is not in the list.
 3. Type `erase` and press Enter to confirm that this disk will be erased. Anything else cancels.
 4. Type a password for the user `atos` and press Enter, then type it again. Nothing shows while you type. You log in with it and use it to make system changes.
@@ -28,4 +29,4 @@ If you leave the stick in, the computer starts the installer again. Nothing happ
 
 ## If something goes wrong
 
-The installer never restarts on its own. When a step fails it shows the error and asks you to press Enter to try again from the start, or to type `shell` for a command line (type `exit` to come back). If the computer has no TPM, or it is turned off, the installer notices only after it has erased the disk and shown a recovery key (that key is then useless). Turn the TPM on in the firmware setup and start the installer again.
+The installer never restarts on its own. When a step fails it shows the error and asks you to press Enter to try again from the start, or to type `shell` for a command line (type `exit` to come back).
