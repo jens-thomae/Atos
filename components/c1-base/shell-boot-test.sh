@@ -6,7 +6,7 @@
 # logged in at greetd's prompt on tty1 (#187: no autologin; `atos` gets a test password through
 # systemd-sysusers' first-boot credential, typed through the QEMU monitor), as the logged-in session: the dock draws its first frame, the launcher opens when the host presses the shortcut
 # (Super, sent through the QEMU monitor), a killed shell comes back while atos-comp keeps running, and the
-# shell's RSS and the idle desktop's RAM are within §7. QEMU's screendump keeps a picture of the
+# shell's RSS and the idle desktop's RAM are within §7, and Wi-Fi and Bluetooth are wired (#231). QEMU's screendump keeps a picture of the
 # dock and of the open launcher; the picture is checked too (the dock's strip is not the plain
 # background, the open launcher darkens the screen).
 # Usage: shell-boot-test.sh <image in the user's podman storage> <output dir>   (needs sudo, qemu, OVMF, swtpm-less)
@@ -95,6 +95,16 @@ sleep 1
 pkill -KILL -u atos -x atos-shell
 if wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 2 ]"; then echo ATOS-SHELL-RESTARTED; else echo ATOS-CHECK-FAIL shell not restarted; fi
 pgrep -u atos -x atos-comp >/dev/null && echo ATOS-COMP-STILL-RUNNING
+# Wi-Fi and Bluetooth (#231), after the idle numbers: the VM has no radio, so only the software side. NetworkManager
+# loaded its Wi-Fi plugin, bluetoothd runs without an adapter and bluetoothctl talks to it, and none of
+# NetworkManager, iwd and bluetoothd listens on a socket.
+echo "ATOS-IWD $(systemctl is-active iwd.service)"
+journalctl -b -u NetworkManager -o cat --no-pager | grep -q "Loaded device plugin: NMWifiFactory" \
+  && echo ATOS-NM-WIFI-PLUGIN || echo ATOS-CHECK-FAIL NetworkManager did not load its Wi-Fi plugin
+systemctl start bluetooth.service && timeout 10 bluetoothctl list >/dev/null \
+  && echo ATOS-BLUETOOTHCTL-OK || echo ATOS-CHECK-FAIL bluetoothctl cannot talk to bluetoothd
+l=$(ss -Hltunp | grep -E "\"(NetworkManager|iwd|bluetoothd)\"" || true)
+[ -z "$l" ] && echo ATOS-WIRELESS-NO-LISTENERS || echo "ATOS-CHECK-FAIL listening: $l"
 sleep 6
 systemctl poweroff --no-block'
 # shellcheck disable=SC2016 # systemd expands it
@@ -175,7 +185,8 @@ tr -d '\r' <"$OUT/boot.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -aE 'ATOS
 
 for s in login dock launcher nudged; do [ -f "$W/$s.ppm" ] && convert "$W/$s.ppm" "$OUT/$s.png"; done
 fail() { echo "::error::$*"; exit 1; }
-for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING; do
+for m in ATOS-DOCK-UP ATOS-LAUNCHER-OPEN ATOS-SHELL-RESTARTED ATOS-COMP-STILL-RUNNING \
+         ATOS-NM-WIFI-PLUGIN ATOS-BLUETOOTHCTL-OK ATOS-WIRELESS-NO-LISTENERS; do
   grep -aq "$m" "$OUT/boot.log" || fail "$m missing from the serial log"
 done
 grep -aqE 'ATOS-CHECK-FAIL' "$OUT/boot.log" && fail "guest check failed"

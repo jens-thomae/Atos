@@ -28,6 +28,7 @@ The [`Containerfile`](../../../components/c1-base/Containerfile) follows upstrea
    - The test keys' `PK.auth`, `KEK.auth` and `db.auth` in `/usr/lib/bootc/install/secureboot-keys/auto/`. `bootc install` copies them to the ESP as `loader/keys/auto/`.
    - Trust policy (#75): `usr/share/containers/policy.json`, `usr/share/containers/registries.d/atos.yaml`, `usr/lib/bootc/install/85-atos-sigpolicy.toml` and the TEST cosign key as `/usr/share/pki/containers/atos-c1-base-test.pub`. See [trust-policy.md](trust-policy.md).
    - Apps (#187, below): `flatpak` with Flathub as the system-wide remote, Fedora's OCI remotes masked, the Flatpak-Os-Info header off.
+   - Wi-Fi and Bluetooth (#231, below): `NetworkManager-wifi` with iwd as backend, `iwd`, `bluez`, `wireless-regdb`, Intel and Broadcom firmware; NetworkManager's connectivity check off.
    - The session (below): `greetd`, Xwayland, Mesa, `xterm`, `session/` (greetd config, session wrapper, `atos` user), `atos-comp` copied from the `comp` stage and `atos-shell` (C3) from the `shell` stage.
    - NVIDIA graphics (D-017, #162): NVK, NVIDIA's userspace and GSP firmware from RPM Fusion nonfree (pinned, unmodified), the signed modules from the `nvidia` stage, driver selection (`usr/lib/modprobe.d/atos-nvidia.conf`) and the suspend services. See [nvidia.md](nvidia.md).
    - Boot counting (#56): the patched `bootc`, the health check `atos-session-check.service` (enabled), a timeout drop-in for `boot-complete.target`, one SELinux rule for `systemd-bless-boot`, the karg `panic=10` (`kargs.d/20-atos-panic.toml`), and emergency drop-ins that reboot on a counted boot. The initramfs that carries those drop-ins is rebuilt in the `kernel` stage ([boot-counting.md](boot-counting.md)).
@@ -82,6 +83,35 @@ Card #187, D-003 (Flathub as the default remote), owner decision on #187 (2026-1
 - **Only Flathub.** Fedora's `flatpak-add-fedora-repos.service` (enabled by Fedora's preset) would add Fedora's OCI remotes `fedora` and `fedora-testing` on first boot; it is masked, so apps do not show up twice.
 - **What the client sends** (flatpak 1.18.4 source, `common/flatpak-dir.c`): on every pull, the HTTP headers `Flatpak-Ref` (the app or runtime being fetched), `Flatpak-Upgrade-From` (the installed commit's checksum, on updates) and `Flatpak-Os-Info` (`ID;VERSION_ID;arch` from os-release), and a user agent with the libostree and flatpak versions. Flathub counts downloads from these. Nothing identifies the machine or the user: no install ID, no account. The server sees the IP address, as with any download. **`Flatpak-Os-Info` exists only for statistics, so it is off (D-005):** [`atos-flatpak-no-os-info.service`](../../../components/c1-base/usr/lib/systemd/system/atos-flatpak-no-os-info.service) runs `flatpak config --system --set report-os-info false` once, on first boot, because the setting lives in the installation's repo config under `/var`. `flatpak-config(1)` also documents a `no-report-os-info` file, but flatpak's code (1.18.4 and main) does not read it. `Flatpak-Ref` and `Flatpak-Upgrade-From` cannot be turned off without patching flatpak. `--user` installations keep the default (OS report on) unless the user runs `flatpak config --user --set report-os-info false`.
 - **Checked** in a throwaway c1-base container (aarch64): `flatpak remotes --system` lists `flathub` from remotes.d with no setup, `report-os-info` reads back `false`, and `flatpak install flathub org.gnome.Calculator` installs. On an installed system the KVM test checks the remote, the setting and the terminal entry (C11 `vm-test.sh`).
+
+## Wi-Fi and Bluetooth
+
+Card #231, owner decision on #231 (iwd, not wpa_supplicant). The base image has the kernel drivers and most firmware but no Wi-Fi backend and no Bluetooth daemon, so `nmcli device` showed Wi-Fi as `unmanaged`. The image now has what makes the hardware usable from the command line (`nmcli device wifi connect …`, `bluetoothctl`); the settings UI is C8/C9's.
+
+| Package (Fedora 45) | Installed size | Why |
+| --- | --- | --- |
+| `NetworkManager-wifi` | 0.3 MB | NetworkManager's Wi-Fi device plugin |
+| `iwd` (+ `libell`, `iw`) | 2.1 MB (+1.0 MB) | Wi-Fi backend; satisfies NetworkManager-wifi's `wpa_supplicant or iwd` |
+| `bluez` | 4.7 MB | `bluetoothd`, `bluetoothctl` |
+| `wireless-regdb` | 0.01 MB | regulatory database the kernel loads (`regulatory.db` and its signature) |
+| `iwlwifi-mvm-firmware` | 65.7 MB | Intel Wi-Fi 5/6/6E (most laptops) |
+| `iwlwifi-mld-firmware` | 27.3 MB | Intel Wi-Fi 7 (BE200 and later); required by `iwlwifi-mvm-firmware` |
+| `iwlbluetooth-firmware` | 12.6 MB | Intel Bluetooth; required by `iwlwifi-mvm-firmware` |
+| `iwlwifi-dvm-firmware` | 1.9 MB | older Intel cards |
+| `brcmfmac-firmware` | 10.0 MB | Broadcom Wi-Fi |
+
+About 126 MB in all, almost all firmware (already xz-compressed, so the update download is about the same). Realtek, MediaTek and Atheros/Qualcomm firmware (Wi-Fi and Bluetooth) was already in the base. Not added: `nxpwireless`, `tiwilink`, `libertas` and `qcom-wwan` firmware (embedded boards, old or modem hardware).
+
+Configuration and secure defaults:
+
+- **Backend.** [`usr/lib/NetworkManager/conf.d/90-atos.conf`](../../../components/c1-base/usr/lib/NetworkManager/conf.d/90-atos.conf) sets `wifi.backend=iwd`. `iwd.service` is enabled; `wpa_supplicant` is not installed (the build fails if it is). iwd keeps its default `EnableNetworkConfiguration=false`, so NetworkManager alone sets addresses, routes and DNS. iwd's Ethernet 802.1X daemon `ead` stays disabled.
+- **No connectivity check (D-005).** NetworkManager's check fetches a vendor URL on every connect and periodically (on Fedora, `NetworkManager-config-connectivity-fedora` points it at `fedoraproject.org`). The same drop-in sets `[connectivity] enabled=false`, whatever URL another file sets. Consequence: NetworkManager does not detect captive portals; a portal login page has to be opened by hand.
+- **Nothing listens.** NetworkManager, iwd and bluetoothd talk over D-Bus and netlink only; the boot check confirms that none of them has a listening socket.
+- **Bluetooth.** `bluetooth.service` is enabled (Fedora's preset) and starts when an adapter appears. bluez's defaults stay: not discoverable unless a client asks, and then for 180 s (`DiscoverableTimeout`); no pairing without a registered agent (`AlwaysPairable=false`), and the image ships no agent, so pairing happens only while a user runs one (`bluetoothctl`, later the settings UI); no silent re-pairing (`JustWorksRepairing=never`); HID input only from bonded devices (`ClassicBondedOnly=true`). Adapters power on when found (`AutoEnable=true`).
+- **MAC address.** Fedora's `22-wifi-mac-addr.conf` (in the base) gives each Wi-Fi network a stable, generated MAC address (`stable-ssid`), not the hardware one.
+- `/var/lib/iwd`, `/var/lib/ead` and `/var/lib/bluetooth` are created by [`usr/lib/tmpfiles.d/atos-wireless.conf`](../../../components/c1-base/usr/lib/tmpfiles.d/atos-wireless.conf) (bootc lint).
+
+**Checks.** [`check-wireless.sh`](../../../components/c1-base/check-wireless.sh) runs on every build: packages present and no `wpa_supplicant`, NetworkManager's merged configuration has `wifi.backend=iwd` and `connectivity.enabled=false`, iwd and bluez settings as above, NetworkManager, iwd and bluetooth enabled and ead disabled, and firmware for Intel, Realtek, MediaTek, Qualcomm and Broadcom present. The boot check (`shell-boot-test.sh`) checks the running image without a radio: NetworkManager loaded its Wi-Fi plugin, `bluetoothctl` talks to `bluetoothd` with no adapter, and no listening sockets. That a real card connects is verified only on hardware (the owner's desktop PC, RTL8852BE).
 
 ## Test Secure Boot keys
 
@@ -231,8 +261,8 @@ Card #162, D-017. NVIDIA's open kernel modules, built and signed in the `nvidia`
 
 | Event | Result |
 | --- | --- |
-| Pull request that changes the image recipe (`tools/ci/is-image-change.sh pr`), or has the label `full-ci` | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`, `nvidia/check.sh`, boot check. No registry token, no cosign key. Other pull requests skip it; the nightly run covers them ([docs/ci.md](../../ci.md)). |
-| Merge to `main` that changes what ends up in the image (`tools/ci/is-image-change.sh publish`) | Build, countme check, `check-seal.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Publishes run one at a time (job-level concurrency group, never cancelled; GitHub keeps only the newest waiting one, which contains the replaced code). `:latest` moves only if the commit is ahead of the one it currently names in its `org.atos.source` label, so it never goes backwards and skipped merges don't stall it. |
+| Pull request that changes the image recipe (`tools/ci/is-image-change.sh pr`), or has the label `full-ci` | Build (sealed UKI included, with the committed test Secure Boot key), countme check, `check-seal.sh`, `nvidia/check.sh`, `check-wireless.sh`, boot check. No registry token, no cosign key. Other pull requests skip it; the nightly run covers them ([docs/ci.md](../../ci.md)). |
+| Merge to `main` that changes what ends up in the image (`tools/ci/is-image-change.sh publish`) | Build, countme check, `check-seal.sh`, `nvidia/check.sh`, `check-wireless.sh`, push `ghcr.io/jens-thomae/atos/c1-base:<commit sha>`, sign, verify, then point `:latest` at that signed digest (`skopeo copy` by digest, checked). Publishes run one at a time (job-level concurrency group, never cancelled; GitHub keeps only the newest waiting one, which contains the replaced code). `:latest` moves only if the commit is ahead of the one it currently names in its `org.atos.source` label, so it never goes backwards and skipped merges don't stall it. |
 | Nightly (02:00 UTC) and manual dispatch | `main` built from scratch, the pull-request checks and boot check. Nothing pushed. A failure opens or comments on the issue "Nightly image build failed"; the next green run closes it. |
 | Anything else (docs, C5 to C11, other tools) | Skipped. |
 
