@@ -446,14 +446,7 @@ fn launch(id: &str) {
     };
     let mut cmd = std::process::Command::new(&args[0]);
     cmd.args(&args[1..]);
-    crate::x11::set_display(&mut cmd);
-    match cmd.spawn() {
-        // The shell is the parent; a thread reaps the child so it does not stay a zombie.
-        Ok(mut child) => {
-            std::thread::spawn(move || child.wait().ok());
-        }
-        Err(e) => eprintln!("control centre: {id}: {e}"),
-    }
+    crate::x11::spawn_detached(cmd, format!("control centre: {id}"));
 }
 
 #[cfg(test)]
