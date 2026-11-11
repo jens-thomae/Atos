@@ -8,7 +8,9 @@ use std::rc::Rc;
 use atos_shell::{Palette, Switcher, switcher_item};
 use atos_ui_test::{AccessibleRole, accessibility_tree, assert_screenshot, find_by_label, init};
 use slint::platform::{Key, WindowEvent};
-use slint::{ComponentHandle, Image, LogicalSize, ModelRc, VecModel};
+use slint::{
+    ComponentHandle, Image, LogicalSize, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel,
+};
 
 mod test_font {
     include!(concat!(env!("OUT_DIR"), "/test_font.rs"));
@@ -21,6 +23,66 @@ fn icon(name: &str) -> Image {
             .join(name),
     )
     .expect("fixture icon")
+}
+
+/// A fixed stand-in for a captured window (#266): a title bar, a sidebar and text lines in
+/// `tint`, at a window's aspect ratio. Test content, not UI colours.
+fn window_picture(tint: [u8; 3]) -> Image {
+    let (w, h) = (336, 240);
+    let mut buf = SharedPixelBuffer::<Rgba8Pixel>::new(w, h);
+    for (i, p) in buf.make_mut_slice().iter_mut().enumerate() {
+        let (x, y) = (i as u32 % w, i as u32 / w);
+        let c = if y < 24 {
+            [tint[0] / 2, tint[1] / 2, tint[2] / 2]
+        } else if x < 72 {
+            [230, 230, 235]
+        } else if y % 20 < 8 && x < 96 + (y * 7 % 180) {
+            tint
+        } else {
+            [250, 250, 250]
+        };
+        *p = Rgba8Pixel {
+            r: c[0],
+            g: c[1],
+            b: c[2],
+            a: 255,
+        };
+    }
+    Image::from_rgba8(buf)
+}
+
+/// The tiles with previews: a stacked app, two single windows and one not captured.
+fn with_previews(ui: &Switcher) {
+    ui.set_items(ModelRc::new(VecModel::from(vec![
+        switcher_item(
+            "Design",
+            "Files",
+            2,
+            icon("square.svg"),
+            window_picture([40, 110, 220]),
+        ),
+        switcher_item(
+            "release-notes.md",
+            "Text Editor",
+            1,
+            icon("circle.svg"),
+            window_picture([200, 90, 40]),
+        ),
+        switcher_item(
+            "Window modes and how they behave when tiled",
+            "Web",
+            1,
+            icon("circle.svg"),
+            Image::default(),
+        ),
+        switcher_item(
+            "~/src/shell",
+            "Terminal",
+            1,
+            Image::default(),
+            window_picture([30, 30, 30]),
+        ),
+    ])));
 }
 
 fn switcher() -> Switcher {
@@ -52,14 +114,17 @@ fn switcher_with(n: usize) -> Switcher {
 }
 
 fn shot(dark: bool, name: &str) {
-    shot_n(4, dark, name);
+    shot_n(4, dark, name, false);
 }
 
-fn shot_n(n: usize, dark: bool, name: &str) {
+fn shot_n(n: usize, dark: bool, name: &str, previews: bool) {
     init();
     // Creating it registers the bundled font for the whole process.
     let _font = test_font::FontLoader::new().unwrap();
     let ui = switcher_with(n);
+    if previews {
+        with_previews(&ui);
+    }
     ui.set_font_family("Noto Sans".into());
     ui.global::<Palette>().set_dark(dark);
     assert_screenshot(&ui, env!("CARGO_MANIFEST_DIR"), name);
@@ -76,23 +141,49 @@ fn renders_dark() {
 }
 
 #[test]
+fn renders_previews_light() {
+    shot_n(4, false, "switcher-previews", true);
+}
+
+#[test]
+fn renders_previews_dark() {
+    shot_n(4, true, "switcher-previews-dark", true);
+}
+
+#[test]
+fn previews_leave_the_tile_names_unchanged() {
+    init();
+    let ui = switcher();
+    let names = |ui: &Switcher| -> Vec<String> {
+        accessibility_tree(ui)
+            .into_iter()
+            .filter(|(r, _)| *r == AccessibleRole::ListItem)
+            .map(|(_, l)| l)
+            .collect()
+    };
+    let before = names(&ui);
+    with_previews(&ui);
+    assert_eq!(names(&ui), before);
+}
+
+#[test]
 fn renders_one_window() {
-    shot_n(1, false, "switcher-1");
+    shot_n(1, false, "switcher-1", false);
 }
 
 #[test]
 fn renders_one_window_dark() {
-    shot_n(1, true, "switcher-1-dark");
+    shot_n(1, true, "switcher-1-dark", false);
 }
 
 #[test]
 fn renders_two_windows() {
-    shot_n(2, false, "switcher-2");
+    shot_n(2, false, "switcher-2", false);
 }
 
 #[test]
 fn renders_two_windows_dark() {
-    shot_n(2, true, "switcher-2-dark");
+    shot_n(2, true, "switcher-2-dark", false);
 }
 
 #[test]
