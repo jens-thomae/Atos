@@ -25,6 +25,7 @@ sudo dnf install -y grim     # only for `push screenshot`
 ```sh
 tools/dev-push/push atos-pc            # the shell
 tools/dev-push/push atos-pc --comp     # the shell and atos-comp
+tools/dev-push/push atos-pc --live     # a live-preview shell; see "Slint live preview" below
 tools/dev-push/push screenshot atos-pc shot.png
 ```
 
@@ -32,7 +33,7 @@ What `push` does:
 
 1. Checks that `atos-pc` is a `Host` line in `~/.ssh/config`. It runs ssh with `BatchMode=yes` and password logins off, so it can never ask for a password.
 2. On the PC, refuses (exit 3) unless `/usr` is a writable `bootc usr-overlay`, before anything is copied.
-3. Sends the working tree (uncommitted edits included, ignored files left out) as a tar stream to `/var/home/atos/.cache/atos-dev-push/src`. Only the shell's inputs go: `components/c3-shell`, `components/c4-toolkit`, the Slint pin and patch queue, `rust-toolchain.toml`, the Containerfile and this tool, plus `components/c2-compositor` with `--comp`. File times are kept, so cargo rebuilds only what changed.
+3. Sends the working tree (uncommitted edits included, ignored files left out) as a tar stream to the PC, which unpacks it next to its copy in `/var/home/atos/.cache/atos-dev-push/src` and rewrites only the files that differ, in place. Unchanged files keep their times, so cargo rebuilds only what changed. Only the shell's inputs go: `components/c3-shell`, `components/c4-toolkit`, the Slint pin and patch queue, `rust-toolchain.toml`, the Containerfile and this tool, plus `components/c2-compositor` with `--comp`. Files deleted on the Mac stay in the PC's copy; delete that directory if it matters.
 4. Builds on the PC with rootless podman, in a builder made from the image build's own `shell` (or `comp`) stage of [`components/c1-base/Containerfile`](../components/c1-base/Containerfile): the same pinned base, dnf packages and rustup, cut off before the stage copies any source. The toolchain, crates and `target/` stay in podman volumes and the cache directory. The Slint fork is fetched again only when its pin or patch queue changes. **Difference from the image:** the build is a plain release build with incremental compilation, without the image's thin LTO, to keep the warm build short.
 5. Stops the running shell, copies the new binary over `/usr/bin/atos-shell` in the overlay (owner and mode stay) and waits until the session's restart loop (`atos-session`) has started it and the journal shows its first frame (`BUDGET_FIRST_FRAME`).
 6. With `--comp` it also replaces `atos-comp`. That ends the session (it is the session), and greetd asks for the login, because Atos has no autologin (#187).
@@ -43,20 +44,34 @@ What `push` does:
 
 ## Times
 
-From the command to the new shell on screen, 4K monitor, RTX 4070 Ti PC:
+From the command to the new shell on screen (owner's PC: RTX 4070 Ti, 4K monitor):
 
-| | Measured |
-| --- | --- |
-| Cold (first push after set-up: base image, packages, toolchain, Slint, full build) | not yet: PC not reachable when the tool was written |
-| Warm (one `.slint` or `.rs` change) | not yet |
+| | On the PC | PC side in the dev VM (aarch64, 4 vCPU, no session), 2026-11-11 |
+| --- | --- | --- |
+| Cold (first push: base image pull, packages, toolchain, Slint, full build) | not yet: PC not reachable when the tool was written | 272 s build |
+| Warm, nothing changed | not yet | 1 s build |
+| Warm, one `.rs` change (comment in `notice.rs`) | not yet | 5 s build |
+| First `--live` push (live build, toolchain warm) | not yet | 138 s build |
+| `--live`, only `.slint` changed | not yet | 0 s (no build); the reload itself took under 4 s in `live-preview-test.sh` |
 
-Estimates on #201: cold 6–10 min, warm 20–60 s.
+The VM column ran `push --on-pc` with a writable stand-in for `/usr/bin/atos-shell`. The swap worked; the wait for the first frame timed out by design (no session), and that 40 s is not counted. Estimates for the PC on #201: cold 6–10 min, warm 20–60 s, including the shell's restart (≥ 1 s, the session loop's delay).
 
 ## Slint live preview
 
 Question on #201: does Slint's live preview (reloading `.slint` files in the running shell) work with our pinned fork and our own platform backend?
 
-LIVE_PREVIEW_ANSWER
+**Yes, with one limit.** Tested by [`tools/dev-push/live-preview-test.sh`](../tools/dev-push/live-preview-test.sh) in the dev VM (2026-11-11): it builds atos-shell with `SLINT_LIVE_PREVIEW=1` and Slint's `live-preview` feature from our fork (1.18.1 + patch queue), runs it on our own platform in headless sway, edits `ui/dock.slint` and checks the screen with `grim`:
+
+| Edit | Result |
+| --- | --- |
+| New file renamed over `dock.slint` (how most editors, `sed -i` and `tar` save) | not reloaded within 8 s, in two runs |
+| `dock.slint` written in place | reloaded within 4 s: the shell logs `Reloaded component Dock/Launcher/ControlCentre`, and the dock turns red |
+
+Our platform needs nothing extra: the live component runs on the event-loop proxy our platform already has (`invoke_from_event_loop`), and the reloaded components reuse their windows, so the layer surfaces stay. The limit is Slint's file watcher (`notify`, one watch per file): a file swapped by rename is not seen. Not investigated further; `push --live` works around it.
+
+**`push atos-pc --live`** builds that live-preview shell on the PC, from the PC's copy of the source at the path the binary then watches, and swaps it in. After that, a push that changes only `.slint` files builds nothing: the PC rewrites the changed files in place and the running shell reloads them (a few seconds). A push that changes anything else builds a new live shell. Edits on the Mac can be saved any way, because the PC writes the files itself. A plain `push` puts the normal shell back.
+
+Use `--live` for tuning only: the live shell carries the Slint compiler and interpreter, so it is bigger and slower to start than the real one, and memory or start-up numbers taken from it say nothing about the §7 budgets. Rust code that sets properties or callbacks keeps working across reloads (Slint sets them again on the new instance).
 
 ## Screenshot references after a token change
 

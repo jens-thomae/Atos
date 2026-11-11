@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # Push a shell build to an installed Atos test machine (#201, docs/dev-loop.md).
 #   push <host> [--comp]          build atos-shell (and atos-comp) on <host>, swap it in, restart it
+#   push <host> --live            live-preview shell: later pushes that change only .slint files reload in place
 #   push screenshot <host> [file] PNG of <host>'s screen (default: screenshot.png)
 # <host> must be a `Host` alias in ~/.ssh/config (the owner's set-up on #201). Nothing is built on
 # this machine: the source goes over SSH, the PC builds it in the image's own stage recipe
@@ -37,11 +38,13 @@ builder() { # <stage>
 
 # ponytail: plain release + incremental instead of the image's thin LTO, for a short warm build.
 in_builder() { # <stage> <command>
+  local src
+  src=$(realpath ~/"$cache"/src) # /var/home/atos/…: the path the live shell watches (a symlinked /home fails in the container)
   podman run --rm --security-opt label=disable \
-    -v ~/"$cache"/src:/src -v ~/"$cache"/target:/target \
+    -v "$src:/src" -v "$src:$src" -v "$HOME/$cache/target:/target" \
     -v atos-dev-push-rustup:/opt/rustup -v atos-dev-push-registry:/opt/cargo/registry -v atos-dev-push-git:/opt/cargo/git \
     -e CARGO_TARGET_DIR=/target -e CARGO_PROFILE_RELEASE_LTO=false -e CARGO_PROFILE_RELEASE_INCREMENTAL=true \
-    -e CARGO_TERM_COLOR=never "atos-dev-push-$1" sh -euc "$2"
+    -e CARGO_TERM_COLOR=never -e SRC="$src" "atos-dev-push-$1" sh -euc "$2"
 }
 
 swap() { # <binary>: replace /usr/bin/<binary> in place (keeps owner and mode); stop it first (ETXTBSY)
@@ -56,11 +59,43 @@ swap() { # <binary>: replace /usr/bin/<binary> in place (keeps owner and mode); 
   echo "push: could not replace $dst" >&2; exit 1
 }
 
-on_pc() { # build [--comp]
+# Copy the received tree ($cache/in) into $cache/src, rewriting only files that differ, in place:
+# unchanged files keep their mtime (cargo rebuilds only what changed), and Slint's live preview
+# reloads only on in-place writes (a file renamed over the old one goes unnoticed; #201).
+# ponytail: files deleted on the Mac stay in src; delete ~/.cache/atos-dev-push/src if that matters.
+sync_in() {
+  local f
+  cd ~/"$cache"/in
+  find . -type f | while IFS= read -r f; do
+    if [ ! -e "../src/$f" ]; then mkdir -p "../src/${f%/*}" && cp -p "$f" "../src/$f"
+    elif ! cmp -s "$f" "../src/$f"; then cat "$f" >"../src/$f"; fi
+  done
+}
+
+# Everything but the .slint files: if it is unchanged, a live shell needs no new binary.
+code_stamp() { find components tools third_party/slint/UPSTREAM third_party/slint/patches rust-toolchain.toml -type f ! -name '*.slint' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16; }
+
+wait_frame() { # <since>: the session loop (atos-session) restarts the shell; wait for its first frame
+  for _ in $(seq 400); do
+    journalctl -q -t atos-shell --since "@$1" -g '^BUDGET_FIRST_FRAME' >/dev/null 2>&1 && { echo "push: new shell on screen"; return 0; }
+    sleep 0.1
+  done
+  echo "push: no frame from the new shell after 40 s; see journalctl -t atos-shell" >&2; exit 1
+}
+
+on_pc() { # [--comp | --live]
+  sync_in
   cd ~/"$cache"/src
   mkdir -p ~/"$cache"/target
-  local t0 stamp
+  local t0 stamp code since
   t0=$(date +%s)
+  if [ "${1:-}" = --live ]; then
+    code=$(code_stamp)
+    if [ "$(cat ~/"$cache"/live.stamp 2>/dev/null)" = "$code" ] && cmp -s ~/"$cache"/target/atos-shell.new /usr/bin/atos-shell; then
+      echo "push: only .slint files changed; the live shell reloads them by itself"
+      return 0
+    fi
+  fi
   builder shell
   # Slint fork: fetch and patch only when the pin or the queue changed.
   stamp=$(cat third_party/slint/UPSTREAM third_party/slint/patches/* | sha256sum | cut -c1-16)
@@ -68,26 +103,28 @@ on_pc() { # build [--comp]
     in_builder shell 'cd /src && tools/slint-fork/slint-fork.sh setup >/dev/null'
     echo "$stamp" >~/"$cache"/slint.stamp
   fi
-  in_builder shell 'cd /src/components/c3-shell && cargo build -q --release --config ../../third_party/slint/patch.toml && strip -o /target/atos-shell.new /target/release/atos-shell'
+  rm -f ~/"$cache"/live.stamp
+  if [ "${1:-}" = --live ]; then
+    # Built from the source's path on the PC: the binary watches and reloads the .slint files there.
+    # shellcheck disable=SC2016 # $SRC expands in the container
+    in_builder shell 'cd "$SRC/components/c3-shell" && SLINT_LIVE_PREVIEW=1 CARGO_TARGET_DIR=/target/live cargo build -q --release --features slint/live-preview --config ../../third_party/slint/patch.toml && strip -o /target/atos-shell.new /target/live/release/atos-shell'
+  else
+    in_builder shell 'cd /src/components/c3-shell && cargo build -q --release --config ../../third_party/slint/patch.toml && strip -o /target/atos-shell.new /target/release/atos-shell'
+  fi
   if [ "${1:-}" = --comp ]; then
     builder comp
     in_builder comp 'cd /src/components/c2-compositor && cp ../../rust-toolchain.toml . && cargo build -q --release --locked && strip -o /target/atos-comp.new /target/release/atos-comp'
   fi
   echo "push: built in $(($(date +%s) - t0)) s"
   swap atos-shell
-  local since
   since=$(date +%s) # the session waits >= 1 s before it starts the new binary
+  [ "${1:-}" = --live ] && echo "$code" >~/"$cache"/live.stamp
   if [ "${1:-}" = --comp ]; then
     swap atos-comp # ends the session: greetd asks for the login again (no autologin, #187)
     echo "push: atos-comp replaced; log in at the PC to start the new session"
     return 0
   fi
-  # The session loop (atos-session) restarts the shell; wait for its first frame in the journal.
-  for _ in $(seq 400); do
-    journalctl -q -t atos-shell --since "@$since" -g '^BUDGET_FIRST_FRAME' >/dev/null 2>&1 && { echo "push: new shell on screen"; return 0; }
-    sleep 0.1
-  done
-  echo "push: no frame from the new shell after 40 s; see journalctl -t atos-shell" >&2; exit 1
+  wait_frame "$since"
 }
 
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by test.sh: functions only
@@ -95,7 +132,7 @@ if [ "${1:-}" = --on-pc ]; then shift; on_pc "$@"; exit; fi
 
 # --- On the Mac --------------------------------------------------------------------------------
 
-usage() { sed -n '3,4p' "$0" | sed 's/^# //' >&2; exit 2; }
+usage() { sed -n '3,5p' "$0" | sed 's/^# //' >&2; exit 2; }
 mode=build
 [ "${1:-}" = screenshot ] && { mode=screenshot; shift; }
 host=${1:-}; [ -n "$host" ] || usage; shift
@@ -114,16 +151,16 @@ if [ $mode = screenshot ]; then
   exit 0
 fi
 
-comp=
-case ${1:-} in --comp) comp=--comp ;; "") ;; *) usage ;; esac
+opt=
+case ${1:-} in --comp | --live) opt=$1 ;; "") ;; *) usage ;; esac
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root"
 paths=(rust-toolchain.toml components/c1-base/Containerfile tools/dev-push tools/slint-fork third_party/slint components/c4-toolkit components/c3-shell)
-[ -n "$comp" ] && paths+=(components/c2-compositor)
+[ "$opt" = --comp ] && paths+=(components/c2-compositor)
 start=$(date +%s)
 # The working tree as it is (uncommitted edits included), without ignored files (target/, the Slint
-# checkout). mtimes are kept, so cargo on the PC rebuilds only what changed.
+# checkout). The PC unpacks it next to its copy and rewrites only the files that differ (sync_in).
 git ls-files -co --exclude-standard -- "${paths[@]}" | while IFS= read -r f; do [ -e "$f" ] && echo "$f"; done |
   COPYFILE_DISABLE=1 tar -c --no-xattrs --no-mac-metadata -T - -f - |
-  ssh_ "$guard; mkdir -p $cache/src && cd $cache/src && rm -rf components tools rust-toolchain.toml third_party/slint/UPSTREAM third_party/slint/patches && tar -x --warning=no-unknown-keyword -f - && exec bash tools/dev-push/push --on-pc $comp"
-echo "push: $(($(date +%s) - start)) s from command to new shell"
+  ssh_ "$guard; rm -rf $cache/in && mkdir -p $cache/in $cache/src && tar -x --warning=no-unknown-keyword -C $cache/in -f - && exec bash $cache/in/tools/dev-push/push --on-pc $opt"
+echo "push: $(($(date +%s) - start)) s in all"
