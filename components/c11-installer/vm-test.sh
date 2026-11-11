@@ -7,7 +7,7 @@
 #   iso      builds the installer image and the ISO with dev-1 as offline payload
 #   install  boots the unmodified ISO under QEMU (Secure Boot firmware in setup mode, swtpm TPM 2.0)
 #            and installs to an empty 20 GB disk through the interactive installer on tty1, as a
-#            person does (#220): a test unit copies the screen to the serial log, and the host types
+#            person does (#220): a test unit copies the screen to the test log, and the host types
 #            each answer on the VM's keyboard when its question shows. Prints the time it took. The
 #            payload must be the installer's default reference (CI's is); see `unattended`
 #   notpm    boots the ISO with no TPM on an empty disk (#222): the installer must say so before the
@@ -24,7 +24,8 @@
 #   nosb     boots the same disk and TPM with Secure Boot off: PCR7 differs, so the TPM keeps the
 #            key and the boot stops at the recovery key prompt
 # Set BASE=<image@digest> to build c1-base on another base (passed as --build-arg).
-# Disks live on the VM disk in ~/c11; logs go to components/c11-installer/out/.
+# Disks live on the VM disk in ~/c11; logs go to components/c11-installer/out/: <step>.log is what the test
+# units print, on a virtio-serial port of its own (#261); <step>-serial.log is the serial console (firmware, kernel).
 # Without KVM (Apple M1 has no nested virtualisation) every boot takes minutes; CI has KVM.
 set -euo pipefail
 
@@ -53,17 +54,22 @@ case "$(uname -m)" in
     CODE_SB=$F/AAVMF_CODE.secboot.fd CODE_NOSB=$F/AAVMF_CODE.no-secboot.fd VARS0=$F/AAVMF_VARS.fd
     # virt has no keyboard; the login (#187) types on this one. q35 has PS/2, and QEMU sends a key to
     # every keyboard, so x86_64 gets no second one (it would type each key twice).
-    TPMDEV=tpm-tis-device SERIAL=ttyAMA0 KBD=(-device qemu-xhci -device usb-kbd) ;;
+    TPMDEV=tpm-tis-device KBD=(-device qemu-xhci -device usb-kbd) ;;
   x86_64)
     # shellcheck disable=SC2054 # commas are QEMU option syntax
     QEMU=(qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on) F=/usr/share/OVMF
     CODE_SB=$F/OVMF_CODE_4M.secboot.fd CODE_NOSB=$F/OVMF_CODE_4M.fd VARS0=$F/OVMF_VARS_4M.fd
-    TPMDEV=tpm-tis SERIAL=ttyS0 KBD=() ;;
+    TPMDEV=tpm-tis KBD=() ;;
   *) echo "unsupported architecture" >&2; exit 1 ;;
 esac
 # Per QEMU run; with KVM a prompt hidden on tty0 then fails in minutes, not after an hour.
 if [ -w /dev/kvm ]; then QEMU+=(-accel kvm -cpu host) TMO=15m; else QEMU+=(-cpu max) TMO=60m; fi
 
+# The test units print to a virtio-serial port, never to the serial console: kernel messages there split
+# markers mid-line (#261), and a virtio port is never a kernel console. The host reads it as <step>.log.
+PORT_UNIT='Requires=dev-virtio\x2dports-atos.test.device
+After=dev-virtio\x2dports-atos.test.device
+'
 # One systemd credential, passed over SMBIOS: cred <name> <content>
 cred() { printf -- '-smbios\0type=11,value=io.systemd.credential.binary:%s=%s\0' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 
@@ -74,34 +80,28 @@ REPORT_UNIT='[Unit]
 Description=Atos installer test report (dev VM only)
 ConditionPathExists=!/etc/initrd-release
 After=multi-user.target atos-tpm-seal.service
-[Service]
+'"$PORT_UNIT"'[Service]
 Type=exec
 ImportCredential=atos.*
-# The serial port, not the console: on x86_64 the kernel console is tty0 (the UKI has no console=).
-StandardOutput=tty
-StandardError=tty
-TTYPath=/dev/'"$SERIAL"'
+StandardOutput=file:/dev/virtio-ports/atos.test
 # Through cat, so systemd tools see no terminal (no size queries or resets); sleep 1 lets the
-# serial port drain before poweroff (a report once lost its last lines).
+# test port drain before poweroff (a report once lost its last lines).
 ExecStart=/bin/sh -c "{ systemctl is-system-running --wait >/dev/null; echo ATOS-REPORT-BEGIN; bootctl status --no-pager 2>&1 | grep -E \"Secure Boot|Setup Mode\"; systemctl status --no-pager atos-tpm-seal.service | head -3; journalctl -b -o cat --no-pager -u atos-tpm-seal.service | grep atos-tpm-seal; d=$$(readlink -f /dev/disk/by-designator/root-luks); echo LUKS $$d; systemd-cryptenroll $$d; lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS; bootc status | grep -E \"image:|version|booted|staged|rollback\"; grep -s IMAGE_VERSION /usr/lib/os-release; systemd-analyze; sh $$CREDENTIALS_DIRECTORY/atos.check; [ ! -f $$CREDENTIALS_DIRECTORY/atos.action ] || sh -x $$CREDENTIALS_DIRECTORY/atos.action; echo ATOS-REPORT-END; } 2>&1 | cat; sleep 1; systemctl poweroff --no-block"'
 
 # The unattended install: what a user does on tty1, minus the questions.
 INSTALL_UNIT="[Unit]
 Description=Atos unattended install (dev VM only)
 After=multi-user.target
-[Service]
+${PORT_UNIT}[Service]
 Type=exec
-# The kernel console is tty1 (last console= in iso.yaml); the serial port is the test's log.
-StandardOutput=tty
-StandardError=tty
-TTYPath=/dev/$SERIAL
+StandardOutput=file:/dev/virtio-ports/atos.test
 ExecStart=/bin/sh -c '{ echo \"$TEST_PASSWORD\"; echo \"$TEST_PASSWORD\"; } | atos-install --disk /dev/vda --yes --target-imgref $TARGET_IMGREF && echo ATOS-INSTALL-OK || echo ATOS-INSTALL-FAILED; systemctl poweroff --no-block'"
 
 # The interactive install (#220): the ISO runs unchanged. This test-only unit copies what tty1 shows
-# (/dev/vcs1, the console's text) to the serial log whenever it changes, prefixed ATOS-SCREEN, and
+# (/dev/vcs1, the console's text) to the test log whenever it changes, prefixed ATOS-SCREEN, and
 # the installer unit's and logind's journal with it; the host reads the questions from there.
 # shellcheck disable=SC2016 # expands in the guest
-SCREEN_SCRIPT='exec > /dev/'"$SERIAL"' 2>&1
+SCREEN_SCRIPT='exec > /dev/virtio-ports/atos.test 2>&1
 journalctl -fb -o short-monotonic | grep --line-buffered -aiE "atos-installer|getty|autovt|vconsole|logind|tty1|plymouth|drm|fbcon|console" | sed "s/^/ATOS-JOURNAL /" &
 cols=$(od -An -tu1 -j1 -N1 /dev/vcsa1 | tr -d " "); echo "ATOS-SCREEN-START cols=${cols:=80}"
 old= same=0
@@ -118,8 +118,8 @@ while :; do
 done'
 # shellcheck disable=SC2016 # expands in systemd
 SCREEN_UNIT='[Unit]
-Description=Atos installer test: tty1 to the serial log (test only)
-[Service]
+Description=Atos installer test: tty1 to the test log (test only)
+'"$PORT_UNIT"'[Service]
 Type=exec
 ImportCredential=atos.*
 ExecStart=/bin/sh -c "exec sh $$CREDENTIALS_DIRECTORY/atos.screen"'
@@ -179,13 +179,15 @@ login_tty1() {
 
 # qemu_run <log> <extra qemu args...>; env CODE=<firmware code> (default: Secure Boot capable),
 # NOTPM=1 (no TPM device), LINGER=<s> (keep running that long after a halt line, then stop).
+# <log> is the test port; the serial console goes to <log without .log>-serial.log.
 qemu_run() {
   local log=$1 tpm=(); shift
+  local serial=${log%.log}-serial.log
   # shellcheck disable=SC2054 # commas are QEMU option syntax
   [ -n "${NOTPM:-}" ] || { swtpm_up; tpm=(-chardev socket,id=chrtpm,path="$WORK/swtpm.sock"
     -tpmdev emulator,id=tpm0,chardev=chrtpm -device "$TPMDEV",tpmdev=tpm0); }
-  rm -f "$log"
-  echo "QEMU, serial log: $log"
+  rm -f "$log" "$serial"
+  echo "QEMU, test log: $log, serial log: $serial"
   # shellcheck disable=SC2054 # commas are QEMU option syntax
   timeout "$TMO" "${QEMU[@]}" -smp 4 -m 4G -display none \
     -drive if=pflash,format=raw,readonly=on,file="${CODE:-$CODE_SB}" \
@@ -193,13 +195,15 @@ qemu_run() {
     "${tpm[@]}" \
     -drive if=none,id=hd,format=raw,file="$DISK" -device virtio-blk-pci,drive=hd,bootindex=1 \
     -monitor unix:"$WORK/mon.sock",server=on,wait=off "${KBD[@]}" \
-    -serial file:"$log" "$@" &
+    -serial file:"$serial" \
+    -device virtio-serial-pci -chardev file,id=test,path="$log" -device virtserialport,chardev=test,name=atos.test \
+    "$@" &
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
   local pid=$! typed='' stop=''
   local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|Press Enter to try again|Started (kmsconvt|autovt|getty)@tty1|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
-    m=$(tr -d '\r' < "$log" 2>/dev/null | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
+    m=$(cat "$log" "$serial" 2>/dev/null | tr -d '\r' | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
     [ -z "$m" ] || [ -n "$stop" ] || { echo "HALT on: $m"; stop=$((SECONDS + ${LINGER:-0})); }
     [ -z "$stop" ] || [ "$SECONDS" -lt "$stop" ] || { kill "$pid"; break; }
     if [ -z "$typed" ] && grep -aq ATOS-LOGIN-READY "$log"; then login_tty1 && typed=1; fi
@@ -207,7 +211,7 @@ qemu_run() {
     sleep "${POLL:-5}"
   done
   wait "$pid" || true
-  tr -d '\r' < "$log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -av 'EFI Internal Shell' \
+  cat "$serial" "$log" | tr -d '\r' | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | grep -av 'EFI Internal Shell' \
     | grep -aE "atos-install|atos-tpm-seal|ATOS-|Secure Boot|Setup Mode|SLOT|^ *[0-9]+ (recovery|tpm2|password)|LUKS|crypt|booted|staged|IMAGE_VERSION|uid=|Startup finished|recovery key|Installing|Partitioning|Encrypting|installed on|$halt" || true
 }
 
@@ -215,7 +219,6 @@ qemu_run() {
 # password through PAM (pam_unix, unix_chkpwd: shadow labels matter under enforcing SELinux).
 # shellcheck disable=SC2016 # expands in the guest
 ADMIN_CHECK='pw=$(cat "$CREDENTIALS_DIRECTORY/atos.test-password")
-dmesg -n 1 # kernel audit lines on the serial console split the markers (run 42687015461)
 # No autologin (#187): greetd waits at its prompt; the host types user and password on tty1. First,
 # before runuser below opens sessions of its own. s: the user'"'"'s logind sessions on tty1.
 s() { loginctl list-sessions --no-legend | grep -E " atos .*tty1"; }
@@ -241,8 +244,6 @@ boot() {
   mapfile -d '' creds < <(
     cred systemd.extra-unit.atos-report.service "$REPORT_UNIT"
     cred systemd.unit-dropin.multi-user.target~atos-report $'[Unit]\nWants=atos-report.service'
-    # The serial getty also starts here and hangs up the serial tty the report writes to.
-    cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent'
     # Without KVM, udev in the initrd needs longer than the default 45 s to find the root.
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot\x2dluks.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
     cred 'systemd.unit-dropin.dev-gpt\x2dauto\x2droot.device~timeout' $'[Unit]\nJobRunningTimeoutSec=10min'
@@ -292,13 +293,11 @@ fresh_machine() {
 CDROM=(-device virtio-scsi-pci,id=scsi0 -drive if=none,id=cd,format=raw,media=cdrom,readonly=on,file="$ISO"
   -device scsi-cd,drive=cd,bootindex=0)
 
-# The credentials that copy tty1 to the serial log (the interactive runs).
+# The credentials that copy tty1 to the test log (the interactive runs).
 screen_creds() {
   cred systemd.extra-unit.atos-screen.service "$SCREEN_UNIT"
   cred systemd.unit-dropin.multi-user.target~atos-screen $'[Unit]\nWants=atos-screen.service'
   cred atos.screen "$SCREEN_SCRIPT"
-  # The serial getty hangs up the serial tty the screen unit writes to.
-  cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent'
 }
 
 # #222: no TPM. Nothing is typed. The failure prompt is a halt line; QEMU keeps running 60 s after it
@@ -313,7 +312,7 @@ step_notpm() {
   grep -aq 'ATOS-SCREEN .*fTPM (AMD), PTT (Intel)' "$log" || fail+=("no firmware hint on tty1")
   grep -aq 'ATOS-SCREEN Press Enter to try again, or type "shell"' "$log" || fail+=("no retry prompt on tty1")
   ! grep -aqF 'Install Atos on disk number' "$log" || fail+=("the disk question was asked")
-  ! grep -aqE 'reboot: (Restarting system|Power down)' "$log" || fail+=("the machine restarted or powered off")
+  ! grep -aqE 'reboot: (Restarting system|Power down)' "${log%.log}-serial.log" || fail+=("the machine restarted or powered off")
   # Untouched: still 20 GB of zeros, as fresh_machine left it.
   cmp -s -n "$(stat -c %s "$DISK")" "$DISK" /dev/zero && [ "$(stat -c %s "$DISK")" -eq $((20 << 30)) ] \
     || fail+=("the disk is no longer blank")
@@ -333,8 +332,8 @@ step_install() {
   local t=$(($(date +%s) - t0))
   [ "$asked" -eq ${#QUESTIONS[@]} ] || { echo "install: QEMU ended after $asked of ${#QUESTIONS[@]} answers" >&2; exit 1; }
   grep -aq 'ATOS-SCREEN Atos is installed on /dev/vda' "$OUT/install.log"
-  grep -aq 'reboot: Restarting system' "$OUT/install.log"
-  ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" || { echo "the password is in the install log" >&2; exit 1; }
+  grep -aq 'reboot: Restarting system' "$OUT/install-serial.log"
+  ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" "$OUT/install-serial.log" || { echo "the password is in the install log" >&2; exit 1; }
   echo "ATOS-INSTALL-TIME qemu_start_to_poweroff=${t}s"
 }
 
@@ -345,15 +344,13 @@ step_unattended() {
     cred systemd.extra-unit.atos-install-test.service "$INSTALL_UNIT"
     cred systemd.unit-dropin.multi-user.target~atos-install-test $'[Unit]\nWants=atos-install-test.service'
     # The interactive installer on tty1 stays off in the unattended run.
-    cred systemd.unit-dropin.atos-installer.service~test $'[Unit]\nConditionPathExists=/nonexistent'
-    # Nor the serial getty: it hangs up the serial tty this unit writes to, killing the installer.
-    cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent')
+    cred systemd.unit-dropin.atos-installer.service~test $'[Unit]\nConditionPathExists=/nonexistent')
   t0=$(date +%s)
   # shellcheck disable=SC2054
   qemu_run "$OUT/install.log" -nic none "${CDROM[@]}" "${creds[@]}"
   grep -aq ATOS-INSTALL-OK "$OUT/install.log"
   grep -aq 'Password for the administrator account' "$OUT/install.log"
-  ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" || { echo "the password is in the install log" >&2; exit 1; }
+  ! grep -aqF "$TEST_PASSWORD" "$OUT/install.log" "$OUT/install-serial.log" || { echo "the password is in the install log" >&2; exit 1; }
   echo "ATOS-INSTALL-TIME qemu_start_to_poweroff=$(( $(date +%s) - t0 ))s"
 }
 
