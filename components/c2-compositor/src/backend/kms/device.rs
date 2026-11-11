@@ -1319,12 +1319,9 @@ pub fn calculate_scale(
     let (w_mm, h_mm) = monitor_size_mm;
     let (w_px, h_px) = resolution;
     let shorter_res = w_px.min(h_px);
-    let fallback_scale = match shorter_res {
-        px if px <= 1600 => 1.0,
-        _ => 2.0,
-    };
+    // No usable physical size (projector, 0 x 0 EDID): keep 100 %.
+    let fallback_scale = 1.0;
     if w_mm == 0 || h_mm == 0 {
-        // possibly projector, but could just be some no-brand display
         return fallback_scale;
     }
 
@@ -1337,48 +1334,26 @@ pub fn calculate_scale(
     }
 
     let diag = (w_in.powf(2.) * h_in.powf(2.)).sqrt();
-    let dpi = (w_px as f64 / w_in + h_px as f64 / h_in) / 2.0;
 
-    match diag {
-        _diag if diag < 20. || interface == connector::Interface::EmbeddedDisplayPort => {
-            // likely laptop
-            scale_from_dpi(dpi, 144, shorter_res)
-        }
-        // 16:10 has a height of 19.6, anything lower is most likely an ultrawide
-        _diag if diag >= 40. && h_in >= 19. => {
-            // likely TV
-            match shorter_res {
-                px if px <= 1200 => 1.0,
-                _ => 2.0,
-            }
-        }
-        _ => {
-            // likely desktop
-            scale_from_dpi(dpi, 120, shorter_res)
-        }
+    // 16:10 has a height of 19.6, anything lower is most likely an ultrawide
+    if diag >= 40. && h_in >= 19. && interface != connector::Interface::EmbeddedDisplayPort {
+        // likely TV, seen from a distance
+        return if shorter_res <= 1200 { 1.0 } else { 2.0 };
     }
+
+    scale_from_dpi((w_px as f64 / w_in + h_px as f64 / h_in) / 2.0, shorter_res)
 }
 
-pub fn scale_from_dpi(dpi: f64, step_size: u32, shorter_px: u16) -> f64 {
-    let scale = (dpi / step_size as f64) * 100.0;
-
-    // snap to 50%
-    let scale = ((scale.round() as u32).next_multiple_of(50) as f64) / 100.0;
-
-    // max values
-    let max = match shorter_px {
-        px if px <= 1200 => 1.0, // 125% is usually a worse experience than 100% atm
-        // for 1440p and weird variants we let the algorithm take over, but limit the max, this is inspired by what windows does
-        px if px <= 1600 => 1.5,
-        _ => 2.0, // never go higher than 200% by default though (Note for the future: Tablets? Phones?)
-    };
-
-    let min = match shorter_px {
-        px if px >= 2000 => 2.0, // 4k should default to 200%, as we prefer integer scales
-        _ => 1.0,                // never go lower than 100%
-    };
-
-    scale.min(max).max(min)
+/// Default scale for a monitor or laptop panel: pixel density over a reference
+/// density, in 25 % steps. 27-inch 4K (163 ppi) gets 150 %, 27-inch 1440p and
+/// 24-inch 1080p get 100 %.
+pub fn scale_from_dpi(dpi: f64, shorter_px: u16) -> f64 {
+    const REFERENCE_DPI: f64 = 108.0;
+    const MAX_SCALE: f64 = 2.5;
+    // Keep at least 800 logical pixels on the short side (1080p laptops: 125 %).
+    let cap = ((shorter_px as f64 / 800.0 * 4.0).floor() / 4.0).min(MAX_SCALE);
+    let scale = (dpi / REFERENCE_DPI * 4.0).round() / 4.0;
+    scale.min(cap).max(1.0)
 }
 
 #[cfg(test)]
@@ -1392,80 +1367,33 @@ mod test {
             let diag_mm = diag_in * 25.4;
             let h_mm = diag_mm / (aspect.powf(2.0) + 1.0).sqrt();
             let w_mm = h_mm * aspect;
-            (calculate_scale(interface, (w_mm as u32, h_mm as u32), (w_px, h_px)) * 100.0) as i32
+            (calculate_scale(interface, (w_mm as u32, h_mm as u32), (w_px, h_px)) * 100.0).round()
+                as i32
         }
+        let dp = Interface::DisplayPort;
+        let edp = Interface::EmbeddedDisplayPort;
 
-        // Laptops
-        for &iface in &[Interface::EmbeddedDisplayPort, Interface::LVDS] {
-            // 14 inch 3:2
-            assert_eq!(scale(iface, 14.0, 3000, 2000), 200);
-
-            // Various sizes 16:9
-            for &diag_in in &[14.0, 15.6, 17.3] {
-                assert_eq!(scale(iface, diag_in, 1920, 1080), 100);
-                assert_eq!(scale(iface, diag_in, 2560, 1440), 150);
-                assert_eq!(scale(iface, diag_in, 3840, 2160), 200);
-            }
-
-            // Various sizes 16:10
-            for &diag_in in &[14.0, 16.0] {
-                assert_eq!(scale(iface, diag_in, 1920, 1200), 100);
-                assert_eq!(scale(iface, diag_in, 2560, 1600), 150);
-                assert_eq!(scale(iface, diag_in, 3840, 2400), 200);
-            }
-        }
-
-        // Desktops
-        for &iface in &[Interface::DisplayPort, Interface::HDMIA, Interface::HDMIB] {
-            // 24 inch 16:9
-            assert_eq!(scale(iface, 24.0, 1920, 1080), 100);
-            assert_eq!(scale(iface, 24.0, 2560, 1440), 150);
-            assert_eq!(scale(iface, 24.0, 3840, 2160), 200);
-
-            // Larger sizes 16:9
-            for &diag_in in &[27.0, 32.0, 38.0] {
-                assert_eq!(scale(iface, diag_in, 1920, 1080), 100);
-                assert_eq!(scale(iface, diag_in, 2560, 1440), 100);
-                assert_eq!(scale(iface, diag_in, 3840, 2160), 200);
-            }
-
-            // Smaller sizes 21:9
-            for &diag_in in &[26.0, 29.0] {
-                assert_eq!(scale(iface, diag_in, 2560, 1080), 100);
-                assert_eq!(scale(iface, diag_in, 3440, 1440), 150);
-                assert_eq!(scale(iface, diag_in, 5120, 2160), 200);
-            }
-
-            // Larger sizes 21:9
-            for &diag_in in &[34.0, 45.0] {
-                assert_eq!(scale(iface, diag_in, 2560, 1080), 100);
-                assert_eq!(scale(iface, diag_in, 3440, 1440), 100);
-                assert_eq!(scale(iface, diag_in, 5120, 2160), 200);
-            }
-
-            // Various sizes 32:9
-            for &diag_in in &[45.0, 49.0, 57.0] {
-                assert_eq!(scale(iface, diag_in, 3840, 1080), 100);
-                assert_eq!(scale(iface, diag_in, 5120, 1440), 100);
-                assert_eq!(scale(iface, diag_in, 7680, 2160), 200);
-            }
-        }
-
+        // Common panels (T-225)
+        assert_eq!(scale(dp, 24.0, 1920, 1080), 100);
+        assert_eq!(scale(dp, 27.0, 2560, 1440), 100);
+        assert_eq!(scale(dp, 27.0, 3840, 2160), 150);
+        assert_eq!(scale(edp, 14.0, 2880, 1800), 225);
+        assert_eq!(scale(edp, 13.0, 3840, 2400), 250);
+        // Others
+        assert_eq!(scale(edp, 14.0, 1920, 1080), 125);
+        assert_eq!(scale(edp, 15.6, 1920, 1080), 125);
+        assert_eq!(scale(dp, 32.0, 3840, 2160), 125);
+        assert_eq!(scale(dp, 34.0, 3440, 1440), 100);
+        // The owner's monitor: EDID 59 x 33 cm
+        assert_eq!(
+            (calculate_scale(Interface::HDMIA, (590, 330), (3840, 2160)) * 100.0).round() as i32,
+            150
+        );
         // TVs
-        for &iface in &[Interface::DisplayPort, Interface::HDMIA, Interface::HDMIB] {
-            // Various sizes 16:9
-            for &diag_in in &[40.0, 42.0, 48.0, 55.0, 65.0, 77.0, 83.0] {
-                assert_eq!(scale(iface, diag_in, 1920, 1080), 100);
-                assert_eq!(scale(iface, diag_in, 2560, 1440), 200);
-                assert_eq!(scale(iface, diag_in, 3840, 2160), 200);
-            }
-        }
-
-        // Zero sized displays (projectors, invalid EDID)
-        for &iface in &[Interface::DisplayPort, Interface::HDMIA, Interface::HDMIB] {
-            assert_eq!(scale(iface, 0.0, 1920, 1080), 100);
-            assert_eq!(scale(iface, 0.0, 2560, 1440), 100);
-            assert_eq!(scale(iface, 0.0, 3840, 2160), 200);
-        }
+        assert_eq!(scale(Interface::HDMIA, 55.0, 1920, 1080), 100);
+        assert_eq!(scale(Interface::HDMIA, 55.0, 3840, 2160), 200);
+        // No usable physical size (projectors, invalid EDID): 100 %
+        assert_eq!(scale(dp, 0.0, 1920, 1080), 100);
+        assert_eq!(scale(dp, 0.0, 3840, 2160), 100);
     }
 }

@@ -86,10 +86,15 @@ fn with_previews(ui: &Switcher) {
 }
 
 fn switcher() -> Switcher {
+    switcher_with(4)
+}
+
+/// The first `n` of four windows.
+fn switcher_with(n: usize) -> Switcher {
     let ui = Switcher::new().unwrap();
     ui.window().set_size(LogicalSize::new(1000., 400.));
     let item = |t, a, n, i: Image| switcher_item(t, a, n, i, Image::default());
-    ui.set_items(ModelRc::new(VecModel::from(vec![
+    let all = vec![
         item("Design", "Files", 2, icon("square.svg")),
         item("release-notes.md", "Text Editor", 1, icon("circle.svg")),
         item(
@@ -99,17 +104,24 @@ fn switcher() -> Switcher {
             icon("circle.svg"),
         ),
         item("~/src/shell", "Terminal", 1, Image::default()),
-    ])));
-    ui.set_selected(1);
+    ];
+    ui.set_items(ModelRc::new(VecModel::from(
+        all.into_iter().take(n).collect::<Vec<_>>(),
+    )));
+    ui.set_selected(usize::from(n > 1) as i32);
     ui.show().unwrap();
     ui
 }
 
-fn shot(dark: bool, name: &str, previews: bool) {
+fn shot(dark: bool, name: &str) {
+    shot_n(4, dark, name, false);
+}
+
+fn shot_n(n: usize, dark: bool, name: &str, previews: bool) {
     init();
     // Creating it registers the bundled font for the whole process.
     let _font = test_font::FontLoader::new().unwrap();
-    let ui = switcher();
+    let ui = switcher_with(n);
     if previews {
         with_previews(&ui);
     }
@@ -120,22 +132,22 @@ fn shot(dark: bool, name: &str, previews: bool) {
 
 #[test]
 fn renders_light() {
-    shot(false, "switcher", false);
+    shot(false, "switcher");
 }
 
 #[test]
 fn renders_dark() {
-    shot(true, "switcher-dark", false);
+    shot(true, "switcher-dark");
 }
 
 #[test]
 fn renders_previews_light() {
-    shot(false, "switcher-previews", true);
+    shot_n(4, false, "switcher-previews", true);
 }
 
 #[test]
 fn renders_previews_dark() {
-    shot(true, "switcher-previews-dark", true);
+    shot_n(4, true, "switcher-previews-dark", true);
 }
 
 #[test]
@@ -152,6 +164,26 @@ fn previews_leave_the_tile_names_unchanged() {
     let before = names(&ui);
     with_previews(&ui);
     assert_eq!(names(&ui), before);
+}
+
+#[test]
+fn renders_one_window() {
+    shot_n(1, false, "switcher-1", false);
+}
+
+#[test]
+fn renders_one_window_dark() {
+    shot_n(1, true, "switcher-1-dark", false);
+}
+
+#[test]
+fn renders_two_windows() {
+    shot_n(2, false, "switcher-2", false);
+}
+
+#[test]
+fn renders_two_windows_dark() {
+    shot_n(2, true, "switcher-2-dark", false);
 }
 
 #[test]

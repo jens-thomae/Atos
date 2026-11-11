@@ -111,37 +111,38 @@ component Tile inherits Rectangle {
                     image-fit: cover;
                 }
 
-                // No picture yet: the app's icon, large, or its initial.
-                if root.item.preview.width == 0: Image {
-                    accessible-role: none;
-                    width: Space.s7 + Space.s4;
-                    height: self.width;
-                    source: root.item.icon;
-                }
-                if root.item.preview.width == 0 && root.item.icon.width == 0: Text {
-                    accessible-role: none;
-                    text: root.item.initial;
-                    color: Palette.text-2;
-                    font-size: Type.display.size;
-                    font-weight: Type.display.weight;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
             }
 
-            // With a picture, the icon sits on its lower left corner.
-            if root.item.preview.width > 0: Image {
-                accessible-role: none;
+            // The icon sits on the preview's lower left corner (also while there is no picture).
+            Rectangle {
                 x: -Space.s1;
                 y: parent.height - self.height + Space.s1;
                 width: root.badge;
                 height: root.badge;
-                source: root.item.icon;
+                border-radius: Radius.control;
+                clip: true;
+                background: root.item.icon.width > 0 ? transparent : Palette.button-secondary;
+
+                Image {
+                    accessible-role: none;
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.item.icon;
+                }
+                if root.item.icon.width == 0: Text {
+                    accessible-role: none;
+                    text: root.item.initial;
+                    color: Palette.text;
+                    font-size: Type.label.size;
+                    font-weight: Type.label.weight;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
         }
 
         VerticalLayout {
-            padding-left: root.item.preview.width > 0 ? root.badge - Space.s2 : 0px;
+            padding-left: root.badge - Space.s2;
             Text {
                 accessible-role: none;
                 text: root.item.title;
@@ -251,7 +252,8 @@ export component Switcher inherits Window {
         }
 
         panel := Panel {
-            width: min(root.items.length * (root.tile-w + Space.s2) - Space.s2 + 2 * Space.s4, root.width - 2 * Space.s5);
+            // Never narrower than the hint row.
+            width: max(hints.preferred-width + 2 * Space.s4, min(root.items.length * (root.tile-w + Space.s2) - Space.s2 + 2 * Space.s4, root.width - 2 * Space.s5));
             height: strip.height + hints.preferred-height + 3 * Space.s3;
             x: (root.width - self.width) / 2;
             y: (root.height - self.height) / 2;
@@ -273,7 +275,7 @@ export component Switcher inherits Window {
                 accessible-label: "Open windows";
 
                 for item[i] in root.items: Tile {
-                    x: i * (root.tile-w + Space.s2);
+                    x: max(0px, (strip.width - strip.content-width) / 2) + i * (root.tile-w + Space.s2);
                     height: strip.height;
                     item: item;
                     current: i == root.selected;
@@ -284,6 +286,8 @@ export component Switcher inherits Window {
             hints := HorizontalLayout {
                 accessible-role: text;
                 accessible-label: "Alt Tab next, Shift back, backtick same app, W close window, Escape cancel";
+                x: 0px;
+                width: parent.width;
                 y: parent.height - self.preferred-height - Space.s3;
                 alignment: center;
                 spacing: Space.s4;

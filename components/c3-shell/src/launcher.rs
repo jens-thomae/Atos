@@ -184,11 +184,7 @@ fn launch(i: usize) {
     if let Some(dir) = &app.dir {
         cmd.current_dir(dir);
     }
-    match cmd.spawn() {
-        // ponytail: one thread per started app, only to reap it. Fine at human launch rates.
-        Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
-        Err(e) => eprintln!("launcher: {}: {e}", app.id),
-    }
+    crate::x11::spawn_detached(cmd, format!("launcher: {}", app.id));
 }
 
 /// Reads the desktop entries off the event loop; takes the result only if it changed.

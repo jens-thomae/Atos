@@ -149,7 +149,15 @@ jobs:
     timeout-minutes: 10
     permissions:
       actions: read # list earlier runs and download their artifacts
+      contents: read # the commits between the two nightlies
+    outputs:
+      regression: ${{ steps.compare.outputs.regression }}
     steps:
+      # Only the scripts under tools/ci; the binaries come from `build`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: perf-binaries
@@ -159,6 +167,7 @@ jobs:
           name: perf-results
           path: results
       - name: Compare with the previous nightly
+        id: compare
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,15 +176,15 @@ jobs:
           echo "### Compared with the previous nightly" >> "$GITHUB_STEP_SUMMARY"
           # Newest first; skip this run and nightlies that left no results.
           ids=$(gh run list -R "$GITHUB_REPOSITORY" --workflow perf.yml --event schedule \
-            --branch main --limit 20 --json databaseId --jq '.[].databaseId')
-          prev=""
-          for id in $ids; do
-            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            --branch main --limit 20 --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"')
+          prev="" prev_sha=""
+          while read -r id sha; do
+            [ -z "$id" ] || [ "$id" = "$GITHUB_RUN_ID" ] && continue
             if gh run download "$id" -R "$GITHUB_REPOSITORY" -n perf-results -D previous 2>/dev/null; then
-              prev=$id
+              prev=$id prev_sha=$sha
               break
             fi
-          done
+          done <<< "$ids"
           if [ -z "$prev" ]; then
             echo "No earlier nightly results; nothing to compare." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -189,8 +198,50 @@ jobs:
             echo "#### \`$name\`" >> "$GITHUB_STEP_SUMMARY"
             # Exit 1 = regression: marked in the table and as a warning, not a failed job.
             rc=0
-            bin/budgets compare "previous/$name" "$current" "$REGRESSION_THRESHOLD_PERCENT" \
-              | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
-            [ "$rc" -eq 1 ] && echo "::warning title=Perf regression::$name got worse than the previous nightly"
+            bin/budgets compare "previous/$name" "$current" "$REGRESSION_THRESHOLD_PERCENT" > table.md || rc=$?
+            cat table.md >> "$GITHUB_STEP_SUMMARY"
             [ "$rc" -le 1 ] || exit "$rc"
+            if [ "$rc" -eq 1 ]; then
+              echo "::warning title=Perf regression::$name got worse than the previous nightly"
+              mkdir -p regressed && mv table.md "regressed/$name.md"
+            fi
           done
+          # The issue text (empty without a regression), for `regression-report`. Scheduled runs only.
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            PREV_RUN=$prev PREV_SHA=$prev_sha bash tools/ci/perf-regression-body.sh regressed > report.md
+            if [ -s report.md ]; then echo "regression=true" >> "$GITHUB_OUTPUT"; fi
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.compare.outputs.regression == 'true'
+        with:
+          name: perf-regression-report
+          path: report.md
+          if-no-files-found: error
+          retention-days: 7
+
+  # Opens or updates the "Nightly perf regression" issue (docs/ci.md). Scheduled runs only, never pull requests.
+  # The only job with issues: write; hosted, never the NUC; runs only tools/ci/nightly-issue.sh. It never closes the
+  # issue: a nightly without regression only means nothing got worse since the night before.
+  regression-report:
+    needs: compare
+    if: github.event_name == 'schedule' && needs.compare.outputs.regression == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout of tools/ci
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: perf-regression-report
+          path: ${{ runner.temp }}/report
+      - run: bash tools/ci/nightly-issue.sh failure "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        env:
+          TITLE: Nightly perf regression
+          BODY_FILE: ${{ runner.temp }}/report/report.md
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

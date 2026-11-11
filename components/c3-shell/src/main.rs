@@ -14,6 +14,7 @@ mod portal;
 mod services;
 mod switcher;
 mod toplevels;
+mod x11;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -93,6 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let docks = docks.clone();
         control_centre::init(move |dark| {
+            switcher::set_dark(dark);
             for dock in docks.borrow().values() {
                 dock.global::<Palette>().set_dark(dark);
             }
