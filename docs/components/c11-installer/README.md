@@ -12,7 +12,27 @@ The installer ISO puts the sealed Atos image (C1) on an empty disk, **encrypted 
 | [`firstboot/`](../../../components/c11-installer/firstboot/) | `atos-tpm-seal`, the first-boot unit that binds the disk to Secure Boot (below) |
 | [`build-iso.sh`](../../../components/c11-installer/build-iso.sh) | Builds the installer image, then the ISO with image-builder's `generic-iso` type (pinned by digest), with the c1-base image as offline payload |
 | [`vm-test.sh`](../../../components/c11-installer/vm-test.sh) | The end-to-end test in the dev VM (below) |
-| [`.github/workflows/c11-installer.yml`](../../../.github/workflows/c11-installer.yml) | CI: builds the amd64 ISO, checks its contents, then installs it under KVM and boots it twice; on `main` it uploads the tested ISO (below) |
+| [`atos-installer.service`](../../../components/c11-installer/atos-installer.service) | Starts `atos-install` on tty1 of the live system (below) |
+| [`.github/workflows/c11-installer.yml`](../../../.github/workflows/c11-installer.yml) | CI: builds the amd64 ISO, checks its contents, then installs it under KVM through the interactive installer and boots it twice; on `main` it uploads the tested ISO (below) |
+
+User page: [installing from a USB stick](../../user/install-from-usb.md).
+
+## How the installer starts and when it restarts (#220)
+
+The live system boots to `multi-user.target`. `atos-installer.service` (`Type=idle`, enabled in the image; the getty on tty1 is disabled and conflicts with it) runs `atos-install` on tty1 with the terminal as its input and output. It asks for the disk, the word `erase` and the password twice, installs, shows the recovery key and waits for Enter, then reports the time and waits for Enter again.
+
+- **Only `atos-install` restarts the machine**, with `systemctl reboot`, after the install has finished and the user pressed Enter at "Press Enter to restart". The unit itself never restarts anything.
+- **After a failure** it shows the error and asks "Press Enter to try again, or type "shell" for a shell". A retry first undoes what the failed attempt left mounted or open (the target mounts, its `/var/tmp` bind mount, the LUKS mapping, the install-time key file), then starts again with the disk question. The shell is a root `bash` on the live system; `exit` returns to the installer. Anyone at the keyboard of a machine booted from the media already has that much control.
+- **Without input** (the terminal went away) it stops instead of reading empty answers, so it cannot retry or restart in a loop.
+- `--yes` (the dev VM's unattended step) asks nothing but the password and never restarts or retries.
+
+**Why (#220).** Until #220 the unit had `ExecStartPost=-/usr/bin/systemctl reboot`. For `Type=idle` (as for `simple`) `ExecStartPost=` runs as soon as the main process has *started*, not after it exits, so every live boot restarted about 11 s in, in a loop, before the installer could ask anything. CI did not see it: its test turned the unit off and ran its own unattended unit. Reproduced under KVM with the unchanged ISO on PR #221's first run.
+
+## How the installer is tested
+
+`vm-test.sh install` (CI, `c11-installer.yml`) boots the **unchanged** ISO under QEMU with `-no-reboot`, so any restart ends QEMU. Two things are passed in as systemd credentials over SMBIOS, neither of which touches the installer unit: a test-only unit that copies the text of tty1 (`/dev/vcs1`) to the serial log whenever it changes (lines prefixed `ATOS-SCREEN`), with the installer's and logind's journal, and a drop-in that keeps the serial getty off the serial port. The host watches the serial log and, when each question shows on the screen, types the answer on the VM's keyboard through the QEMU monitor (`sendkey`, as `c1-base/shell-boot-test.sh` types the login): the number of the empty disk, `erase`, the password twice, Enter after the recovery key, Enter to restart. The test fails unless all six answers were typed, the screen says the install finished, the kernel then restarted, and the password appears nowhere in the log (it is not echoed). A failure prompt on the screen stops the test at once. The installed disk then goes through `enrol`, `boot` and `reboot` as below, and only then does a push to `main` upload the ISO.
+
+The interactive path installs the installer's built-in image reference (`ghcr.io/jens-thomae/atos/c1-base:latest`), which is CI's payload. The dev VM's payload is a local registry reference, so `vm-test.sh all` there uses `unattended`: `atos-install --yes --target-imgref …` in a test unit, with the installer unit turned off.
 
 ## Getting the ISO (#202)
 
@@ -114,7 +134,7 @@ limactl restart atos-c11
 ATOS_VM=atos-c11 tools/dev-vm/vm run components/c11-installer/vm-test.sh all
 ```
 
-The HWE kernel is needed because `bootc install` mounts EROFS from a file (Linux 6.12 or newer; see the C1 README). On the M1 dev VM, QEMU runs aarch64 without KVM (x86_64 with KVM where `/dev/kvm` exists, as in CI), with AAVMF Secure Boot firmware and an `swtpm` TPM 2.0. The unattended run and the report are passed in as systemd credentials over SMBIOS, so the ISO and the image carry no test hook.
+The HWE kernel is needed because `bootc install` mounts EROFS from a file (Linux 6.12 or newer; see the C1 README). On the M1 dev VM, QEMU runs aarch64 without KVM (x86_64 with KVM where `/dev/kvm` exists, as in CI), with AAVMF Secure Boot firmware and an `swtpm` TPM 2.0. The test units (the screen copy, the unattended install, the report) are passed in as systemd credentials over SMBIOS, so the ISO and the image carry no test hook.
 
 ### Results
 

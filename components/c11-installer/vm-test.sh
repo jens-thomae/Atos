@@ -101,7 +101,7 @@ ExecStart=/bin/sh -c '{ echo \"$TEST_PASSWORD\"; echo \"$TEST_PASSWORD\"; } | at
 # shellcheck disable=SC2016 # expands in the guest
 SCREEN_SCRIPT='exec > /dev/'"$SERIAL"' 2>&1
 journalctl -fb -o short-monotonic -u atos-installer.service -u systemd-logind.service | sed "s/^/ATOS-JOURNAL /" &
-cols=$(od -An -tu1 -j1 -N1 /dev/vcsa1 | tr -d " ")
+cols=$(od -An -tu1 -j1 -N1 /dev/vcsa1 | tr -d " "); echo "ATOS-SCREEN-START cols=${cols:=80}"
 old=
 while :; do
   s=$(fold -w "$cols" /dev/vcs1 | sed "s/ *$//" | grep -v "^$")
@@ -124,7 +124,7 @@ answer_installer() {
   local a
   [ "$asked" -lt ${#QUESTIONS[@]} ] && grep -aqF "${QUESTIONS[asked]}" "$1" || return 0
   case $asked in
-    0) a=$(tr -d '\r' < "$1" | grep -aoE '[0-9]+\) /dev/vda ' | tail -n 1); a=${a%%)*} ;; # the empty disk's number
+    0) a=$(tr -d '\r' < "$1" | grep -aoE '[0-9]+\) /dev/vda ' | tail -n 1 || true); a=${a%%)*} ;; # the empty disk's number
     1) a=erase ;;
     2 | 3) a=$TEST_PASSWORD ;;
     *) a= ;; # Enter

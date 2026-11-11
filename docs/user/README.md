@@ -8,4 +8,4 @@ Pages here are for people who use Atos, not for people who build it. A card that
 - **One task per page**, named for the task ("Turning Secure Boot off and on").
 - **Developer detail** (how it works, why it was decided) stays under `docs/components/` or `docs/decisions/`; link to it from the page if useful.
 
-Pages: [secure-boot-off-and-on.md](secure-boot-off-and-on.md).
+Pages: [install-from-usb.md](install-from-usb.md), [secure-boot-off-and-on.md](secure-boot-off-and-on.md).
