@@ -112,12 +112,13 @@ if wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 2 ]"; then echo ATOS-SHE
 pgrep -u atos -x atos-comp >/dev/null && echo ATOS-COMP-STILL-RUNNING
 journalctl -b _COMM=atos-comp -o short-monotonic --no-pager | sed "s/^/DIAG comp-log /"
 # Wi-Fi and Bluetooth (#231), after the idle numbers: the VM has no radio, so only the software side. NetworkManager
-# loaded its Wi-Fi plugin, bluetoothd runs without an adapter and bluetoothctl talks to it, and none of
+# loaded its Wi-Fi plugin, bluetoothd runs without an adapter (bluetooth.service needs /sys/class/bluetooth, which the
+# module creates; with no adapter nothing loads it) and bluetoothctl talks to it, and none of
 # NetworkManager, iwd and bluetoothd listens on a socket.
 echo "ATOS-IWD $(systemctl is-active iwd.service)"
 journalctl -b -u NetworkManager -o cat --no-pager | grep -q "Loaded device plugin: NMWifiFactory" \
   && echo ATOS-NM-WIFI-PLUGIN || echo ATOS-CHECK-FAIL NetworkManager did not load its Wi-Fi plugin
-systemctl start bluetooth.service && timeout 10 bluetoothctl list >/dev/null \
+modprobe bluetooth && systemctl start bluetooth.service && timeout 10 bluetoothctl list >/dev/null \
   && echo ATOS-BLUETOOTHCTL-OK || echo ATOS-CHECK-FAIL bluetoothctl cannot talk to bluetoothd
 l=$(ss -Hltunp | grep -E "\"(NetworkManager|iwd|bluetoothd)\"" || true)
 [ -z "$l" ] && echo ATOS-WIRELESS-NO-LISTENERS || echo "ATOS-CHECK-FAIL listening: $l"
