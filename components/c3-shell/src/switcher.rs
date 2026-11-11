@@ -225,6 +225,16 @@ fn previews() {
     }) else {
         return;
     };
+    // A minimised window keeps the placeholder with its icon (card #266).
+    let minimized: Vec<u32> = toplevels::list()
+        .into_iter()
+        .filter(|t| t.minimized)
+        .map(|t| t.id)
+        .collect();
+    let ids: Vec<u32> = ids
+        .into_iter()
+        .filter(|id| !minimized.contains(id))
+        .collect();
     capture::start(&ids, size, preview_arrived);
 }
 
