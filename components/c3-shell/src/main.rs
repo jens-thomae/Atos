@@ -106,7 +106,10 @@ fn new_dock(
     // a window's output is known to the shell.
     let weak = dock.as_weak();
     dock.on_slot_rect(move |id, x, y, w, h| {
-        if let Some(s) = weak.upgrade().and_then(|d| platform::surface_of(d.window())) {
+        if let Some(s) = weak
+            .upgrade()
+            .and_then(|d| platform::surface_of(d.window()))
+        {
             toplevels::set_rectangle(id as u32, &s, x as i32, y as i32, w as i32, h as i32);
         }
     });
