@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::State;
+use crate::utils::prelude::OutputExt;
 use crate::wayland::protocols::a11y::A11yHandler;
 use anyhow::{Context, Result, anyhow};
 use atos_comp_config::NumlockState;
 use cosmic_config::CosmicConfigEntry;
 use cosmic_settings_daemon_config::greeter;
-use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
+use smithay::{
+    output::Output,
+    reexports::{calloop::EventLoop, wayland_server::DisplayHandle},
+};
 use tracing::{info, warn};
 
 pub mod render;
@@ -46,14 +50,16 @@ pub fn init_backend_auto(
     };
 
     if res.is_ok() {
-        let output = state
-            .common
-            .shell
-            .read()
-            .outputs()
-            .next()
-            .with_context(|| "Backend initialized without output")
-            .cloned()?;
+        let output = initial_output(
+            &state
+                .common
+                .shell
+                .read()
+                .outputs()
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+        .with_context(|| "Backend initialized without output")?;
         let initial_seat = crate::shell::create_seat(
             dh,
             &mut state.common.seat_state,
@@ -161,4 +167,49 @@ pub fn init_backend_auto(
         }
     }
     res
+}
+
+/// The seat's first active output, where clients without an output of their own (the launcher) open:
+/// the one under the pointer, which starts at the origin. Not simply the first output, whose order
+/// follows smithay's DRM device `HashMap` and changes between boots (#195).
+fn initial_output(outputs: &[Output]) -> Option<Output> {
+    outputs
+        .iter()
+        .find(|o| o.geometry().contains((0, 0)))
+        .or(outputs.first())
+        .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smithay::output::{Mode, PhysicalProperties, Subpixel};
+
+    fn output(name: &str, x: i32) -> Output {
+        let o = Output::new(
+            name.into(),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: String::new(),
+                model: String::new(),
+                serial_number: String::new(),
+            },
+        );
+        let mode = Mode {
+            size: (1280, 800).into(),
+            refresh: 60_000,
+        };
+        o.change_current_state(Some(mode), None, None, Some((x, 0).into()));
+        o
+    }
+
+    #[test]
+    fn initial_output_is_under_the_pointer_not_first_found() {
+        // Device order put the right-hand output first, as in the failing boots.
+        let outputs = [output("Virtual-2", 1280), output("Virtual-1", 0)];
+        assert_eq!(initial_output(&outputs).unwrap().name(), "Virtual-1");
+        assert_eq!(initial_output(&outputs[..1]).unwrap().name(), "Virtual-2");
+        assert!(initial_output(&[]).is_none());
+    }
 }

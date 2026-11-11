@@ -57,6 +57,18 @@ CHECK='
 uid=$(id -u atos); rt=/run/user/$uid
 log() { journalctl -b -t atos-shell -o cat --no-pager; }
 wait_for() { for _ in $(seq 240); do eval "$1" && return 0; sleep 0.5; done; return 1; }   # 2 min
+# #195 evidence: count page-flip (vblank) events and the scanout flushes sent to QEMU per CRTC, from boot on.
+T=/sys/kernel/tracing
+{ echo 16384 >$T/buffer_size_kb; for e in drm/drm_vblank_event_queued drm/drm_vblank_event_delivered virtio_gpu/virtio_gpu_cmd_queue; do echo 1 >$T/events/$e/enable; done; } 2>/dev/null || echo "DIAG tracing unavailable"
+# diag <tag>: DRM devices, connectors, planes, flip counts and atos-comp'"'"'s threads, on the serial log only (DIAG <tag> lines).
+diag() {
+  { ls -l /sys/class/drm; for c in /sys/class/drm/card*-*; do echo "$c $(cat $c/status) $(cat $c/enabled) $(head -1 $c/modes)"; done
+    for f in /sys/kernel/debug/dri/*/state; do echo "== $f"; grep -E "plane\[|crtc\[|fb=|crtc-pos|active|enable" $f; done
+    awk "/drm_vblank_event|virtio_gpu_cmd_queue/ { e = \$5; for (i = 6; i <= NF; i++) if (\$i ~ /^(crtc|type)=/) e = e \" \" \$i; n[e]++ } END { for (k in n) print \"count\", n[k], k }" $T/trace
+    c=$(pgrep -u atos -x atos-comp | head -1)
+    for t in /proc/$c/task/*; do echo "thread $(cat $t/comm) $(cut -d" " -f3 $t/stat) wchan=$(cat $t/wchan)"; sed "s/^/  /" $t/stack; done
+  } 2>&1 | sed "s/^/DIAG $1 /"
+}
 # No autologin (#187): the host types user and password at the prompt once it is up.
 wait_for "pgrep -x agreety >/dev/null" && echo ATOS-LOGIN-READY || { echo ATOS-CHECK-FAIL no login prompt; systemctl poweroff --no-block; exit 0; }
 # What the login left behind (#187), for a failed login: no password text, only its status.
@@ -67,6 +79,7 @@ comp=$(pgrep -u atos -x atos-comp | head -1)
 t0=$(awk "{ printf \"%.2f\", \$22 / 100 }" /proc/$comp/stat)
 t1=$(journalctl -b -t atos-shell -o short-monotonic --no-pager | grep -m1 BUDGET_FIRST_FRAME | sed "s/^\[ *\([0-9.]*\)\].*/\1/")
 echo "ATOS-DOCK-UP uptime=$(cut -d. -f1 /proc/uptime)s"
+diag dock
 echo "ATOS-LOGIN-TO-DESKTOP-S $(awk "BEGIN { printf \"%.1f\", $t1 - $t0 }")"
 # Idle: startup finished, then 60 s more, so first-boot work is over (§7 "after login").
 systemctl is-system-running --wait >/dev/null 2>&1
@@ -85,10 +98,12 @@ echo "ATOS-SUNRECLAIM-KB $(awk "/^SUnreclaim:/ { print \$2 }" /proc/meminfo)"
 # The shortcut itself: the host presses Super through the QEMU monitor (atos-comp'"'"'s default binding), which runs
 # `atos-shell --launcher` from atos-comp. Nothing here calls the shell.
 # (QEMU sends the key to every keyboard: the default PS/2 one is the only one, a second device would toggle twice.)
+diag press
 echo ATOS-PRESS-SUPER
 wl=$(basename "$(ls -t $rt/wayland-[0-9] | head -1)")
 if wait_for "log | grep -q ^LAUNCHER_OPEN_MS"; then echo ATOS-LAUNCHER-OPEN; else echo ATOS-CHECK-FAIL launcher did not open; fi
 sleep 25   # the host retries the launcher screendump for up to 20 s of this (#192)
+diag launcher
 runuser -u atos -- env XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=$wl atos-shell --launcher   # closes it
 sleep 1
 # A crashing shell: the session stays, the shell returns.
@@ -105,6 +120,7 @@ systemctl start bluetooth.service && timeout 10 bluetoothctl list >/dev/null \
   && echo ATOS-BLUETOOTHCTL-OK || echo ATOS-CHECK-FAIL bluetoothctl cannot talk to bluetoothd
 l=$(ss -Hltunp | grep -E "\"(NetworkManager|iwd|bluetoothd)\"" || true)
 [ -z "$l" ] && echo ATOS-WIRELESS-NO-LISTENERS || echo "ATOS-CHECK-FAIL listening: $l"
+journalctl -b _COMM=atos-comp -o short-monotonic --no-pager | sed "s/^/DIAG comp-log /"
 sleep 6
 systemctl poweroff --no-block'
 # shellcheck disable=SC2016 # systemd expands it
@@ -137,7 +153,7 @@ rm -f "$W/mon.sock"
 echo "booting the installed disk"
 # shellcheck disable=SC2054 # commas are QEMU option syntax
 timeout "$tmo" qemu-system-x86_64 -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on \
-  "${acc[@]}" -smp 4 -m 4G -display none -device virtio-gpu-pci -nic none \
+  "${acc[@]}" -smp 4 -m 4G -display none -vga none -device virtio-gpu-pci -nic none \
   -drive if=pflash,format=raw,readonly=on,file=$F/OVMF_CODE_4M.secboot.fd -drive if=pflash,format=raw,file="$W/vars.fd" \
   -drive if=virtio,format=raw,file="$W/disk.raw" \
   -monitor unix:"$W/mon.sock",server=on,wait=off -serial file:"$OUT/boot.log" "${creds[@]}" &
@@ -154,6 +170,8 @@ type_keys() {
 }
 shots=(); halt='Freezing execution|Entering emergency mode|Kernel panic|[Ss]ecurity [Vv]iolation|ATOS-CHECK-FAIL'
 mon() { echo "$1" | socat - UNIX-CONNECT:"$W/mon.sock" >/dev/null; }
+# #195: one display head (-vga none). With QEMU's default VGA next to the virtio GPU the kernel numbers the two
+# connectors in probe order, so the head under the pointer (where the launcher opens) was not always the one screendump read.
 shot() { mon "screendump $W/$1.ppm"; shots+=("$1"); }
 # #192: the launcher's frame is not always on QEMU's screen 3 s after the marker (a screendump still showed the dock).
 # Retry until the picture differs from the dock's as the final check demands, for 20 s; if it never does the check fails as before.
