@@ -130,12 +130,19 @@ fn candidate_disks() -> Result<Vec<String>, String> {
     Ok(disks)
 }
 
+/// One line from the user. Without input (the terminal went away) the installer stops instead of
+/// taking an empty line as an answer, so it never retries in a loop or restarts on its own.
 fn ask(prompt: &str) -> String {
     print!("{prompt}");
     io::stdout().flush().ok();
     let mut s = String::new();
-    io::stdin().lock().read_line(&mut s).ok();
-    s.trim().to_string()
+    match io::stdin().lock().read_line(&mut s) {
+        Ok(n) if n > 0 => s.trim().to_string(),
+        _ => {
+            eprintln!("\natos-install: no input, stopping");
+            std::process::exit(1)
+        }
+    }
 }
 
 fn choose_disk() -> Result<String, String> {
@@ -219,9 +226,71 @@ fn wipe(s: String) {
     std::hint::black_box(&b);
 }
 
+/// Lines of at most 79 characters (the first after the "atos-install: " prefix): the console is 80.
+const TPM_HOWTO: &str = "\
+Most computers have a TPM 2.0, but it is often turned off. Restart the\n\
+computer, open the firmware setup (often F2, F10, Del or Esc right after\n\
+switching on) and turn on the setting called TPM, fTPM (AMD), PTT (Intel)\n\
+or Security Device. Then start the installer again.";
+
+/// #222: the TPM 2.0 the enrolment (`systemd-cryptenroll --tpm2-device=auto`) will use, checked
+/// before the disk question. `auto` takes the only TPM 2.0 resource manager (`/dev/tpmrm*`) that
+/// `--tpm2-device=list` shows and refuses when there is none or more than one. The kernel's
+/// `tpm_version_major` per TPM (`/sys/class/tpm/tpm*`) tells TPM 1.2 apart from none at all.
+fn tpm_problem(list: &str, versions: &[String]) -> Option<String> {
+    let devices: Vec<&str> = list
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .filter(|d| d.starts_with("/dev/tpmrm"))
+        .collect();
+    let v2 = versions.iter().any(|v| v == "2");
+    match devices.len() {
+        1 if v2 => None,
+        0 if !v2 && versions.iter().any(|v| v == "1") => Some(format!(
+            "this computer's TPM is version 1.2, and Atos needs a TPM 2.0\n\
+             to encrypt the disk. Nothing has been changed on any disk.\n\
+             Some computers can switch their TPM to 2.0 in the firmware setup.\n{TPM_HOWTO}"
+        )),
+        0 | 1 => Some(format!(
+            "this computer has no TPM 2.0 turned on, and Atos needs one\n\
+             to encrypt the disk. Nothing has been changed on any disk.\n{TPM_HOWTO}"
+        )),
+        _ => Some(format!(
+            "this computer has more than one TPM 2.0 ({}),\n\
+             and the installer can use only one. Nothing has been changed on any disk.\n\
+             Turn all but one off in the firmware setup, then start the installer again.",
+            devices.join(", ")
+        )),
+    }
+}
+
+fn check_tpm() -> Result<(), String> {
+    let out = Command::new("systemd-cryptenroll")
+        .arg("--tpm2-device=list")
+        .output()
+        .map_err(|e| format!("systemd-cryptenroll: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "listing the TPMs failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let versions = fs::read_dir("/sys/class/tpm")
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|e| fs::read_to_string(e.path().join("tpm_version_major")).ok())
+        .map(|v| v.trim().to_string())
+        .collect::<Vec<_>>();
+    tpm_problem(&String::from_utf8_lossy(&out.stdout), &versions).map_or(Ok(()), Err)
+}
+
 fn install(a: &Args) -> Result<(), String> {
     let arch = std::env::consts::ARCH;
     let root_type = root_type(arch).ok_or_else(|| format!("unsupported architecture {arch}"))?;
+    // Before anything is asked or written (#222): without the TPM the enrolment below would fail
+    // only after the disk was erased and a recovery key shown.
+    check_tpm()?;
     let disk = match &a.disk {
         Some(d) => d.clone(),
         None => choose_disk()?,
@@ -367,13 +436,34 @@ fn install(a: &Args) -> Result<(), String> {
     fs::remove_file(KEYFILE).map_err(|e| e.to_string())?;
 
     println!(
-        "\nAtos is installed on {disk} in {} s. Remove the installer media and restart.",
+        "\nAtos is installed on {disk} in {} s.\n\
+         After you press Enter the computer restarts. Remove the installer media then, so it starts Atos.",
         start.elapsed().as_secs()
     );
-    if !a.yes {
-        ask("Press Enter to restart. ");
-    }
     Ok(())
+}
+
+/// Undoes what a failed attempt left mounted or open, so a retry starts clean. Best effort: each
+/// step fails harmlessly when there is nothing to undo.
+fn cleanup() {
+    let quiet = |args: &[&str]| {
+        let _ = Command::new(args[0])
+            .args(&args[1..])
+            .stderr(std::process::Stdio::null())
+            .status();
+    };
+    // Only our bind mount of the target's scratch directory, never the live system's own /var/tmp.
+    let src = Command::new("findmnt")
+        .args(["-no", "SOURCE", "/var/tmp"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    if src.contains("lost+found/var-tmp") {
+        quiet(&["umount", "/var/tmp"]);
+    }
+    quiet(&["umount", "-R", TARGET]);
+    quiet(&["cryptsetup", "close", MAPPER]);
+    fs::remove_file(KEYFILE).ok();
 }
 
 fn write_private(path: &str, data: &[u8]) -> Result<(), String> {
@@ -499,14 +589,35 @@ fn deployment_etc(target: &Path) -> Result<std::path::PathBuf, String> {
     }
 }
 
+/// Interactive (no `--yes`): restarts the machine only after the install has finished and the user
+/// has pressed Enter. After a failure it shows the error and waits for the user to retry or open a
+/// shell; it never restarts on its own (#220). With `--yes` it exits instead and restarts nothing.
 fn main() -> ExitCode {
     let a = parse_args(std::env::args().skip(1));
-    match install(&a) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("atos-install: {e}");
-            ExitCode::FAILURE
+    loop {
+        let err = match install(&a) {
+            Ok(()) if a.yes => return ExitCode::SUCCESS,
+            Ok(()) => {
+                ask("Press Enter to restart. ");
+                return match sh(&["systemctl", "reboot"]) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => {
+                        eprintln!("atos-install: {e}\nRestart the computer with its power button.");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+            Err(e) => e,
+        };
+        eprintln!("atos-install: {err}");
+        if a.yes {
+            return ExitCode::FAILURE;
         }
+        if ask("\nPress Enter to try again, or type \"shell\" for a shell: ") == "shell" {
+            println!("Type \"exit\" to come back to the installer.");
+            let _ = Command::new("/bin/bash").arg("--login").status();
+        }
+        cleanup();
     }
 }
 
@@ -561,6 +672,59 @@ mod tests {
         assert!(ask("a\nb\n").is_err());
         assert!(ask("a\nb\na\nb\na\nb\nc\nc\n").is_err());
         assert!(ask("").is_err());
+    }
+
+    /// #220: the unit must not restart the machine; `ExecStartPost` ran as soon as the installer
+    /// had started. Only `main` restarts, after the user confirms.
+    #[test]
+    fn installer_unit_never_restarts() {
+        let unit = include_str!("../../atos-installer.service");
+        let lines = unit.lines().filter(|l| !l.starts_with('#'));
+        assert!(
+            lines
+                .clone()
+                .all(|l| !l.contains("reboot") && !l.starts_with("ExecStartPost"))
+        );
+        assert!(
+            lines
+                .clone()
+                .any(|l| l == "ExecStart=/usr/bin/atos-install")
+        );
+    }
+
+    /// `systemd-cryptenroll --tpm2-device=list` as systemd prints it (a table; with no device only
+    /// "No suitable TPM2 devices found." on standard error) and `tpm_version_major` per TPM.
+    #[test]
+    fn tpm_check() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let one = "PATH        DEVICE      DRIVER \n/dev/tpmrm0 MSFT0101:00 tpm_tis\n";
+        // TPM 2.0 present (QEMU's tpm-tis with swtpm, as in the KVM test).
+        assert_eq!(tpm_problem(one, &v(&["2"])), None);
+        // None: no TPM, or turned off in the firmware.
+        let none = tpm_problem("", &[]).unwrap();
+        assert!(none.contains("no TPM 2.0") && none.contains("fTPM") && none.contains("PTT"));
+        assert!(none.contains("Nothing has been changed"));
+        // TPM 1.2: the kernel has tpm0, but there is no resource manager for it.
+        let old = tpm_problem("", &v(&["1"])).unwrap();
+        assert!(old.contains("version 1.2") && old.contains("Security Device"));
+        // A tpmrm device the kernel does not call 2.0 is not trusted to work.
+        assert!(tpm_problem(one, &v(&["1"])).unwrap().contains("no TPM 2.0"));
+        assert!(tpm_problem(one, &[]).is_some());
+        // Two: `--tpm2-device=auto` refuses to choose.
+        let two = format!("{one}/dev/tpmrm1 STM0125:00  tpm_tis_spi\n");
+        assert!(
+            tpm_problem(&two, &v(&["2", "2"]))
+                .unwrap()
+                .contains("/dev/tpmrm0, /dev/tpmrm1")
+        );
+        // The header and the "no device" note are never taken for a device.
+        assert!(tpm_problem("No suitable TPM2 devices found.\n", &v(&["2"])).is_some());
+        // Every line fits the 80-column console, the first after "atos-install: ".
+        for m in [none, old] {
+            let mut lines = m.lines();
+            assert!(lines.next().unwrap().len() <= 79 - "atos-install: ".len());
+            assert!(lines.all(|l| l.len() <= 79), "{m}");
+        }
     }
 
     #[test]

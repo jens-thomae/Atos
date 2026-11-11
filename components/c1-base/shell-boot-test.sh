@@ -95,6 +95,18 @@ for d in /proc/[0-9]*; do
   p=$(awk "/^Pss:/ { print \$2 }" $d/smaps_rollup 2>/dev/null); [ -n "$p" ] && echo "$p $(cat $d/comm)"
 done | sort -rn | awk "{ t += \$1; n[\$2] += \$1; if (\$2 == \"atos-shell\") sh = \$1 } END { for (k in n) if (n[k] > 20000) print \"ATOS-PSS-PROC\", n[k], k; print \"ATOS-PSS-TOTAL-KB\", t; print \"ATOS-PSS-SHELL-KB\", sh }"
 echo "ATOS-SUNRECLAIM-KB $(awk "/^SUnreclaim:/ { print \$2 }" /proc/meminfo)"
+# NVIDIA suspend file (#223): systemd-sleep (systemd_sleep_t), in which driver 615 saves video memory, may create, write
+# and read files in /var/lib/systemd/sleep and not in /var/tmp. A copy of sh labelled as systemd-sleep'"'"'s entrypoint runs
+# in that domain; the refusal in /var/tmp shows it ran confined. (The driver'"'"'s unnamed file needs a subset of this.)
+d=/var/lib/systemd/sleep; m="$(stat -c "%a %U %C" $d 2>&1)"
+mkdir -p /run/t223 && cp /usr/bin/bash /run/t223/sh && chcon -t systemd_sleep_exec_t /run/t223/sh
+as_sleep() { systemd-run -q --wait -p SELinuxContext=system_u:system_r:systemd_sleep_t:s0 /run/t223/sh -c "echo atos >$1/t223 && read l <$1/t223"; }
+if [ "$m" != "700 root system_u:object_r:systemd_sleep_var_lib_t:s0" ]; then echo "ATOS-CHECK-FAIL $d: $m"
+elif ! as_sleep $d; then echo "ATOS-CHECK-FAIL systemd_sleep_t cannot write in $d"
+elif as_sleep /var/tmp; then echo "ATOS-CHECK-FAIL the systemd_sleep_t test did not run confined"
+else echo ATOS-NVIDIA-SLEEP-DIR-OK; fi
+journalctl -b _TRANSPORT=audit -o cat --no-pager | grep "t223" | sed "s/^/DIAG avc /"
+rm -rf /run/t223 $d/t223 /var/tmp/t223
 # The shortcut itself: the host presses Super through the QEMU monitor (atos-comp'"'"'s default binding), which runs
 # `atos-shell --launcher` from atos-comp. Nothing here calls the shell.
 # (QEMU sends the key to every keyboard: the default PS/2 one is the only one, a second device would toggle twice.)
@@ -223,5 +235,6 @@ echo "idle desktop RAM ${idle} MB (PSS ${pss} kB + SUnreclaim ${slab} kB; budget
 echo "shell RSS ${rss:?} KB (share 307200)"
 [ "$rss" -le 307200 ] || fail "shell RSS over its 300 MB share"
 [ "$idle" -le 800 ] || fail "idle desktop RAM $idle MB over 800 MB"
+grep -aq ATOS-NVIDIA-SLEEP-DIR-OK "$OUT/boot.log" || fail "NVIDIA suspend file check (#223) missing from the serial log"
 # Pixels: the screen is not one colour (dock), and the open launcher changes the picture a lot (scrim).
 python3 -I "$HERE/shot-diff.py" "$W/dock.ppm" "$W/launcher.ppm"

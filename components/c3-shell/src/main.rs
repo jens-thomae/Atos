@@ -12,6 +12,7 @@ mod platform;
 mod portal;
 mod services;
 mod toplevels;
+mod x11;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,13 +32,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // One model for all docks: every output shows the same running windows.
     let items = Rc::new(VecModel::<DockItem>::default());
-    {
-        let items = items.clone();
-        let icons = RefCell::new(HashMap::new());
-        toplevels::on_change(move |list| update(&items, &list, &mut icons.borrow_mut()));
-    }
-
     let docks = Rc::new(RefCell::new(HashMap::<u32, Dock>::new()));
+    // Icons are loaded for the physical size of the sharpest dock (the model is shared); when a
+    // dock's scale becomes known or changes, the same list is read again.
+    let refresh = {
+        let (items, docks) = (items.clone(), docks.clone());
+        let icons = RefCell::new(Icons::default());
+        Rc::new(move |list: Vec<toplevels::Toplevel>| {
+            let px = docks
+                .try_borrow()
+                .map(|d| dock_icon_px(&d))
+                .unwrap_or_default();
+            update(&items, &list, &mut icons.borrow_mut(), px)
+        })
+    };
+    {
+        let refresh = refresh.clone();
+        toplevels::on_change(move |list| refresh(list));
+    }
+    {
+        let refresh = refresh.clone();
+        platform::on_scale_changed(move |_| refresh(toplevels::list()));
+    }
     let first_error = Rc::new(RefCell::new(None));
     {
         let (docks, first_error) = (docks.clone(), first_error.clone());
@@ -101,17 +117,17 @@ fn new_dock(
 
 /// Keeps the model in step with the compositor's list, changing only rows that differ so the
 /// docks do not rebuild every slot on each title change. Icons are read once per app ID.
-fn update(
-    items: &VecModel<DockItem>,
-    list: &[toplevels::Toplevel],
-    icons: &mut HashMap<String, slint::Image>,
-) {
+fn update(items: &VecModel<DockItem>, list: &[toplevels::Toplevel], icons: &mut Icons, px: u32) {
+    if px != std::mem::replace(&mut icons.px, px) {
+        icons.map.clear();
+    }
     let new: Vec<DockItem> = list
         .iter()
         .map(|t| {
             let icon = icons
+                .map
                 .entry(t.app_id.clone())
-                .or_insert_with(|| atos_shell::icons::load(&t.app_id))
+                .or_insert_with(|| atos_shell::icons::load(&t.app_id, px))
                 .clone();
             dock_item(t.id, &t.title, &t.app_id, t.activated, icon)
         })
@@ -126,4 +142,20 @@ fn update(
             None => items.push(item),
         }
     }
+}
+
+/// Icons by app ID, loaded for `px` physical pixels.
+#[derive(Default)]
+struct Icons {
+    px: u32,
+    map: HashMap<String, slint::Image>,
+}
+
+/// The physical size of the biggest dock tile (a dock not configured yet counts as scale 1).
+fn dock_icon_px(docks: &HashMap<u32, Dock>) -> u32 {
+    docks
+        .values()
+        .map(|d| (d.get_tile_size() * d.window().scale_factor()).ceil() as u32)
+        .max()
+        .unwrap_or(40)
 }

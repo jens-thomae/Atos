@@ -54,6 +54,45 @@ fn renders_running_windows() {
     assert_screenshot(&ui, env!("CARGO_MANIFEST_DIR"), "dock");
 }
 
+/// The dock at an output scale: the window is the same logical size, the snapshot is in physical
+/// pixels (sizes below are physical), and the screenshot is sharp rather than an upscaled 1x one.
+fn at_scale(scale: f32) -> Dock {
+    let (ui, _) = dock();
+    ui.window().dispatch_event(WindowEvent::ScaleFactorChanged {
+        scale_factor: scale,
+    });
+    // What the shell's platform does on configure: the buffer is the logical size times the scale.
+    ui.window().set_size(slint::PhysicalSize::new(
+        (560. * scale) as u32,
+        (64. * scale) as u32,
+    ));
+    ui
+}
+
+#[test]
+fn renders_at_scale_1() {
+    init();
+    let ui = at_scale(1.);
+    assert_eq!(ui.window().size(), slint::PhysicalSize::new(560, 64));
+    assert_screenshot(&ui, env!("CARGO_MANIFEST_DIR"), "dock");
+}
+
+#[test]
+fn renders_at_scale_1_5() {
+    init();
+    let ui = at_scale(1.5);
+    assert_eq!(ui.window().size(), slint::PhysicalSize::new(840, 96));
+    assert_screenshot(&ui, env!("CARGO_MANIFEST_DIR"), "dock-scale-1.5");
+}
+
+#[test]
+fn renders_at_scale_2() {
+    init();
+    let ui = at_scale(2.);
+    assert_eq!(ui.window().size(), slint::PhysicalSize::new(1120, 128));
+    assert_screenshot(&ui, env!("CARGO_MANIFEST_DIR"), "dock-scale-2");
+}
+
 #[test]
 fn names_every_window_and_the_focused_one() {
     init();

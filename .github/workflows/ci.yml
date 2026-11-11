@@ -38,6 +38,8 @@ jobs:
           persist-credentials: false
       - run: bash tools/ci/test-is-docs-only.sh
       - run: bash tools/ci/test-mirror-base.sh
+      - run: bash tools/ci/test-perf-regression-body.sh
+      - run: bash tools/dev-push/test.sh
       - id: diff
         shell: bash
         run: |

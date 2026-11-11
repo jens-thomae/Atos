@@ -3,10 +3,12 @@ Description=Atos installer
 After=systemd-user-sessions.service plymouth-quit-wait.service
 Conflicts=getty@tty1.service
 
+# atos-install restarts the machine itself, once the install has finished and the user has pressed
+# Enter; after a failure it waits on tty1 (#220). No ExecStartPost=: for Type=idle it runs as soon
+# as the installer has started, which restarted the live system in a loop.
 [Service]
 Type=idle
 ExecStart=/usr/bin/atos-install
-ExecStartPost=-/usr/bin/systemctl reboot
 StandardInput=tty
 StandardOutput=tty
 StandardError=tty

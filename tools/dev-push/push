@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Push a shell build to an installed Atos test machine (#201, docs/dev-loop.md).
+#   push <host> [--comp]          build atos-shell (and atos-comp) on <host>, swap it in, restart it
+#   push <host> --live            live-preview shell: later pushes that change only .slint files reload in place
+#   push screenshot <host> [file] PNG of <host>'s screen (default: screenshot.png)
+# <host> must be a `Host` alias in ~/.ssh/config (the owner's set-up on #201). Nothing is built on
+# this machine: the source goes over SSH, the PC builds it in the image's own stage recipe
+# (components/c1-base/Containerfile) with rootless podman and installs it into its /usr overlay.
+# Refuses unless /usr on <host> is a writable `bootc usr-overlay` (D-015). Never asks for a password
+# (BatchMode), never calls sudo or bootc, and writes only the two binaries in the overlay and its
+# cache in ~/.cache/atos-dev-push. A reboot of <host> undoes the install; the cache, the podman
+# images and the atos-dev-push-* volumes stay (cleanup: docs/dev-loop.md).
+set -euo pipefail
+
+cache=.cache/atos-dev-push   # relative to the remote home: /var/home/atos/.cache/atos-dev-push
+
+# True if a `findmnt -nr -o FSTYPE,OPTIONS --mountpoint /usr` line is a writable overlay. With no
+# overlay, /usr is not a mount point and the line is empty; `--read-only` overlays start `ro,`.
+overlay_ok() { case $1 in "overlay rw,"*upperdir=*) return 0 ;; *) return 1 ;; esac; }
+
+# True if $1 is a literal name on a `Host` line of the ssh config $2 (no patterns, users or ports).
+alias_ok() {
+  case $1 in "" | -* | *[!A-Za-z0-9_-]*) return 1 ;; esac
+  awk -v h="$1" 'tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i == h) f = 1 } END { exit !f }' "$2"
+}
+
+# --- On the PC (run there by the Mac side below, from the synced source tree) ---------------------
+
+# The image build's own stage up to its first COPY: base image, dnf packages, pinned rustup.
+stage_file() { # <Containerfile> <stage>
+  grep '^ARG BASE=' "$1"
+  sed -n "/^FROM \${BASE} AS $2\$/,/^COPY --from=repo/p" "$1" | sed '$d'
+}
+# Tagged with the recipe's hash: an unchanged recipe reuses the image without calling podman build.
+builder_tag() { echo "localhost/atos-dev-push-$1:$(stage_file components/c1-base/Containerfile "$1" | sha256sum | cut -c1-16)"; }
+builder() { # <stage>
+  local tag
+  tag=$(builder_tag "$1")
+  podman image exists "$tag" && return 0
+  # --layers=false: the image's policy.json rejects containers-storage sources, and a build whose
+  # steps are all cached copies the cached image from there, which fails (#201). So no layer cache.
+  mkdir -p ~/"$cache"/empty
+  stage_file components/c1-base/Containerfile "$1" | podman build -q --layers=false -t "$tag" -f - ~/"$cache"/empty >/dev/null || return
+  # Drop builders of older recipes (a few GB each).
+  podman images --format '{{.Repository}}:{{.Tag}}' --filter reference="localhost/atos-dev-push-$1" |
+    grep -vxF "$tag" | xargs -r podman rmi >/dev/null || true
+}
+
+# ponytail: plain release + incremental instead of the image's thin LTO, for a short warm build.
+in_builder() { # <stage> <command>
+  local src
+  src=$(realpath ~/"$cache"/src) # /var/home/atos/…: the path the live shell watches (a symlinked /home fails in the container)
+  # :z, not :Z: :Z gives each container its own category and so relabels all of target/ on every run.
+  podman run --rm \
+    -v "$src:/src:z" -v "$src:$src:z" -v "$HOME/$cache/target:/target:z" \
+    -v atos-dev-push-rustup:/opt/rustup -v atos-dev-push-registry:/opt/cargo/registry -v atos-dev-push-git:/opt/cargo/git \
+    -e CARGO_TARGET_DIR=/target -e CARGO_PROFILE_RELEASE_LTO=false -e CARGO_PROFILE_RELEASE_INCREMENTAL=true \
+    -e CARGO_TERM_COLOR=never -e SRC="$src" "$(builder_tag "$1")" sh -euc "$2"
+}
+
+swap() { # <binary>: replace /usr/bin/<binary> in place (keeps owner and mode); stop it first (ETXTBSY)
+  local dst=/usr/bin/$1 new=~/$cache/target/$1.new
+  [ -w "$dst" ] || { echo "push: $dst is not writable; at the PC: sudo chown atos $dst" >&2; exit 3; }
+  for _ in $(seq 20); do # the session restarts the shell after >= 1 s; retry if it won the race
+    pkill -x "$1" || true
+    while pgrep -x "$1" >/dev/null; do sleep 0.05; done
+    cp "$new" "$dst" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  echo "push: could not replace $dst" >&2; exit 1
+}
+
+# Copy the received tree ($cache/in) into $cache/src, rewriting only files that differ, in place:
+# unchanged files keep their mtime (cargo rebuilds only what changed), and Slint's live preview
+# reloads only on in-place writes (a file renamed over the old one goes unnoticed; #201).
+# ponytail: files deleted on the Mac stay in src; delete ~/.cache/atos-dev-push/src if that matters.
+sync_in() {
+  local f
+  cd ~/"$cache"/in
+  find . -type f | while IFS= read -r f; do
+    if [ ! -e "../src/$f" ]; then mkdir -p "../src/${f%/*}" && cp -p "$f" "../src/$f"
+    elif ! cmp -s "$f" "../src/$f"; then cat "$f" >"../src/$f"; fi
+  done
+}
+
+# Everything but the .slint files: if it is unchanged, a live shell needs no new binary.
+code_stamp() { find components tools third_party/slint/UPSTREAM third_party/slint/patches rust-toolchain.toml -type f ! -name '*.slint' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16; }
+
+wait_frame() { # <since>: the session loop (atos-session) restarts the shell; wait for its first frame
+  for _ in $(seq 400); do
+    journalctl -q -t atos-shell --since "@$1" -g '^BUDGET_FIRST_FRAME' >/dev/null 2>&1 && { echo "push: new shell on screen"; return 0; }
+    sleep 0.1
+  done
+  echo "push: no frame from the new shell after 40 s; see journalctl -t atos-shell" >&2; exit 1
+}
+
+on_pc() { # [--comp | --live]
+  sync_in
+  cd ~/"$cache"/src
+  mkdir -p ~/"$cache"/target
+  local t0 stamp code since
+  t0=$(date +%s)
+  if [ "${1:-}" = --live ]; then
+    code=$(code_stamp)
+    if [ "$(cat ~/"$cache"/live.stamp 2>/dev/null)" = "$code" ] && cmp -s ~/"$cache"/target/atos-shell.new /usr/bin/atos-shell; then
+      echo "push: only .slint files changed; the live shell reloads them by itself"
+      return 0
+    fi
+  fi
+  builder shell
+  # Slint fork: fetch and patch only when the pin or the queue changed.
+  stamp=$(cat third_party/slint/UPSTREAM third_party/slint/patches/* | sha256sum | cut -c1-16)
+  if [ "$(cat ~/"$cache"/slint.stamp 2>/dev/null)" != "$stamp" ] || [ ! -f third_party/slint/patch.toml ]; then
+    in_builder shell 'cd /src && tools/slint-fork/slint-fork.sh setup >/dev/null'
+    echo "$stamp" >~/"$cache"/slint.stamp
+  fi
+  rm -f ~/"$cache"/live.stamp
+  if [ "${1:-}" = --live ]; then
+    # Built from the source's path on the PC: the binary watches and reloads the .slint files there.
+    # shellcheck disable=SC2016 # $SRC expands in the container
+    in_builder shell 'cd "$SRC/components/c3-shell" && SLINT_LIVE_PREVIEW=1 CARGO_TARGET_DIR=/target/live cargo build -q --release --features slint/live-preview --config ../../third_party/slint/patch.toml && strip -o /target/atos-shell.new /target/live/release/atos-shell'
+  else
+    in_builder shell 'cd /src/components/c3-shell && cargo build -q --release --config ../../third_party/slint/patch.toml && strip -o /target/atos-shell.new /target/release/atos-shell'
+  fi
+  if [ "${1:-}" = --comp ]; then
+    builder comp
+    in_builder comp 'cd /src/components/c2-compositor && cp ../../rust-toolchain.toml . && cargo build -q --release --locked && strip -o /target/atos-comp.new /target/release/atos-comp'
+  fi
+  echo "push: built in $(($(date +%s) - t0)) s"
+  swap atos-shell
+  since=$(date +%s) # the session waits >= 1 s before it starts the new binary
+  [ "${1:-}" = --live ] && echo "$code" >~/"$cache"/live.stamp
+  if [ "${1:-}" = --comp ]; then
+    swap atos-comp # ends the session: greetd asks for the login again (no autologin, #187)
+    echo "push: atos-comp replaced; log in at the PC to start the new session"
+    return 0
+  fi
+  wait_frame "$since"
+}
+
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by test.sh: functions only
+if [ "${1:-}" = --on-pc ]; then shift; on_pc "$@"; exit; fi
+
+# --- On the Mac --------------------------------------------------------------------------------
+
+usage() { sed -n '3,5p' "$0" | sed 's/^# //' >&2; exit 2; }
+mode=build
+[ "${1:-}" = screenshot ] && { mode=screenshot; shift; }
+host=${1:-}; [ -n "$host" ] || usage; shift
+alias_ok "$host" ~/.ssh/config || { echo "push: '$host' is not a Host alias in ~/.ssh/config (set-up: #201)" >&2; exit 2; }
+
+ssh_() { ssh -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no "$host" "$@"; }
+guard="$(declare -f overlay_ok); overlay_ok \"\$(findmnt -nr -o FSTYPE,OPTIONS --mountpoint /usr)\" || { echo 'push: /usr is not a writable overlay on this boot; at the PC: sudo bootc usr-overlay' >&2; exit 3; }"
+# The newest wayland-N socket, as atos-session picks it. Expands on the PC.
+# shellcheck disable=SC2016
+wl='s=$(ls -t "$XDG_RUNTIME_DIR"/wayland-[0-9] | head -1); export WAYLAND_DISPLAY=${s##*/}'
+
+if [ $mode = screenshot ]; then
+  out=${1:-screenshot.png}
+  ssh_ "$guard; command -v grim >/dev/null || { echo 'push: no grim on the PC; at the PC: sudo dnf install -y grim' >&2; exit 3; }; $wl; grim -" >"$out.part"
+  mv "$out.part" "$out"; echo "push: $out"
+  exit 0
+fi
+
+opt=
+case ${1:-} in --comp | --live) opt=$1 ;; "") ;; *) usage ;; esac
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+cd "$root"
+paths=(rust-toolchain.toml components/c1-base/Containerfile tools/dev-push tools/slint-fork third_party/slint components/c4-toolkit components/c3-shell)
+[ "$opt" = --comp ] && paths+=(components/c2-compositor)
+start=$(date +%s)
+# The working tree as it is (uncommitted edits included), without ignored files (target/, the Slint
+# checkout). The PC unpacks it next to its copy and rewrites only the files that differ (sync_in).
+git ls-files -co --exclude-standard -- "${paths[@]}" | while IFS= read -r f; do [ -e "$f" ] && echo "$f"; done |
+  COPYFILE_DISABLE=1 tar -c --no-xattrs --no-mac-metadata -T - -f - |
+  ssh_ "$guard; rm -rf $cache/in && mkdir -p $cache/in $cache/src && tar -x --warning=no-unknown-keyword -C $cache/in -f - && exec bash $cache/in/tools/dev-push/push --on-pc $opt"
+echo "push: $(($(date +%s) - start)) s in all"

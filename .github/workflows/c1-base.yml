@@ -54,7 +54,7 @@ jobs:
         with:
           fetch-depth: 0 # a push is diffed from github.event.before, which may be several commits back (about 10 MB)
           persist-credentials: false
-      - run: bash tools/ci/test-is-image-change.sh && bash tools/ci/test-nightly-issue.sh
+      - run: bash tools/ci/test-is-image-change.sh && bash tools/ci/test-nightly-issue.sh && bash tools/ci/test-retry.sh
       - id: diff
         shell: bash
         env:
@@ -91,10 +91,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Network steps retry transient failures (#246, docs/ci.md): apt with Acquire::Retries, the rest with
+      # tools/ci/retry.sh. The runner's packages come first, so a mirror outage fails in a minute, not after the build.
+      - &runner-packages
+        name: Install runner packages (seal check, boot test)
+        run: sudo apt-get -o Acquire::Retries=8 install -y -q --no-install-recommends sbsigntool qemu-system-x86 ovmf python3-virt-firmware socat imagemagick > /dev/null
       - name: Log in to the layer cache (read only)
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        run: |
+          # shellcheck disable=SC2016 # the inner shell expands $TOKEN, so it never appears in the retry's arguments
+          tools/ci/retry.sh sh -c 'echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin'
       # The base pin is our mirror of the recorded quay.io digest, and the mirror holds it (#117). Same login, read only.
       # A bump's copy (base-mirror.yml) starts on the same push, so wait for it up to 10 min.
       - name: Base image is mirrored
@@ -103,7 +110,8 @@ jobs:
       - &free-disk
         name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - run: podman build --pull=missing --cache-from "$CACHE" --cache-ttl "$CACHE_TTL" --build-context repo=. -t c1-base components/c1-base
+      # One retry for dnf, curl and the cache inside the build: finished layers come from local storage.
+      - run: RETRY_ATTEMPTS=2 tools/ci/retry.sh podman build --pull=missing --cache-from "$CACHE" --cache-ttl "$CACHE_TTL" --build-context repo=. -t c1-base components/c1-base
       # The steps marked &name below also run in `nightly` (YAML aliases), so both lanes check the same things.
       - &countme
         name: countme is masked (D-005)
@@ -113,9 +121,7 @@ jobs:
         run: podman run --rm c1-base sh -c 'test "$(systemctl is-enabled greetd)" = enabled && atos-comp --version && test -x /usr/bin/atos-shell && test -x /usr/libexec/atos/atos-session && test -x /usr/bin/Xwayland'
       - &seal
         name: UKI and systemd-boot are signed and seal the image (#54)
-        run: |
-          sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
-          components/c1-base/check-seal.sh c1-base
+        run: components/c1-base/check-seal.sh c1-base
       - &nvidia
         name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
         run: components/c1-base/nvidia/check.sh c1-base
@@ -128,7 +134,6 @@ jobs:
         name: Boot the image, check the dock and the launcher (#186)
         shell: bash  # pipefail: the script's exit code, not tee's, decides the step
         run: |
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf python3-virt-firmware socat imagemagick > /dev/null
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
           components/c1-base/shell-boot-test.sh c1-base shell-boot 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
@@ -168,6 +173,8 @@ jobs:
           [ -f components/c1-base/cosign.pub ] || { echo "::error::components/c1-base/cosign.pub missing"; exit 1; }
           # Content check, not names; the TEST db key is the only private key allowed (D-014: public).
           bash tools/ci/check-no-private-keys.sh
+      - name: Install runner packages (seal check)
+        run: sudo apt-get -o Acquire::Retries=8 install -y -q --no-install-recommends sbsigntool > /dev/null
 
       # The compositor build layers (toolchain plus target/) do not fit in the runner's ~14 GB free disk next to the base image.
       - name: Free runner disk
@@ -176,19 +183,20 @@ jobs:
       - name: Log in to the layer cache
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        run: |
+          # shellcheck disable=SC2016 # the inner shell expands $TOKEN, so it never appears in the retry's arguments
+          tools/ci/retry.sh sh -c 'echo "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin'
       # The label tells users where the corresponding source is (GPL, D-013); the tag is built below.
       # The version label is the commit time (UTC), the signed version floor's input (#75, docs/components/c1-base/trust-policy.md).
+      # One retry, as in `build`; it also covers the cache push (a cache, not the published image: Push below is not retried).
       - run: >-
-          podman build --pull=missing --cache-to "$CACHE" --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source"
+          RETRY_ATTEMPTS=2 tools/ci/retry.sh podman build --pull=missing --cache-to "$CACHE" --build-context repo=. --label "org.atos.source=$IMAGE:$GITHUB_SHA-source"
           --label "org.opencontainers.image.version=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d.%H%M%S HEAD)"
           -t c1-base components/c1-base
       - name: countme is masked (D-005)
         run: test "$(podman run --rm c1-base systemctl is-enabled rpm-ostree-countme.timer || true)" = masked
       - name: UKI and systemd-boot are signed and seal the image (#54)
-        run: |
-          sudo apt-get install -y -q --no-install-recommends sbsigntool > /dev/null
-          components/c1-base/check-seal.sh c1-base
+        run: components/c1-base/check-seal.sh c1-base
       - name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
         run: components/c1-base/nvidia/check.sh c1-base
       - name: Wi-Fi and Bluetooth packages, iwd backend, no connectivity check, unit states (#231)
@@ -206,7 +214,7 @@ jobs:
           git archive --prefix="atos-$GITHUB_SHA/" -o "src/atos-$GITHUB_SHA.tar.gz" HEAD
           # NVIDIA's open kernel modules (MIT/GPL-2.0), the exact commit the image's modules are built from (#162).
           (. components/c1-base/nvidia/UPSTREAM
-           git clone -q --depth 1 --branch "$tag" "$repo" "$RUNNER_TEMP/nv"
+           bash tools/ci/retry.sh git clone -q --depth 1 --branch "$tag" "$repo" "$RUNNER_TEMP/nv"
            test "$(git -C "$RUNNER_TEMP/nv" rev-parse HEAD)" = "$commit"
            git -C "$RUNNER_TEMP/nv" archive --prefix="open-gpu-kernel-modules-$tag/" -o "$PWD/src/open-gpu-kernel-modules-$tag.tar.gz" HEAD)
           podman run --rm c1-base rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > src/fedora-packages.txt
@@ -296,8 +304,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - *runner-packages
       - *free-disk
-      - run: podman build --pull=missing --build-context repo=. -t c1-base components/c1-base
+      - run: RETRY_ATTEMPTS=2 tools/ci/retry.sh podman build --pull=missing --build-context repo=. -t c1-base components/c1-base
       - *countme
       - *session
       - *seal

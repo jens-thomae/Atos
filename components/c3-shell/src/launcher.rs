@@ -28,6 +28,8 @@ const REQUEST: &[u8] = b"launcher";
 struct State {
     apps: Vec<App>,
     icons: HashMap<String, slint::Image>,
+    /// The physical size `icons` were loaded for.
+    icon_px: u32,
     ui: Option<Launcher>,
     shown: bool,
     started: bool,
@@ -53,6 +55,18 @@ pub fn init() {
         }
         Err(e) => eprintln!("launcher: {e}"),
     }
+    // The window's scale is known once it is configured: reload the icons for its physical size.
+    platform::on_scale_changed(|w| {
+        let query = STATE.with(|s| {
+            let s = s.borrow();
+            s.ui.as_ref()
+                .filter(|l| std::ptr::eq(l.window(), w) && s.shown)
+                .map(|l| l.get_query())
+        });
+        if let Some(q) = query {
+            search(&q);
+        }
+    });
     platform::on_frame_done(|w| {
         let opened = STATE.with(|s| {
             let mut s = s.borrow_mut();
@@ -126,13 +140,19 @@ fn close() {
 }
 
 fn items(s: &mut State, apps: &[App]) -> slint::ModelRc<AppItem> {
+    let px = s.ui.as_ref().map_or(0, |ui| {
+        (ui.get_icon_size() * ui.window().scale_factor()).ceil() as u32
+    });
+    if px != std::mem::replace(&mut s.icon_px, px) {
+        s.icons.clear();
+    }
     let items: Vec<AppItem> = apps
         .iter()
         .map(|a| {
             let icon = s
                 .icons
                 .entry(a.icon.clone())
-                .or_insert_with(|| icons::load_named(&a.icon))
+                .or_insert_with(|| icons::load_named(&a.icon, px))
                 .clone();
             app_item(&a.name, icon)
         })
@@ -162,11 +182,7 @@ fn launch(i: usize) {
     if let Some(dir) = &app.dir {
         cmd.current_dir(dir);
     }
-    match cmd.spawn() {
-        // ponytail: one thread per started app, only to reap it. Fine at human launch rates.
-        Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
-        Err(e) => eprintln!("launcher: {}: {e}", app.id),
-    }
+    crate::x11::spawn_detached(cmd, format!("launcher: {}", app.id));
 }
 
 /// Reads the desktop entries off the event loop; takes the result only if it changed.

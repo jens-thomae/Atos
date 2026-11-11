@@ -42,7 +42,11 @@ COPY atos-installer.service /usr/lib/systemd/system/atos-installer.service
 COPY --from=build /atos-install /usr/bin/atos-install
 COPY install-policy.json /usr/share/atos-install/install-policy.json
 # The live system runs only the installer: no bootloader updates, no greeter, no update timers.
+# Nothing else on tty1 (#220): on Fedora 45 its console is kmscon (kmsconvt@tty1, started with
+# getty.target, and autovt@tty1, which logind starts while tty1 is free). kmscon takes over the
+# display and the keyboard, so the installer ran where nobody could see or answer it.
 RUN systemctl mask bootloader-update.service bootc-fetch-apply-updates.timer rpm-ostree-countme.timer \
+      kmsconvt@tty1.service autovt@tty1.service \
     && systemctl disable getty@tty1.service \
     && systemctl enable atos-installer.service
 LABEL org.opencontainers.image.title="Atos installer"

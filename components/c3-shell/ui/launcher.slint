@@ -24,6 +24,8 @@ export component Launcher inherits Window {
     in property <string> font-family: Fonts.sans;
     // Rows in view at once; more scroll.
     out property <int> rows: 8;
+    // The size icons are drawn at; the shell loads them for it times the output's scale.
+    out property <length> icon-size: Size.control;
 
     // Empties the field, focuses it and scrolls to the top; the shell calls it on closing.
     public function reset() {

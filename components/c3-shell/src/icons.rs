@@ -8,31 +8,33 @@
 
 use std::path::{Path, PathBuf};
 
-// Smallest PNG first that is still at least the dock's tile (40 px at scale 1): decoding a list of
-// 256 px icons for the launcher costs far more than it shows.
-const CANDIDATES: &[&str] = &[
-    "icons/hicolor/scalable/apps/{}.svg",
-    "icons/hicolor/48x48/apps/{}.png",
-    "icons/hicolor/64x64/apps/{}.png",
-    "icons/hicolor/96x96/apps/{}.png",
-    "icons/hicolor/128x128/apps/{}.png",
-    "icons/hicolor/256x256/apps/{}.png",
-    "pixmaps/{}.svg",
-    "pixmaps/{}.png",
+// (path, pixel size; 0 = scalable). Smallest PNG first that is still at least the size the icon is
+// drawn at in physical pixels: decoding a list of 256 px icons for the launcher costs far more than
+// it shows, and a 48 px icon on a 2x output is blurry.
+const CANDIDATES: &[(&str, u32)] = &[
+    ("icons/hicolor/scalable/apps/{}.svg", 0),
+    ("icons/hicolor/48x48/apps/{}.png", 48),
+    ("icons/hicolor/64x64/apps/{}.png", 64),
+    ("icons/hicolor/96x96/apps/{}.png", 96),
+    ("icons/hicolor/128x128/apps/{}.png", 128),
+    ("icons/hicolor/256x256/apps/{}.png", 256),
+    ("pixmaps/{}.svg", 0),
+    ("pixmaps/{}.png", 0),
 ];
 
 /// The app's icon, or an empty image.
-pub fn load(app_id: &str) -> slint::Image {
-    icon_path(app_id)
+/// `px` is the physical size it is drawn at (logical size times the output's scale).
+pub fn load(app_id: &str, px: u32) -> slint::Image {
+    icon_path(app_id, px)
         .and_then(|p| slint::Image::load_from_path(&p).ok())
         .unwrap_or_default()
 }
 
-pub fn icon_path(app_id: &str) -> Option<PathBuf> {
-    icon_path_in(&data_dirs(), app_id)
+pub fn icon_path(app_id: &str, px: u32) -> Option<PathBuf> {
+    icon_path_in(&data_dirs(), app_id, px)
 }
 
-pub fn icon_path_in(dirs: &[PathBuf], app_id: &str) -> Option<PathBuf> {
+pub fn icon_path_in(dirs: &[PathBuf], app_id: &str, px: u32) -> Option<PathBuf> {
     // An app ID is a reverse-DNS name; refuse anything that could leave the data directories.
     if app_id.is_empty() || app_id.contains('/') || app_id.starts_with('.') {
         return None;
@@ -41,17 +43,17 @@ pub fn icon_path_in(dirs: &[PathBuf], app_id: &str) -> Option<PathBuf> {
         .iter()
         .find_map(|d| desktop_icon(&d.join("applications").join(format!("{app_id}.desktop"))))
         .unwrap_or_else(|| app_id.to_owned());
-    named_icon_in(dirs, &icon)
+    named_icon_in(dirs, &icon, px)
 }
 
 /// An `Icon=` value (a name or an absolute path) as an image, or an empty image.
-pub fn load_named(icon: &str) -> slint::Image {
-    named_icon_in(&data_dirs(), icon)
+pub fn load_named(icon: &str, px: u32) -> slint::Image {
+    named_icon_in(&data_dirs(), icon, px)
         .and_then(|p| slint::Image::load_from_path(&p).ok())
         .unwrap_or_default()
 }
 
-fn named_icon_in(dirs: &[PathBuf], icon: &str) -> Option<PathBuf> {
+fn named_icon_in(dirs: &[PathBuf], icon: &str, px: u32) -> Option<PathBuf> {
     if icon.is_empty() || icon.starts_with('.') {
         return None;
     }
@@ -61,9 +63,30 @@ fn named_icon_in(dirs: &[PathBuf], icon: &str) -> Option<PathBuf> {
     if icon.contains('/') {
         return None;
     }
-    dirs.iter()
-        .flat_map(|d| CANDIDATES.iter().map(|c| d.join(c.replace("{}", icon))))
-        .find(|p| p.is_file())
+    let found = |want: &dyn Fn(u32) -> bool| {
+        dirs.iter()
+            .flat_map(|d| {
+                CANDIDATES
+                    .iter()
+                    .map(move |(c, n)| (d.join(c.replace("{}", icon)), *n))
+            })
+            .filter(|(_, n)| want(*n))
+            .map(|(p, _)| p)
+            .find(|p| p.is_file())
+    };
+    // Scalable and unsized files draw sharp at any size; then the smallest PNG that is big
+    // enough; if none is, the biggest there is.
+    found(&|n| n == 0 || n >= px).or_else(|| {
+        CANDIDATES
+            .iter()
+            .rev()
+            .filter(|(_, n)| *n > 0)
+            .find_map(|(c, _)| {
+                dirs.iter()
+                    .map(|d| d.join(c.replace("{}", icon)))
+                    .find(|p| p.is_file())
+            })
+    })
 }
 
 /// `Icon=` in the `[Desktop Entry]` group.
@@ -129,16 +152,35 @@ mod tests {
 
         // Desktop entry gives the icon name; scalable is preferred, so 48x48 is the only match.
         assert_eq!(
-            icon_path_in(&dirs, "org.example.App"),
+            icon_path_in(&dirs, "org.example.App", 40),
             Some(b.join("icons/hicolor/48x48/apps/example-app.png"))
         );
         // No desktop entry: the app ID is the icon name.
         assert_eq!(
-            icon_path_in(&dirs, "other"),
+            icon_path_in(&dirs, "other", 40),
             Some(b.join("icons/hicolor/scalable/apps/other.svg"))
         );
-        assert_eq!(icon_path_in(&dirs, "missing"), None);
-        assert_eq!(icon_path_in(&dirs, "../a/applications/x"), None);
+        assert_eq!(icon_path_in(&dirs, "missing", 40), None);
+
+        // The PNG is picked for the physical size: the smallest one that is big enough, else the
+        // biggest there is.
+        std::fs::create_dir_all(b.join("icons/hicolor/128x128/apps")).unwrap();
+        std::fs::write(b.join("icons/hicolor/128x128/apps/example-app.png"), "").unwrap();
+        let pick = |px| icon_path_in(&dirs, "org.example.App", px).unwrap();
+        assert_eq!(pick(40), b.join("icons/hicolor/48x48/apps/example-app.png"));
+        assert_eq!(
+            pick(60),
+            b.join("icons/hicolor/128x128/apps/example-app.png")
+        );
+        assert_eq!(
+            pick(80),
+            b.join("icons/hicolor/128x128/apps/example-app.png")
+        );
+        assert_eq!(
+            pick(500),
+            b.join("icons/hicolor/128x128/apps/example-app.png")
+        );
+        assert_eq!(icon_path_in(&dirs, "../a/applications/x", 40), None);
         std::fs::remove_dir_all(root).unwrap();
     }
 }
