@@ -5,7 +5,9 @@
 # 2. NVIDIA's packaged files are unmodified: every installed file is verified against the pinned
 #    RPM Fusion packages, downloaded fresh and signature-checked;
 # 3. NVIDIA's licence is installed, the NGX updater is not turned on, NVK is present;
-# 4. driver selection, module options and the suspend services are in place.
+# 4. driver selection, module options and the suspend services are in place, and the driver's
+#    suspend file goes to a directory tmpfiles creates and Fedora's policy labels for systemd-sleep (#223).
+#    That systemd-sleep may write there is checked when the image boots (shell-boot-test.sh).
 # That the initramfs has no NVIDIA or nouveau module is checked when it is built (Containerfile, `kernel`).
 # Rootless podman and network access are enough. Usage: check.sh <image>
 set -euo pipefail
@@ -51,12 +53,15 @@ conf=$(modprobe -c)
 # The fallback to nouveau relies on nothing blacklisting it (RPM Fusion does so through GRUB arguments).
 ! grep -qE "^blacklist (nouveau|nova_core)\b" <<<"$conf" || fail "nouveau or nova_core blacklisted"
 for l in "softdep nouveau pre: nvidia-drm" "options nvidia_drm modeset=1 fbdev=1" \
-         "options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp"; do
+         "options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/lib/systemd/sleep"; do
   grep -qxF "$l" <<<"$conf" || fail "modprobe config lacks: $l"
 done
 for s in nvidia-suspend nvidia-resume nvidia-hibernate nvidia-suspend-then-hibernate; do
   [ "$(systemctl is-enabled "$s.service")" = enabled ] || fail "$s.service not enabled"
 done
 [ "$(systemctl is-enabled nvidia-powerd.service)" = disabled ] || fail "nvidia-powerd.service not disabled"
-echo "ok: driver selection, module options and suspend services; nvidia-powerd off"
+systemd-tmpfiles --cat-config | grep -xE "d /var/lib/systemd/sleep 0700 root root( -)*" >/dev/null || fail "no tmpfiles line for /var/lib/systemd/sleep"
+grep -qxE "/var/lib/systemd/sleep\(/\.\*\)\?[[:space:]]+system_u:object_r:systemd_sleep_var_lib_t:s0" \
+  /etc/selinux/targeted/contexts/files/file_contexts || fail "/var/lib/systemd/sleep is not labelled systemd_sleep_var_lib_t"
+echo "ok: driver selection, module options, suspend services and suspend file directory; nvidia-powerd off"
 '

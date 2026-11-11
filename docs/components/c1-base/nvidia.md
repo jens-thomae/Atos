@@ -84,9 +84,33 @@ RPM Fusion's own `nvidia-fallback.service` stays inert: its condition is RPM Fus
 | Setting | Where | Why |
 | --- | --- | --- |
 | `options nvidia-drm modeset=1 fbdev=1` | `atos-nvidia.conf` | KMS for the compositor, and replacing simpledrm (NVIDIA README, wayland-issues) |
-| `options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp` | `atos-nvidia.conf` | Video memory survives suspend; saved to disk, not tmpfs (NVIDIA README, powermanagement) |
-| `nvidia-suspend`, `nvidia-resume`, `nvidia-hibernate`, `nvidia-suspend-then-hibernate` enabled | Containerfile | Needed with `PreserveVideoMemoryAllocations=1`. On a machine without NVIDIA, `nvidia-sleep.sh` finds no `/proc/driver/nvidia/suspend` and does nothing |
+| `options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/lib/systemd/sleep` | `atos-nvidia.conf` | Video memory survives suspend, saved to disk, not tmpfs (NVIDIA README, powermanagement). Why this directory: [Suspend and SELinux](#suspend-and-selinux) |
+| `d /var/lib/systemd/sleep 0700 root root` | [`usr/lib/tmpfiles.d/atos-nvidia.conf`](../../../components/c1-base/usr/lib/tmpfiles.d/atos-nvidia.conf) | systemd does not create the directory. `/var` comes into being at install, so tmpfiles.d creates it at boot, with the SELinux label Fedora's policy gives that path |
+| `nvidia-suspend`, `nvidia-resume`, `nvidia-hibernate`, `nvidia-suspend-then-hibernate` enabled | Containerfile (RPM Fusion's preset) | **Not used with driver 615 as shipped**: RPM Fusion's units carry `ExecCondition=… grep -qs 'UseKernelSuspendNotifiers: 0' /proc/driver/nvidia/params`, so they are skipped while the driver's kernel suspend notifiers do the work. Kept enabled as the fallback: a user who sets `NVreg_UseKernelSuspendNotifiers=0` in `/etc/modprobe.d/` gets the older path through these services, which NVIDIA names as a workaround if the notifier path fails. On a machine without NVIDIA the condition is false too |
 | NGX updater off | nothing to configure | `allow_ngx_updater` defaults to false when no config file sets it (NVIDIA README, ngx). No file in the image sets it; CI checks that. A user can still opt in through `~/.config/nvidia-ngx-conf.json` (§2.6, D-005: off by default) |
+
+## Suspend and SELinux
+
+Card #223. With `NVreg_PreserveVideoMemoryAllocations=1`, driver 615's open modules save video memory into an unnamed file (`O_TMPFILE`) in `NVreg_TemporaryFilePath`. The open modules use kernel suspend notifiers by default (RPM Fusion's line to turn them on is commented out, and the owner's journal shows `nvidia-suspend` skipped because the parameter is not `0`), so the driver opens that file **from its kernel suspend notifier, inside the task that writes `/sys/power/state`: `systemd-sleep`, SELinux domain `systemd_sleep_t`**. Fedora's policy gives that domain only `append getattr ioctl lock read` on `tmp_t` files, so with `/var/tmp` the driver got `-13` and aborted every suspend on the owner's RTX 4070 Ti (journal on #223: `denied { write open } … scontext=systemd_sleep_t tcontext=tmp_t`).
+
+`/var/lib/systemd/sleep` needs no new policy. Fedora's file contexts label it `systemd_sleep_var_lib_t`, and the policy already allows (checked in `selinux-policy-targeted-45.23.fc45` with `sesearch`, 2026-11-11):
+
+```
+allow systemd_sleep_t systemd_sleep_var_lib_t:dir { add_name getattr ioctl lock open read remove_name search write };
+allow systemd_sleep_t systemd_sleep_var_lib_t:file { append create getattr ioctl link lock open read rename setattr unlink watch watch_reads write };
+allow systemd_sleep_t init_var_lib_t:dir { getattr open search };   # /var/lib/systemd
+```
+
+So the image adds no SELinux module and no rule, and no domain gains access it did not have. The directory is on the root file system (ext4, which supports unnamed temporary files), inside full-disk encryption, mode 0700 root. The file has no name and is gone after resume. It needs free space for the video memory in use, up to 12 GB on the RTX 4070 Ti; with less free space the driver aborts suspend with the same `could not reserve space` message.
+
+What others do (2026-11-11):
+
+- **NVIDIA's README** (615.78.08, powermanagement) asks for a file system that supports unnamed temporary files and is large enough, and recommends against tmpfs. It does not mention SELinux.
+- **NVIDIA upstream** (Aaron Plattner, [fedora-selinux/selinux-policy#3087](https://github.com/fedora-selinux/selinux-policy/pull/3087)) proposed `fs_write_tmpfs_files(systemd_sleep_t)` for a future driver that uses `shmem_file_setup()`. Not merged; closed in September 2026 for a driver-side workaround that did not make it into 615. For a distribution that sets `NVreg_TemporaryFilePath=`, he says the policy for that path is the distribution's job.
+- **RPM Fusion** used `/var/lib/systemd/sleep` with a tmpfiles line from March to September 2026 (rfbz#7428), then went back to `/var/tmp` because its own `nvidia-kmod` now carries that driver patch. We build the modules from NVIDIA's source unpatched, so that does not help us.
+- **Bluefin** ([projectbluefin/common#1374](https://github.com/projectbluefin/common/pull/1374), merged 2026-10-04) moved to `/var/lib/systemd/sleep` with the same tmpfiles line, and tested a `systemd_sleep_t` `O_TMPFILE` write there under enforcing SELinux (no AVC) and in `/var/tmp` (`EACCES`).
+
+Rejected: a broad allow on `tmp_t` (every `/tmp` and `/var/tmp` file), a tmpfs allow (RAM, and the file must survive for up to 12 GB), and our own labelled directory with a new rule (more policy for what Fedora already provides).
 
 ## Licence
 
@@ -102,9 +126,11 @@ RPM Fusion's own `nvidia-fallback.service` stays inert: its condition is RPM Fus
 1. The image has exactly the four modules. Each is signed by the TEST db key (`modinfo -F signer`) and has the image's vermagic. `nvidia.ko`'s version equals the pin, and so does the userspace. No package of another architecture (i686) is installed.
 2. NVIDIA's files are unmodified. The script downloads the seven pinned packages, checks their signatures, and runs `rpm -Vp` against the image: digest, size, mode and owner of every packaged file. Documentation is not installed (`nodocs`) and is skipped.
 3. The licence is installed, no file turns on the NGX updater, NVK's ICD is present.
-4. The driver-selection softdep, the module options and the suspend services are in place, and `nvidia-powerd` is disabled. Nothing blacklists `nouveau` or `nova_core`: the fallback depends on that, and RPM Fusion's own setup does blacklist them (through GRUB arguments, which we do not have).
+4. The driver-selection softdep, the module options and the suspend services are in place, and `nvidia-powerd` is disabled. The tmpfiles line for `/var/lib/systemd/sleep` exists and the image's file contexts label it `systemd_sleep_var_lib_t`. Nothing blacklists `nouveau` or `nova_core`: the fallback depends on that, and RPM Fusion's own setup does blacklist them (through GRUB arguments, which we do not have).
 
 The initramfs check runs when the image is built.
+
+**Boot check** ([`shell-boot-test.sh`](../../../components/c1-base/shell-boot-test.sh), KVM in CI): after boot, `/var/lib/systemd/sleep` is `700 root` with label `systemd_sleep_var_lib_t`; a shell started in `systemd_sleep_t` (a copy of `bash` labelled `systemd_sleep_exec_t`, through `systemd-run -p SELinuxContext=`) can create, write and read a file there and is refused in `/var/tmp`. The refusal shows the test ran confined. A named file needs more permissions than the driver's unnamed one (`create`, `add_name`), so passing covers the driver's case. The driver itself and a real suspend cannot run in a VM without an NVIDIA GPU.
 
 **Dev VM, Secure Boot on:** `tools/dev-vm/sealed.sh nvidia` boots the installed image with the TEST keys enrolled and loads `nvidia-drm` (results below).
 
@@ -153,11 +179,15 @@ D-017: a kernel or driver update ships only after this passes on the owner's mac
 
 1. **Boot and log in** (tty1, `atos` and the install password; #187). `bootctl status | grep 'Secure Boot'` shows `enabled (user)`.
 2. **The right driver is bound.** `lsmod | grep -E '^(nvidia|nouveau)'` lists `nvidia_drm`, `nvidia_modeset`, `nvidia_uvm`, `nvidia`, and `nouveau` with use count 0. `cat /proc/driver/nvidia/version` shows `Open Kernel Module` and the pinned version. `journalctl -k -b | grep -iE 'NVRM|nvidia'` has no errors or `taint` warnings other than the out-of-tree note.
-3. **Options are applied.** `cat /sys/module/nvidia_drm/parameters/{modeset,fbdev}` prints `Y` twice. `grep -E 'PreserveVideoMemoryAllocations|TemporaryFilePath' /proc/driver/nvidia/params` shows `1` and `"/var/tmp"`. `ls /sys/class/drm/` has no simpledrm card left.
+3. **Options are applied.** `cat /sys/module/nvidia_drm/parameters/{modeset,fbdev}` prints `Y` twice. `grep -E 'PreserveVideoMemoryAllocations|TemporaryFilePath|UseKernelSuspendNotifiers' /proc/driver/nvidia/params` shows `1`, `"/var/lib/systemd/sleep"` and a `UseKernelSuspendNotifiers` that is not `0`. `ls /sys/class/drm/` has no simpledrm card left.
 4. **`nvidia-smi`** shows the RTX 4070 Ti, driver 615.78.08 and a sensible temperature and power draw at idle.
 5. **Budgets.** `budgets <app> --cpu-window full` (docs/budgets.md); record the numbers on the release card. They are manual until #67 provides test hardware.
 6. **Two monitors.** Connect both; both show the desktop at their native mode and refresh rate; drag a window across.
-7. **Suspend and resume.** `systemctl suspend`, wake with a key: the desktop returns on both monitors, with no black screen or corruption (cosmic-comp #2955). `journalctl -b -u nvidia-suspend -u nvidia-resume` shows both ran.
+7. **Suspend and resume.** Before: `ls -ldZ /var/lib/systemd/sleep` shows `drwx------` `root root` `system_u:object_r:systemd_sleep_var_lib_t:s0`, and `df -h /var/lib/systemd/sleep` has more free space than `nvidia-smi --query-gpu=memory.used --format=csv` reports. Then `systemctl suspend` (and once from the control centre), wait until the screens are off, wake with a key: the desktop returns on both monitors, with no black screen or corruption (cosmic-comp #2955). After:
+   - `journalctl -b -k --grep 'PM: suspend|NVRM'` shows `PM: suspend entry (deep)` and `PM: suspend exit`, and no `could not be opened`, `could not reserve space` or `aborting suspend`.
+   - `journalctl -b --grep 'avc:  denied'` shows nothing from `systemd-sleep`.
+   - `journalctl -b -u nvidia-suspend -u nvidia-resume` shows both **skipped** (their `ExecCondition`): with kernel suspend notifiers the driver saves and restores video memory itself.
+   - `journalctl -b _COMM=atos-comp --since -5min` after the resume: note any `failed to set mode`, `New screen configuration invalid` or `Unable to clear state` lines on the release card (#223 saw them after the aborted suspend).
 8. **A Vulkan game** (Steam Flatpak, a Proton title) runs. Its GPU process appears in `nvidia-smi`.
 9. **Fallback.** `echo 'install nvidia /bin/false' | sudo tee /etc/modprobe.d/atos-no-nvidia.conf`, reboot: the desktop comes up on nouveau (`lsmod` shows `nouveau` in use, no `nvidia`). Remove the file and reboot: back on NVIDIA.
 10. **NGX updater off.** `ls ~/.config/nvidia-ngx-conf.json /usr/share/nvidia/nvidia-ngx-conf.json` finds nothing.
