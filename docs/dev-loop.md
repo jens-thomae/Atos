@@ -40,7 +40,7 @@ What `push` does:
 
 [`tools/dev-push/test.sh`](../tools/dev-push/test.sh) (run in `ci.yml`) checks the overlay guard, the alias check and that the builder takes the image's stage without any source. `push` never calls `sudo` or `bootc`, writes nothing in `/etc`, and writes in `/usr` only the two binaries. The overlay lives in RAM and is gone after a reboot. The installed image is untouched.
 
-`push screenshot` runs `grim` on the PC against atos-comp's screen-capture protocol (ext-image-copy-capture, offered to unsandboxed clients) and writes the PNG on the Mac. Agents use it to check a visual change themselves.
+`push screenshot` runs `grim` on the PC against atos-comp's screen-capture protocol (ext-image-copy-capture, offered to unsandboxed clients) and writes the PNG on the Mac. Agents use it to check a visual change themselves. **Not tested yet:** whether grim 1.5.0 (Fedora 45) captures atos-comp's screen. That grim speaks ext-image-copy-capture comes from its release notes; the dev VM has grim 1.4, which only speaks wlr-screencopy, so the test can only run on the PC. If it fails, no capture interface gets added here; it becomes a card.
 
 ## Times
 
