@@ -156,6 +156,6 @@ No step asks for an online account or a network (D-005); the VM has no network d
 
 **CI on x86_64** (`c11-installer.yml`): Ubuntu's OVMF refuses systemd-boot's enrolment of the TEST keys from `loader/keys/auto` (`Failed to write PK secure boot variable: Security violation`; AAVMF accepts the same files). CI therefore enrols them into the firmware variables after the install with `virt-fw-vars` (`vm-test.sh enrol`), then checks that the first boot runs with Secure Boot on and seals to PCR 7, and that the second unlocks without a prompt. Auto-enrolment by systemd-boot is covered only by the aarch64 dev VM. Real x86 firmware may refuse it the same way; key enrolment at install (#123) has to handle that.
 
-**Install time under KVM** (CI, `c11-installer.yml`, GitHub's amd64 runner, 4 vCPU, payload on the ISO): **105 s** from QEMU start to power-off, live boot included; the installer itself reports 82 s. Budget (§7): 600 s; the job fails above it.
+**Install time under KVM** (CI, `c11-installer.yml`, GitHub's amd64 runner, 4 vCPU, payload on the ISO): **105 s** from QEMU start to power-off, live boot included; the installer itself reports 82 s. Budget (§7): 600 s; the job fails above it. Through the interactive installer (#220, run 43022379810, 11 November 2026): **144 s** from QEMU start to the restart, typing included; the installer reports 117 s.
 
 Not yet measured: install time on real hardware, and x86_64 hardware with shim+MOK (PCR 7+14).
