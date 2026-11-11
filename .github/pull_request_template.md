@@ -5,7 +5,7 @@ Short summary of the change.
 
 ### How it was verified
 - [ ] Tests added or updated, and passing
-- [ ] Quality budgets (spec §7) checked, only if the card asks for it: <which ones, results>
+- [ ] Performance budgets (spec §7) checked, only if the card asks for it: <which ones, results>
 - [ ] Screenshot tests updated (UI changes only)
 
 ### Spec and decisions

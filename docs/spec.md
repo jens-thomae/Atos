@@ -104,7 +104,7 @@ This log records every architectural decision and its status. **Decided** entrie
 | D-015 | Developer mode (C1): turning it on enrols a per-machine developer db key with the per-machine KEK (TPM-resident if the signing tools support it, otherwise a root-only file; it also signs the PCR11 policy for developer UKIs). Locally built images FROM the verified release image are sealed, signed with it and booted with `bootc switch` from one fixed local reference, allowed in the trust policy only while developer mode is on. A rebuild service rebuilds and stages automatically on each release, using only the inputs pinned at the last authenticated build. `bootc usr-overlay` is available for transient changes. Signing, switching and toggling developer mode need admin authentication every time, through a shell-owned prompt that shows the warning for every entry point; turning warnings off shortens the dialog but keeps the password. Making `/usr` writable for the current boot (`bootc usr-overlay`, `dnf install --transient`) also requires admin authentication. Developer-signed boots unlock the disk silently by default, TPM2 + PIN optional. Unsandboxed assistants (D-012) are a separate switch inside developer mode. Turning it off disables unsandboxed assistants, boots the release image in both deployment slots and only then removes the key from db (no dbx entry). The warning and in-session indicator can be hidden; the developer boot-entry label cannot. Turning Secure Boot off is the user's firmware choice and is documented, not offered | Decided | Owner (2026-11-07): the only option that allows persistent own builds while keeping offline protection; reuses D-014's enrolment; one machine, reversible. Accepted cost: while it is on, a runtime root compromise can persist by signing with the developer key. See `docs/components/c1-base/developer-mode.md` |
 | D-016 | Secure Boot fallback B2 (amends D-014): on machines where key enrolment in setup mode is impractical, keep the firmware's Microsoft KEK/db, boot a pinned, Microsoft-signed Fedora shim with MokManager, and enrol the Atos release cert as a MOK. The release cert must not be a MOK CA cert (no keyCertSign), `MokListTrusted` is turned off, and the TPM disk binding also covers PCR14. Neither limits kernel module trust: on Fedora's kernel every MOK, db cert and shim's vendor cert verifies kernel modules (#158). B2 machines trust Microsoft and Fedora as well as Atos, an explicit exception to D-014's "no outside party can change a machine's trust" | Decided | Owner (2026-11-07): many ordinary laptops make setup mode impractical; without B2 they would get no Secure Boot. Spike #76 showed it works on x86_64 and aarch64. See `docs/components/c1-base/shim-mok-spike.md` |
 | D-017 | NVIDIA graphics: one image for everyone. It ships NVIDIA's open kernel modules (Turing and newer), built from source and signed with the Atos key, and NVIDIA's proprietary userspace and GSP firmware unmodified, with NVIDIA's licence included and shown in the installer and Settings → About. Pre-Turing GPUs use nouveau + NVK as best effort; no prebuilt closed module. NVK is in every image. A kernel update ships only once the NVIDIA modules build against it and pass the smoke test on the owner's machine. The owner accepts NVIDIA's distributor terms, including the clause 2.11 indemnity | Decided | Owner (2026-11-08): a single image for simplicity, after the licence terms were presented. See `docs/decisions/nvidia-graphics.md` |
-| D-018 | Performance budgets (§7) gate phase gates and releases, not pull requests. They are measured nightly on `main` on the NUC; a clear regression opens a card and nobody is blocked by it. Security lane and correctness tests are unchanged. Reviewers do not ask for budget measurements on ordinary changes; a card asks for a budget check only when the change is performance work or a phase gate | Decided | Owner (2026-11-11): build as much of the system as possible first and tune performance as we go, for a faster development flow while design, features and feel are settled. Card #237 |
+| D-018 | Performance budgets (§7) gate phase gates and releases, not pull requests. They are measured nightly on `main` on the NUC; a clear regression opens a card and nobody is blocked by it. Security lane and correctness tests are unchanged. Reviewers do not ask for budget measurements on ordinary changes; a card asks for a budget check only when the change is performance work or a phase gate. Three existing automated checks still fail a pull request on a budget breach (the `ci.yml` Budgets step, install time ≤ 600 s in `c11-installer.yml`, `SHELL_GATE` in the C3 e2e check) and stay as they are until the owner decides card #240. | Decided | Owner (2026-11-11): build as much of the system as possible first and tune performance as we go, for a faster development flow while design, features and feel are settled. Card #237 |
 
 ## 6. Component specifications
 
@@ -203,7 +203,7 @@ Each component has a short ID used on task cards, a purpose and its hard require
 
 ## 7. Quality budgets
 
-These budgets gate phase gates and releases, not individual pull requests (D-018). They are measured automatically on the reference hardware wherever possible: an Intel NUC 11 with a Celeron N5105, deliberately low-end. The performance budgets are measured nightly on `main`; a clear regression becomes a card, and nobody is blocked by it. A card names a budget in its acceptance criteria only when the change is performance work. The numbers are proposed starting targets and can be tightened.
+The performance budgets (Input, Shell, Apps and System rows) gate phase gates and releases, not individual pull requests (D-018). They are measured automatically on the reference hardware wherever possible: an Intel NUC 11 with a Celeron N5105, deliberately low-end. They are measured nightly on `main`; a clear regression becomes a card, and nobody is blocked by it. A card names a performance budget in its acceptance criteria only when the change is performance work or a phase gate. The Stability and Accessibility rows are unchanged and still checked on pull requests as before. Security lane and correctness tests are unchanged. The numbers are proposed starting targets and can be tightened.
 
 | Area | Metric | Budget |
 | --- | --- | --- |
@@ -246,7 +246,7 @@ The project runs like a small engineering company in which every engineer starts
 | Owner | Jens | Sets priorities, approves decisions and spec changes, accepts finished work | Write every task by hand; a planner agent drafts them |
 | Planner agent | One agent per planning session | Breaks a roadmap phase into task cards, keeps the board tidy, writes weekly status | Write production code |
 | Builder agent | One agent per task | Implements one card on its own branch, with tests | Change the spec, pick up unassigned work, touch other components |
-| Reviewer agent | A fresh agent that did not build the work | Checks the change against the card and spec; runs a budget check only if the card asks for one; approves or requests changes | Fix the code itself |
+| Reviewer agent | A fresh agent that did not build the work | Checks the change against the card and spec; runs a performance budget check only if the card asks for one; approves or requests changes | Fix the code itself |
 | Docs agent | As needed | Keeps component specs, the decisions log and the glossary in sync with merged work | Invent decisions |
 
 ### Session protocol
@@ -256,7 +256,7 @@ Every builder session follows the same steps:
 1. Read the files in section 1's reading order, then the card and its last handoff note.
 2. Move the card to **In progress** and write a three-line plan on it.
 3. Work on a branch named after the card ID, for example `T-142-files-split-view`.
-4. Run the tests for the component, and the budget checks only if the card asks for them.
+4. Run the tests for the component, and the performance budget checks only if the card asks for them.
 5. Open a pull request linked to the card; move the card to **Review**.
 6. Write the handoff note and end the session.
 
@@ -276,7 +276,7 @@ A card is done only when all of these hold:
 
 - [ ] The acceptance criteria on the card are met.
 - [ ] Tests exist and pass in CI.
-- [ ] Budget checks pass if the card asks for them; otherwise the nightly run on `main` covers section 7.
+- [ ] Performance budget checks pass if the card asks for them; otherwise the nightly run on `main` covers them. The accessibility, contrast and stability rows of section 7 still pass.
 - [ ] UI changes match the design system and have screenshot tests.
 - [ ] A reviewer agent approved the change, and the owner accepted it. The owner delegates acceptance to the planner for cards that decide nothing, change no spec text and touch no security-relevant code. Delegated acceptance means the reviewer's approval is enough to accept the work. The merge itself still needs the owner's OK in the planner session; one OK may cover a batch of fast-lane pull requests.
 - [ ] Affected component docs are updated; spec changes are proposed on the card, and the owner accepts them (section 1).
@@ -364,7 +364,7 @@ Use these terms exactly, in code, docs and cards, so agents don't drift into syn
 | Extension point | A defined place where third-party code can plug in, such as a palette provider |
 | Image | The read-only, signed system snapshot that updates replace atomically |
 | Card | One task on the board (a GitHub issue); branches use its number, such as T-142 |
-| Budget | A measurable quality limit from section 7 that gates a phase gate or a release if missed; it does not gate a pull request |
+| Budget | A measurable quality limit from section 7 that blocks release if missed. Performance budgets gate phase gates and releases, not pull requests (D-018); the accessibility, contrast and stability budgets are unchanged |
 | Owner | The project lead, who approves decisions and accepts work |
 | Assistant | An AI agent that acts for the user on the running OS, local or cloud. Not the agents that build this project |
 | Agent interface | The MCP servers through which system features and apps expose their actions to assistants (C12) |
