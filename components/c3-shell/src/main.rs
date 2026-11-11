@@ -12,6 +12,7 @@ mod platform;
 mod portal;
 mod services;
 mod toplevels;
+mod x11;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

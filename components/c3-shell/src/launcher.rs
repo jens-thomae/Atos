@@ -179,6 +179,7 @@ fn launch(i: usize) {
     close();
     let mut cmd = std::process::Command::new(&app.argv[0]);
     cmd.args(&app.argv[1..]);
+    crate::x11::set_display(&mut cmd);
     if let Some(dir) = &app.dir {
         cmd.current_dir(dir);
     }
