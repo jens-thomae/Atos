@@ -12,6 +12,7 @@ use cosmic_protocols::toplevel_info::v1::client::{
 };
 use cosmic_protocols::toplevel_management::v1::client::zcosmic_toplevel_manager_v1;
 use sctk::reexports::client::globals::GlobalList;
+use sctk::reexports::client::protocol::wl_surface::WlSurface;
 use sctk::reexports::client::{Connection, Dispatch, Proxy, QueueHandle, event_created_child};
 use sctk::reexports::protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_handle_v1 as ext_handle, ext_foreign_toplevel_list_v1 as ext_list,
@@ -126,6 +127,12 @@ pub fn dock_click(id: u32) {
             activate(id);
         }
     }
+}
+
+/// Tells the compositor where this window's dock icon is (surface-local, logical pixels), so
+/// it minimises into the icon and restores from it.
+pub fn set_rectangle(id: u32, surface: &WlSurface, x: i32, y: i32, w: i32, h: i32) {
+    with_cosmic(id, |m, c| m.set_rectangle(c, surface, x, y, w, h));
 }
 
 fn with_cosmic(

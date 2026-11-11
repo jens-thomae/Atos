@@ -151,6 +151,14 @@ fn window_by_id(id: u32) -> Option<Rc<LayerWindow>> {
     windows().into_iter().find(|w| w.id == id)
 }
 
+/// The wl_surface a window of ours is drawn on.
+pub fn surface_of(window: &slint::Window) -> Option<wl_surface::WlSurface> {
+    windows()
+        .into_iter()
+        .find(|w| std::ptr::eq(&w.window, window))
+        .map(|w| w.surface.borrow().clone())
+}
+
 /// The seat the shell acts for (activation needs one).
 pub fn seat() -> Option<wl_seat::WlSeat> {
     SEAT.with(|s| s.borrow().clone())

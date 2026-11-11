@@ -102,6 +102,14 @@ fn new_dock(
     let dock = platform::with_output(output, Dock::new)?;
     dock.set_items(items.clone().into());
     dock.on_activate(|id| toplevels::dock_click(id as u32));
+    // ponytail: with several outputs the last dock to report wins; per-output rectangles when
+    // a window's output is known to the shell.
+    let weak = dock.as_weak();
+    dock.on_slot_rect(move |id, x, y, w, h| {
+        if let Some(s) = weak.upgrade().and_then(|d| platform::surface_of(d.window())) {
+            toplevels::set_rectangle(id as u32, &s, x as i32, y as i32, w as i32, h as i32);
+        }
+    });
     dock.on_open_launcher(launcher::toggle);
     dock.on_open_control_centre(control_centre::toggle);
     // Bottom of the output, floating: the gap to the screen edges comes from the tokens.
