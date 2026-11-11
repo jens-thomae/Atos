@@ -10,7 +10,11 @@
 //! `WindowAdapter::internal` with `i_slint_core::InternalToken` and `WindowAdapterInternal`
 //! (`handle_focus_change`, `register_item_tree`, `unregister_item_tree`).
 //!
-//! ponytail: the spike's scope. Scale 1, no key repeat, no modifiers, no cursor shapes, no IME,
+//! Scale: each surface follows its output's scale, `wp_fractional_scale_v1` with `wp_viewporter`
+//! (the buffer is the physical size, the viewport maps it to the logical size), else the integer
+//! buffer scale that sctk reports. Windows re-render on a change (`on_scale_changed`).
+//!
+//! ponytail: the spike's scope. No key repeat, no modifiers, no cursor shapes, no IME,
 //! no clipboard. Each is a card in the spike's write-up (section 6); the C4 backend crate
 //! (card 1 there) replaces this file.
 
@@ -40,7 +44,7 @@ use sctk::reexports::calloop::{EventLoop, channel};
 use sctk::reexports::calloop_wayland_source::WaylandSource;
 use sctk::reexports::client::globals::{GlobalList, registry_queue_init};
 use sctk::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface};
-use sctk::reexports::client::{Connection, Proxy, QueueHandle};
+use sctk::reexports::client::{Connection, Dispatch, Proxy, QueueHandle};
 use sctk::registry::{ProvidesRegistryState, RegistryState};
 use sctk::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers};
 use sctk::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler};
@@ -57,6 +61,13 @@ use slint::platform::{
 };
 use slint::{LogicalPosition, LogicalSize, PhysicalSize, WindowSize};
 
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
+    self, WpFractionalScaleV1,
+};
+use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
+use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
+
 use crate::accesskit::{AccessKitAdapter, DeferredAccessKitAction};
 use crate::toplevels;
 
@@ -64,6 +75,7 @@ type Task = Box<dyn FnOnce() + Send>;
 type WindowTask = Box<dyn FnOnce(&Rc<LayerWindow>) + Send>;
 type OutputHook = Box<dyn FnMut(&wl_output::WlOutput, bool)>;
 type FrameHook = Box<dyn Fn(&slint::Window)>;
+type ScaleHook = Box<dyn Fn(&slint::Window)>;
 
 /// How a layer surface sits on its output: the edges it is anchored to and its margin
 /// (top, right, bottom, left) in logical pixels. The exclusive zone is its height.
@@ -82,6 +94,8 @@ struct Globals {
     qh: QueueHandle<State>,
     compositor: CompositorState,
     layer_shell: LayerShell,
+    /// Both or neither: fractional scale needs the viewport to map the buffer to the surface.
+    fractional: Option<(WpFractionalScaleManagerV1, WpViewporter)>,
     egl: Display,
     egl_config: Config,
     tx: channel::Sender<Task>,
@@ -99,6 +113,7 @@ thread_local! {
     static OUTPUTS: RefCell<Vec<wl_output::WlOutput>> = const { RefCell::new(Vec::new()) };
     static OUTPUT_HOOK: RefCell<Option<OutputHook>> = const { RefCell::new(None) };
     static FRAME_HOOKS: RefCell<Vec<FrameHook>> = const { RefCell::new(Vec::new()) };
+    static SCALE_HOOKS: RefCell<Vec<ScaleHook>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Calls `hook` with the window whenever the compositor reports a frame of it as shown
@@ -106,6 +121,14 @@ thread_local! {
 /// their openings with it.
 pub fn on_frame_done(hook: impl Fn(&slint::Window) + 'static) {
     FRAME_HOOKS.with(|h| h.borrow_mut().push(Box::new(hook)));
+}
+
+/// Calls `hook` with the window after it was laid out at its output's scale: on every configure
+/// and whenever the scale changes (the output's scale changed, or the window moved to an output
+/// with another one). The hook must be cheap when nothing it depends on changed. Icons are loaded
+/// for the physical size, so the dock and the launcher reload theirs here.
+pub fn on_scale_changed(hook: impl Fn(&slint::Window) + 'static) {
+    SCALE_HOOKS.with(|h| h.borrow_mut().push(Box::new(hook)));
 }
 
 fn globals() -> Rc<Globals> {
@@ -190,6 +213,10 @@ impl WaylandPlatform {
         let compositor = CompositorState::bind(&global_list, &qh)?;
         let layer_shell = LayerShell::bind(&global_list, &qh)?;
         toplevels::bind(&global_list, &qh);
+        let fractional = global_list
+            .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
+            .ok()
+            .zip(global_list.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok());
 
         // SAFETY: the display pointer comes from the live connection, which `Globals` keeps open
         // for as long as the EGL display exists.
@@ -225,6 +252,7 @@ impl WaylandPlatform {
                 qh,
                 compositor,
                 layer_shell,
+                fractional,
                 egl,
                 egl_config,
                 tx,
@@ -474,7 +502,14 @@ pub struct LayerWindow {
     layer: RefCell<Option<LayerSurface>>,
     renderer: FemtoVGRenderer,
     gl: Rc<Gl>,
+    /// Physical size of the buffer.
     size: Cell<PhysicalSize>,
+    /// Size the compositor configured, in logical pixels.
+    logical: Cell<(u32, u32)>,
+    /// The output's scale: a multiple of 1/120 with fractional scale, else an integer.
+    scale: Cell<f64>,
+    /// `Some` while shown, when the compositor has fractional scale.
+    fractional: RefCell<Option<(WpFractionalScaleV1, WpViewport)>>,
     preferred: Cell<LogicalSize>,
     configured: Cell<bool>,
     dirty: Cell<bool>,
@@ -521,6 +556,9 @@ impl LayerWindow {
             renderer,
             gl,
             size: Cell::new(PhysicalSize::new(1, 1)),
+            logical: Cell::new((1, 1)),
+            scale: Cell::new(1.),
+            fractional: RefCell::new(None),
             preferred: Cell::new(LogicalSize::new(0., 0.)),
             configured: Cell::new(false),
             dirty: Cell::new(true),
@@ -578,6 +616,13 @@ impl LayerWindow {
         if self.shown_before.replace(true) {
             *self.surface.borrow_mut() = g.compositor.create_surface(&g.qh);
         }
+        if let Some((manager, viewporter)) = &g.fractional {
+            let wl = self.surface.borrow();
+            *self.fractional.borrow_mut() = Some((
+                manager.get_fractional_scale(&wl, &g.qh, wl.clone()),
+                viewporter.get_viewport(&wl, &g.qh, ()),
+            ));
+        }
         let surface = g.layer_shell.create_layer_surface(
             &g.qh,
             self.surface.borrow().clone(),
@@ -620,15 +665,46 @@ impl LayerWindow {
         // The EGL surface goes first: it must not outlive the wl_surface, which dropping the
         // LayerSurface destroys.
         self.gl.detach();
+        self.destroy_scale_objects();
         self.layer.borrow_mut().take();
         self.accesskit.borrow_mut().set_platform_adapter(None);
         self.configured.set(false);
         self.frame_pending.set(false);
     }
 
+    fn destroy_scale_objects(&self) {
+        if let Some((f, v)) = self.fractional.borrow_mut().take() {
+            v.destroy();
+            f.destroy();
+        }
+    }
+
     fn configure(&self, width: u32, height: u32) {
-        let size = PhysicalSize::new(width.max(1), height.max(1));
+        self.logical.set((width.max(1), height.max(1)));
+        self.apply_size();
+    }
+
+    /// The output's scale changed. Before the first configure only the value is kept.
+    fn set_scale(&self, scale: f64) {
+        if self.scale.replace(scale) == scale || !self.configured.get() {
+            return;
+        }
+        self.apply_size();
+    }
+
+    /// Sizes the buffer and tells Slint: the buffer is the logical size times the scale, rounded;
+    /// the compositor shows it at the logical size (viewport, or integer buffer scale).
+    fn apply_size(&self) {
+        let (lw, lh) = self.logical.get();
+        let scale = self.scale.get();
+        let px = |l: u32| ((l as f64 * scale).round() as u32).max(1);
+        let size = PhysicalSize::new(px(lw), px(lh));
         self.size.set(size);
+        if let Some((_, viewport)) = &*self.fractional.borrow() {
+            viewport.set_destination(lw as i32, lh as i32);
+        } else {
+            self.surface.borrow().set_buffer_scale(scale as i32);
+        }
         if let Err(e) = self
             .gl
             .attach(&self.surface.borrow(), size.width, size.height)
@@ -636,10 +712,11 @@ impl LayerWindow {
             eprintln!("EGL surface: {e}");
             return;
         }
-        self.window
-            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+        self.window.dispatch_event(WindowEvent::ScaleFactorChanged {
+            scale_factor: scale as f32,
+        });
         self.window.dispatch_event(WindowEvent::Resized {
-            size: size.to_logical(1.0),
+            size: LogicalSize::new(lw as f32, lh as f32),
         });
         self.accesskit
             .borrow_mut()
@@ -651,6 +728,7 @@ impl LayerWindow {
             ));
         self.configured.set(true);
         self.dirty.set(true);
+        SCALE_HOOKS.with(|h| h.borrow().iter().for_each(|f| f(&self.window)));
     }
 
     fn render_if_needed(&self) {
@@ -687,6 +765,7 @@ impl LayerWindow {
 impl Drop for LayerWindow {
     fn drop(&mut self) {
         self.gl.detach();
+        self.destroy_scale_objects();
         // Dropping the LayerSurface destroys the wl_surface; otherwise destroy it here.
         if self.layer.get_mut().take().is_none() {
             self.surface.get_mut().destroy();
@@ -709,7 +788,7 @@ impl WindowAdapter for LayerWindow {
     }
 
     fn set_size(&self, size: WindowSize) {
-        self.size.set(size.to_physical(1.0));
+        self.size.set(size.to_physical(self.scale.get() as f32));
     }
 
     fn size(&self) -> PhysicalSize {
@@ -831,9 +910,15 @@ impl CompositorHandler for State {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: i32,
+        surface: &wl_surface::WlSurface,
+        factor: i32,
     ) {
+        // The fallback: with fractional scale the compositor's preferred scale rules.
+        if let Some(w) = window_for_surface(surface)
+            && w.fractional.borrow().is_none()
+        {
+            w.set_scale(factor.max(1) as f64);
+        }
     }
     fn transform_changed(
         &mut self,
@@ -875,6 +960,29 @@ impl CompositorHandler for State {
     ) {
     }
 }
+
+impl Dispatch<WpFractionalScaleV1, wl_surface::WlSurface> for State {
+    fn event(
+        _: &mut Self,
+        _: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        surface: &wl_surface::WlSurface,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let wp_fractional_scale_v1::Event::PreferredScale { scale } = event else {
+            return;
+        };
+        if let Some(w) = window_for_surface(surface) {
+            w.set_scale(scale as f64 / 120.);
+        }
+    }
+}
+
+// No events: the manager, the viewporter and its viewports.
+sctk::reexports::client::delegate_noop!(State: WpFractionalScaleManagerV1);
+sctk::reexports::client::delegate_noop!(State: WpViewporter);
+sctk::reexports::client::delegate_noop!(State: WpViewport);
 
 impl OutputHandler for State {
     fn output_state(&mut self) -> &mut OutputState {
