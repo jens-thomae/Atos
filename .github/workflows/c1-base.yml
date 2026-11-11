@@ -125,6 +125,9 @@ jobs:
       - &nvidia
         name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
         run: components/c1-base/nvidia/check.sh c1-base
+      - &wireless
+        name: Wi-Fi and Bluetooth packages, iwd backend, no connectivity check, unit states (#231)
+        run: components/c1-base/check-wireless.sh c1-base
       # #186: install the image, boot it with KVM and Secure Boot, check the dock, the launcher and a shell restart,
       # keep screenshots. Last: it removes the image from podman's storage to make room for the install.
       - &boot
@@ -196,6 +199,8 @@ jobs:
         run: components/c1-base/check-seal.sh c1-base
       - name: NVIDIA driver is signed, matches the kernel and is unmodified (#162)
         run: components/c1-base/nvidia/check.sh c1-base
+      - name: Wi-Fi and Bluetooth packages, iwd backend, no connectivity check, unit states (#231)
+        run: components/c1-base/check-wireless.sh c1-base
 
       # Corresponding source (GPL, D-013, #85): the package is public, the repository is not. Built and checked
       # before anything is pushed, and pushed before the image, so no image is ever public without its source. A FROM-scratch
@@ -306,6 +311,7 @@ jobs:
       - *session
       - *seal
       - *nvidia
+      - *wireless
       - *boot
       - *screenshots
 

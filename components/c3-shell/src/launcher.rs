@@ -23,6 +23,8 @@ use slint::{ComponentHandle, VecModel};
 use crate::platform;
 
 const REQUEST: &[u8] = b"launcher";
+const SWITCHER_NEXT: &[u8] = b"switcher next";
+const SWITCHER_PREV: &[u8] = b"switcher prev";
 
 #[derive(Default)]
 struct State {
@@ -126,7 +128,7 @@ fn open() {
 }
 
 /// Hides the launcher; while hidden, clears the search for the next opening.
-fn close() {
+pub fn close() {
     let was_shown = STATE.with(|s| std::mem::take(&mut s.borrow_mut().shown));
     let Some(ui) = ui().filter(|_| was_shown) else {
         return;
@@ -227,13 +229,18 @@ fn listen() -> std::io::Result<()> {
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut buf = Vec::new();
-            if stream
-                .take(REQUEST.len() as u64)
-                .read_to_end(&mut buf)
-                .is_ok()
-                && buf == REQUEST
-            {
-                slint::invoke_from_event_loop(toggle).ok();
+            if stream.take(32).read_to_end(&mut buf).is_err() {
+                continue;
+            }
+            match buf.as_slice() {
+                REQUEST => drop(slint::invoke_from_event_loop(toggle)),
+                SWITCHER_NEXT => drop(slint::invoke_from_event_loop(|| {
+                    crate::switcher::step(true)
+                })),
+                SWITCHER_PREV => drop(slint::invoke_from_event_loop(|| {
+                    crate::switcher::step(false)
+                })),
+                _ => {}
             }
         }
     });
@@ -242,8 +249,21 @@ fn listen() -> std::io::Result<()> {
 
 /// `atos-shell --launcher`: asks the running shell to open or close its launcher.
 pub fn request() -> Result<(), Box<dyn std::error::Error>> {
+    send(REQUEST)
+}
+
+/// `atos-shell --switcher next|prev`: opens the window switcher, or moves its selection.
+pub fn request_switcher(forward: bool) -> Result<(), Box<dyn std::error::Error>> {
+    send(if forward {
+        SWITCHER_NEXT
+    } else {
+        SWITCHER_PREV
+    })
+}
+
+fn send(msg: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let path = socket_path();
     UnixStream::connect(&path)
-        .and_then(|mut s| s.write_all(REQUEST))
+        .and_then(|mut s| s.write_all(msg))
         .map_err(|e| format!("no shell at {}: {e}", path.display()).into())
 }

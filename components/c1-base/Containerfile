@@ -175,6 +175,18 @@ RUN dnf -y install --setopt=install_weak_deps=False flatpak \
     && rm -rf /run/selinux-policy /run/dnf /var/lib/dnf /var/cache/* /var/log/*
 COPY flatpak/flathub.flatpakrepo /usr/share/flatpak/remotes.d/flathub.flatpakrepo
 
+# Wi-Fi and Bluetooth (#231; docs/components/c1-base/README.md, "Wi-Fi and Bluetooth"). NetworkManager drives Wi-Fi
+# through iwd (owner decision on #231), so wpa_supplicant stays out; usr/lib/NetworkManager/conf.d/90-atos.conf sets the
+# backend and turns the connectivity check off (D-005). iwd keeps its default EnableNetworkConfiguration=false, so
+# NetworkManager alone owns addresses and DNS. bluez keeps its defaults: not discoverable, no pairing without an agent.
+# iwlwifi-mvm-firmware pulls in the mld (Wi-Fi 7) and Intel Bluetooth firmware; dvm is for older Intel cards. Realtek,
+# MediaTek, Atheros/Qualcomm and Broadcom firmware is already in the base. /var dirs: atos-wireless.conf.
+RUN dnf -y install --setopt=install_weak_deps=False NetworkManager-wifi iwd bluez wireless-regdb \
+      iwlwifi-mvm-firmware iwlwifi-dvm-firmware \
+    && ! rpm -q wpa_supplicant \
+    && systemctl enable iwd.service bluetooth.service \
+    && rm -rf /run/dnf /var/lib/dnf /var/cache/* /var/log/*
+
 COPY session/ /
 # Boot counting (#56): patched bootc names an upgrade's UKI entry `…+3.conf`; the health check
 # decides when a counted boot is good (usr/lib/systemd/system/atos-session-check.service). The
