@@ -10,6 +10,8 @@
 #            person does (#220): a test unit copies the screen to the serial log, and the host types
 #            each answer on the VM's keyboard when its question shows. Prints the time it took. The
 #            payload must be the installer's default reference (CI's is); see `unattended`
+#   notpm    boots the ISO with no TPM on an empty disk (#222): the installer must say so before the
+#            disk question, offer retry or shell, and still wait 60 s later; the disk stays all zeros
 #   unattended  not in CI: the same install with `atos-install --yes --target-imgref` in a test
 #            unit and the installer unit off; the dev VM's payload is a local registry reference
 #   enrol    not in `all`: enrols the TEST keys into the firmware variables (x86_64 CI, where
@@ -175,28 +177,31 @@ login_tty1() {
   echo "login typed on tty1"
 }
 
-# qemu_run <log> <extra qemu args...>; env CODE=<firmware code> (default: Secure Boot capable).
+# qemu_run <log> <extra qemu args...>; env CODE=<firmware code> (default: Secure Boot capable),
+# NOTPM=1 (no TPM device), LINGER=<s> (keep running that long after a halt line, then stop).
 qemu_run() {
-  local log=$1; shift
-  swtpm_up
+  local log=$1 tpm=(); shift
+  # shellcheck disable=SC2054 # commas are QEMU option syntax
+  [ -n "${NOTPM:-}" ] || { swtpm_up; tpm=(-chardev socket,id=chrtpm,path="$WORK/swtpm.sock"
+    -tpmdev emulator,id=tpm0,chardev=chrtpm -device "$TPMDEV",tpmdev=tpm0); }
   rm -f "$log"
   echo "QEMU, serial log: $log"
   # shellcheck disable=SC2054 # commas are QEMU option syntax
   timeout "$TMO" "${QEMU[@]}" -smp 4 -m 4G -display none \
     -drive if=pflash,format=raw,readonly=on,file="${CODE:-$CODE_SB}" \
     -drive if=pflash,format=raw,file="$VARS" \
-    -chardev socket,id=chrtpm,path="$WORK/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
-    -device "$TPMDEV",tpmdev=tpm0 \
+    "${tpm[@]}" \
     -drive if=none,id=hd,format=raw,file="$DISK" -device virtio-blk-pci,drive=hd,bootindex=1 \
     -monitor unix:"$WORK/mon.sock",server=on,wait=off "${KBD[@]}" \
     -serial file:"$log" "$@" &
   # bootindex on the disk: the install leaves the EFI Shell ahead of the disk in BootOrder (the CD
   # was first), and newly found boot options are appended after it. QEMU's bootindex reorders it.
-  local pid=$! typed=
+  local pid=$! typed='' stop=''
   local halt='Shell> |Freezing execution|Entering emergency mode|Kernel panic|Access [Dd]enied|ATOS-INSTALL-FAILED|Press Enter to try again|Started (kmsconvt|autovt|getty)@tty1|[Pp]assphrase for|recovery key for'
   while kill -0 "$pid" 2>/dev/null; do
     m=$(tr -d '\r' < "$log" 2>/dev/null | grep -av 'EFI Internal Shell' | grep -aE -m1 "$halt" || true)
-    [ -z "$m" ] || { echo "HALT on: $m"; kill "$pid"; break; }
+    [ -z "$m" ] || [ -n "$stop" ] || { echo "HALT on: $m"; stop=$((SECONDS + ${LINGER:-0})); }
+    [ -z "$stop" ] || [ "$SECONDS" -lt "$stop" ] || { kill "$pid"; break; }
     if [ -z "$typed" ] && grep -aq ATOS-LOGIN-READY "$log"; then login_tty1 && typed=1; fi
     [ -z "${INTERACTIVE:-}" ] || answer_installer "$log"
     sleep "${POLL:-5}"
@@ -287,17 +292,41 @@ fresh_machine() {
 CDROM=(-device virtio-scsi-pci,id=scsi0 -drive if=none,id=cd,format=raw,media=cdrom,readonly=on,file="$ISO"
   -device scsi-cd,drive=cd,bootindex=0)
 
+# The credentials that copy tty1 to the serial log (the interactive runs).
+screen_creds() {
+  cred systemd.extra-unit.atos-screen.service "$SCREEN_UNIT"
+  cred systemd.unit-dropin.multi-user.target~atos-screen $'[Unit]\nWants=atos-screen.service'
+  cred atos.screen "$SCREEN_SCRIPT"
+  # The serial getty hangs up the serial tty the screen unit writes to.
+  cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent'
+}
+
+# #222: no TPM. Nothing is typed. The failure prompt is a halt line; QEMU keeps running 60 s after it
+# with -no-reboot, so a restart in that time would end it and show in the log.
+step_notpm() {
+  local creds log=$OUT/notpm.log
+  fresh_machine
+  mapfile -d '' creds < <(screen_creds)
+  NOTPM=1 LINGER=60 POLL=1 qemu_run "$log" -no-reboot -nic none "${CDROM[@]}" "${creds[@]}"
+  local fail=()
+  grep -aq 'ATOS-SCREEN atos-install: this computer has no TPM 2.0 turned on' "$log" || fail+=("no TPM message on tty1")
+  grep -aq 'ATOS-SCREEN .*fTPM (AMD), PTT (Intel)' "$log" || fail+=("no firmware hint on tty1")
+  grep -aq 'ATOS-SCREEN Press Enter to try again, or type "shell"' "$log" || fail+=("no retry prompt on tty1")
+  ! grep -aqF 'Install Atos on disk number' "$log" || fail+=("the disk question was asked")
+  ! grep -aqE 'reboot: (Restarting system|Power down)' "$log" || fail+=("the machine restarted or powered off")
+  # Untouched: still 20 GB of zeros, as fresh_machine left it.
+  cmp -s -n "$(stat -c %s "$DISK")" "$DISK" /dev/zero && [ "$(stat -c %s "$DISK")" -eq $((20 << 30)) ] \
+    || fail+=("the disk is no longer blank")
+  [ ${#fail[@]} -eq 0 ] || { printf 'notpm: %s\n' "${fail[@]}" >&2; exit 1; }
+  echo "ATOS-NOTPM-OK"
+}
+
 step_install() {
   # atos-install has no question for the image: it installs its built-in default (#220).
   local default=ghcr.io/jens-thomae/atos/c1-base:latest creds t0
   [ "$TARGET_IMGREF" = "$default" ] || { echo "install: the payload must be $default; use unattended" >&2; exit 1; }
   fresh_machine
-  mapfile -d '' creds < <(
-    cred systemd.extra-unit.atos-screen.service "$SCREEN_UNIT"
-    cred systemd.unit-dropin.multi-user.target~atos-screen $'[Unit]\nWants=atos-screen.service'
-    cred atos.screen "$SCREEN_SCRIPT"
-    # The serial getty hangs up the serial tty the screen unit writes to.
-    cred "systemd.unit-dropin.serial-getty@$SERIAL.service~test" $'[Unit]\nConditionPathExists=/nonexistent')
+  mapfile -d '' creds < <(screen_creds)
   t0=$(date +%s)
   # -no-reboot: the restart the user confirms ends QEMU, and so does any restart before it.
   INTERACTIVE=1 POLL=1 qemu_run "$OUT/install.log" -no-reboot -nic none "${CDROM[@]}" "${creds[@]}"
@@ -362,8 +391,8 @@ step_nosb() {
 }
 
 case "${1:-}" in
-  images|iso|install|unattended|enrol|boot|reboot|stage|apply|nosb) "step_$1" ;;
+  images|iso|notpm|install|unattended|enrol|boot|reboot|stage|apply|nosb) "step_$1" ;;
   # The dev VM's payload is a local registry reference, which the interactive path cannot name.
-  all) for s in images iso unattended boot reboot stage apply nosb; do "step_$s"; done ;;
-  *) sed -n '2,26p' "$0" >&2; exit 2 ;;
+  all) for s in images iso notpm unattended boot reboot stage apply nosb; do "step_$s"; done ;;
+  *) sed -n '2,28p' "$0" >&2; exit 2 ;;
 esac

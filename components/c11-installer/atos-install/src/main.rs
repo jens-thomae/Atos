@@ -226,10 +226,12 @@ fn wipe(s: String) {
     std::hint::black_box(&b);
 }
 
+/// Lines of at most 79 characters (the first after the "atos-install: " prefix): the console is 80.
 const TPM_HOWTO: &str = "\
-Most computers have a TPM 2.0, but it is often turned off. Restart the computer, open the\n\
-firmware setup (often F2, F10, Del or Esc right after switching on) and turn on the setting\n\
-called TPM, fTPM (AMD), PTT (Intel) or Security Device. Then start the installer again.";
+Most computers have a TPM 2.0, but it is often turned off. Restart the\n\
+computer, open the firmware setup (often F2, F10, Del or Esc right after\n\
+switching on) and turn on the setting called TPM, fTPM (AMD), PTT (Intel)\n\
+or Security Device. Then start the installer again.";
 
 /// #222: the TPM 2.0 the enrolment (`systemd-cryptenroll --tpm2-device=auto`) will use, checked
 /// before the disk question. `auto` takes the only TPM 2.0 resource manager (`/dev/tpmrm*`) that
@@ -245,17 +247,17 @@ fn tpm_problem(list: &str, versions: &[String]) -> Option<String> {
     match devices.len() {
         1 if v2 => None,
         0 if !v2 && versions.iter().any(|v| v == "1") => Some(format!(
-            "this computer's TPM is version 1.2, and Atos needs a TPM 2.0 to encrypt the disk.\n\
-             Nothing has been changed on any disk.\n\
+            "this computer's TPM is version 1.2, and Atos needs a TPM 2.0\n\
+             to encrypt the disk. Nothing has been changed on any disk.\n\
              Some computers can switch their TPM to 2.0 in the firmware setup.\n{TPM_HOWTO}"
         )),
         0 | 1 => Some(format!(
-            "this computer has no TPM 2.0 turned on, and Atos needs one to encrypt the disk.\n\
-             Nothing has been changed on any disk.\n{TPM_HOWTO}"
+            "this computer has no TPM 2.0 turned on, and Atos needs one\n\
+             to encrypt the disk. Nothing has been changed on any disk.\n{TPM_HOWTO}"
         )),
         _ => Some(format!(
-            "this computer has more than one TPM 2.0 ({}), and the installer can use only one.\n\
-             Nothing has been changed on any disk.\n\
+            "this computer has more than one TPM 2.0 ({}),\n\
+             and the installer can use only one. Nothing has been changed on any disk.\n\
              Turn all but one off in the firmware setup, then start the installer again.",
             devices.join(", ")
         )),
@@ -717,6 +719,12 @@ mod tests {
         );
         // The header and the "no device" note are never taken for a device.
         assert!(tpm_problem("No suitable TPM2 devices found.\n", &v(&["2"])).is_some());
+        // Every line fits the 80-column console, the first after "atos-install: ".
+        for m in [none, old] {
+            let mut lines = m.lines();
+            assert!(lines.next().unwrap().len() <= 79 - "atos-install: ".len());
+            assert!(lines.all(|l| l.len() <= 79), "{m}");
+        }
     }
 
     #[test]
