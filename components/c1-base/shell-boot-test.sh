@@ -110,6 +110,7 @@ sleep 1
 pkill -KILL -u atos -x atos-shell
 if wait_for "[ \$(log | grep -c BUDGET_FIRST_FRAME) -ge 2 ]"; then echo ATOS-SHELL-RESTARTED; else echo ATOS-CHECK-FAIL shell not restarted; fi
 pgrep -u atos -x atos-comp >/dev/null && echo ATOS-COMP-STILL-RUNNING
+journalctl -b _COMM=atos-comp -o short-monotonic --no-pager | sed "s/^/DIAG comp-log /"
 # Wi-Fi and Bluetooth (#231), after the idle numbers: the VM has no radio, so only the software side. NetworkManager
 # loaded its Wi-Fi plugin, bluetoothd runs without an adapter and bluetoothctl talks to it, and none of
 # NetworkManager, iwd and bluetoothd listens on a socket.
@@ -120,7 +121,6 @@ systemctl start bluetooth.service && timeout 10 bluetoothctl list >/dev/null \
   && echo ATOS-BLUETOOTHCTL-OK || echo ATOS-CHECK-FAIL bluetoothctl cannot talk to bluetoothd
 l=$(ss -Hltunp | grep -E "\"(NetworkManager|iwd|bluetoothd)\"" || true)
 [ -z "$l" ] && echo ATOS-WIRELESS-NO-LISTENERS || echo "ATOS-CHECK-FAIL listening: $l"
-journalctl -b _COMM=atos-comp -o short-monotonic --no-pager | sed "s/^/DIAG comp-log /"
 sleep 6
 systemctl poweroff --no-block'
 # shellcheck disable=SC2016 # systemd expands it
