@@ -7,7 +7,7 @@ Start with [`../CLAUDE.md`](../CLAUDE.md), then [`spec.md`](spec.md) §1–3 and
 | Task | Read |
 | --- | --- |
 | Any card | Its card and last handoff note; the spec sections it links; [decisions index](decisions/README.md) for what it touches |
-| Any code | [budgets.md](budgets.md), [dev-environment.md](dev-environment.md) (Linux VM on macOS), [ci.md](ci.md) |
+| Any code | [budgets.md](budgets.md), [dev-environment.md](dev-environment.md) (Linux VM on macOS), [dev-pc.md](dev-pc.md) (build on the test PC), [ci.md](ci.md) |
 | UI work | [dev-loop.md](dev-loop.md) (see it on the test PC), [design/README.md](design/README.md), the toolkit docs in `components/c4-toolkit/`, esp. [screenshot-tests.md](components/c4-toolkit/screenshot-tests.md) and [widgets.md](components/c4-toolkit/widgets.md) |
 | Compositor (C2) | [components/c2-compositor/](components/c2-compositor/README.md), then its [code map](components/c2-compositor/code-map.md) |
 | Shell (C3) | `components/c3-shell/README.md`, then the C4 docs |
@@ -26,6 +26,7 @@ Components without a doc folder yet (C5–C10, C12) have only their spec §6 sec
 - [budgets.md](budgets.md): the budget harness and how to run it.
 - [ci.md](ci.md): CI workflows and hosted minutes.
 - [dev-environment.md](dev-environment.md): the Linux dev VM on macOS.
+- [dev-pc.md](dev-pc.md): build and test on the owner's test PC (`tools/dev-pc/pc`).
 - [dev-loop.md](dev-loop.md): a shell change on the owner's test PC in under a minute (`tools/dev-push`).
 - [reference-runner.md](reference-runner.md): the NUC runner and its setup.
 - [design/](design/README.md): design tokens (`tokens.json`).

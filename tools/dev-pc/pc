@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Build and test this checkout on the owner's Atos test PC (#273, docs/dev-pc.md). Like tools/dev-vm/vm:
+#   pc run <cmd...>   in the build container, in the same directory as here
+#   pc host <cmd...>  on the PC itself as atos, in the same directory of its copy (podman build, qemu)
+# The working tree (uncommitted edits included, ignored files left out) goes over SSH first. The build
+# container is dev-push's builder: the image's own `comp` stage under components/c2-compositor, its
+# `shell` stage everywhere else (components/c1-base/Containerfile), plus cargo-nextest at ci.yml's pin.
+# Host: $ATOS_PC (default atos-pc), a Host alias in ~/.ssh/config. Never asks for a password, never
+# calls sudo. On the PC it writes only ~/atos-build/<checkout>/ and ~/atos-build/bin/, and shares
+# dev-push's builder images and atos-dev-push-* volumes (cleanup: docs/dev-pc.md).
+set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091 # alias_ok, sync_in, builder, builder_tag
+. "$here/../dev-push/push"
+
+name_ok() { case $1 in "" | .* | *[!A-Za-z0-9._-]*) return 1 ;; esac; }
+stage_for() { case $1 in components/c2-compositor | components/c2-compositor/*) echo comp ;; *) echo shell ;; esac; }
+
+# --- On the PC ---------------------------------------------------------------------------------
+on_pc() { # <checkout> <dir relative to the repo root> run|host <cmd...>
+  local name=$1 rel=$2 mode=$3 stage src
+  shift 3
+  export PATH=/usr/bin:/usr/sbin # not the owner's Homebrew or ~/.cargo
+  cache=atos-build/$name # push's sync_in and in_builder work under ~/$cache
+  sync_in
+  exec 9>&- # the lock the Mac side took around extract and sync: the command itself runs unlocked
+  src=$(realpath ~/"$cache"/src)
+  if [ "$mode" = host ]; then cd "$src/$rel" && exec "$@"; fi
+  cd "$src"
+  stage=$(stage_for "$rel")
+  builder "$stage"
+  local nv ns nx=~/atos-build/bin/cargo-nextest
+  nv=$(sed -n 's/^  NEXTEST_VERSION: //p' .github/workflows/ci.yml)
+  ns=$(sed -n 's/^  NEXTEST_SHA256: //p' .github/workflows/ci.yml)
+  if ! [ -x "$nx" ] || ! grep -qx "$nv" "$nx.version" 2>/dev/null; then
+    mkdir -p ~/atos-build/bin
+    curl -fsSL --retry 3 -o "$nx.tgz" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$nv/cargo-nextest-$nv-x86_64-unknown-linux-gnu.tar.gz"
+    echo "$ns  $nx.tgz" | sha256sum --check --quiet
+    tar -xzf "$nx.tgz" -C ~/atos-build/bin cargo-nextest && rm "$nx.tgz" && echo "$nv" >"$nx.version"
+  fi
+  mkdir -p ~/"$cache"/target
+  # ponytail: shares dev-push's toolchain and crate volumes, but cargo's .package-cache lock is per container, so
+  # concurrent crate downloads or toolchain installs can race (rerun; docs/dev-pc.md). Shared lock if it bites.
+  exec podman run --rm -v "$src:/src:z" -v "$HOME/$cache/target:/target:z" -v "$nx:/usr/local/bin/cargo-nextest:ro,z" \
+    -v atos-dev-push-rustup:/opt/rustup -v atos-dev-push-registry:/opt/cargo/registry -v atos-dev-push-git:/opt/cargo/git \
+    -e CARGO_TARGET_DIR=/target -w "/src/$rel" "$(builder_tag "$stage")" "$@"
+}
+
+# Client-side: no agent, X11 or port forwarding whatever ~/.ssh/config says, so the Mac's agent (GitHub key)
+# never reaches the PC even if the key loses `restrict` (guard rail 2). No password prompts.
+ssh_opts=(-a -x -o ClearAllForwardings=yes -o ForwardAgent=no -o ForwardX11=no -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no)
+
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by test.sh: functions only
+if [ "${1:-}" = --on-pc ]; then shift; on_pc "$@"; fi
+
+# --- On the Mac --------------------------------------------------------------------------------
+mode=${1:-}; case $mode in run | host) shift ;; *) sed -n '3,5p' "$0" | sed 's/^# //' >&2; exit 2 ;; esac
+[ $# -gt 0 ] || { echo "pc: no command" >&2; exit 2; }
+host=${ATOS_PC:-atos-pc}
+alias_ok "$host" ~/.ssh/config || { echo "pc: '$host' is not a Host alias in ~/.ssh/config (set-up: #201)" >&2; exit 2; }
+rel=$(git rev-parse --show-prefix); rel=${rel%/}
+root=$(git rev-parse --show-toplevel)
+name=$(basename "$root")
+name_ok "$name" || { echo "pc: checkout name '$name' is not [A-Za-z0-9._-]" >&2; exit 2; }
+cd "$root"
+c=atos-build/$name
+# shellcheck disable=SC2029 # $c, $name and the %q words expand here on purpose
+git ls-files -co --exclude-standard | while IFS= read -r f; do [ -e "$f" ] && echo "$f"; done |
+  COPYFILE_DISABLE=1 tar -c --no-xattrs --no-mac-metadata -T - -f - |
+  ssh "${ssh_opts[@]}" "$host" \
+    "export PATH=/usr/bin:/usr/sbin; mkdir -p $c && exec 9>$c.lock && flock 9 && rm -rf $c/in && mkdir -p $c/in $c/src && tar -x --warning=no-unknown-keyword -C $c/in -f - && exec bash $c/in/tools/dev-pc/pc --on-pc $name $(printf '%q ' "${rel:-.}" "$mode" "$@")"
