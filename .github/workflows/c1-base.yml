@@ -82,7 +82,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # A cold build (cache expired or early layers changed) is ~33 min plus checks and boot test (#277).
+    timeout-minutes: 75
     # packages: read, to pull the layer cache (#86). Not a boundary: a PR can edit this block. Publish never reads the cache.
     permissions:
       contents: read
@@ -153,7 +154,8 @@ jobs:
     needs: changes
     if: github.event_name == 'push' && needs.changes.outputs.publish == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # Always a cold build: ~33 min plus ~9 min of cache upload on slow runners (#277); 45 cancelled it.
+    timeout-minutes: 75
     # One publish at a time, never cancelled while pushing; GitHub keeps only the newest waiting one (#109).
     concurrency:
       group: c1-base-main-publish
