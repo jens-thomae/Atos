@@ -9,7 +9,7 @@ tools/dev-pc/pc run cargo nextest run --config ../../third_party/slint/patch.tom
 tools/dev-pc/pc host podman build --build-context repo=. -t localhost/atos-build-c1 components/c1-base   # on the PC itself
 ```
 
-Same interface as `tools/dev-vm/vm run`: the command runs in the same directory of the PC's copy of this checkout. Every call first sends the working tree (uncommitted edits included, ignored files left out) as a tar stream, the way `tools/dev-push/push` does, and rewrites only the files that differ, so cargo rebuilds only what changed. Files deleted here stay in the PC's copy (`pc host rm …` removes one). The PC host is `$ATOS_PC`, default `atos-pc`, which must be a `Host` alias in `~/.ssh/config` (#201). `pc` runs ssh with `BatchMode`, so it never asks for a password, and it never calls `sudo`.
+Same interface as `tools/dev-vm/vm run`: the command runs in the same directory of the PC's copy of this checkout. Every call first sends the working tree (uncommitted edits included, ignored files left out) as a tar stream, the way `tools/dev-push/push` does, and rewrites only the files that differ, so cargo rebuilds only what changed. Files deleted here stay in the PC's copy (`pc host rm …` removes one). The PC host is `$ATOS_PC`, default `atos-pc`, which must be a `Host` alias in `~/.ssh/config` (#201). `pc` runs ssh with `BatchMode`, so it never asks for a password, turns off agent, X11 and port forwarding on its side whatever `~/.ssh/config` says, and never calls `sudo`.
 
 - **`pc run`** runs in a fresh `podman run --rm` container of dev-push's builder image: the image build's own `comp` stage of [`components/c1-base/Containerfile`](../components/c1-base/Containerfile) under `components/c2-compositor`, its `shell` stage everywhere else (the same pinned base, dnf packages and rustup, cut off before the stage copies any source; built once per recipe, tagged with its hash). `cargo-nextest` at `ci.yml`'s pin and checksum is mounted in. Build output goes to one `CARGO_TARGET_DIR` per checkout. Debug builds, as in CI.
 - **`pc host`** runs on the PC as `atos`, with `PATH=/usr/bin:/usr/sbin` (not the owner's Homebrew or `~/.cargo`). For rootless `podman build` of the image and for QEMU.
@@ -27,6 +27,8 @@ All in `/var/home/atos`, which is outside the image, so it survives reboots, `bo
 | `cargo-nextest` | `~/atos-build/bin/` |
 | Builder images (shared with `push`) | `localhost/atos-dev-push-{shell,comp}:<recipe hash>`, about 3–4 GB each |
 | Toolchain, crates, git deps (shared with `push`) | podman volumes `atos-dev-push-rustup`, `-registry`, `-git` |
+
+**Running `pc` calls at the same time.** Two calls for the same checkout take turns for the sync (a lock on `~/atos-build/<checkout>.lock`) and then run in parallel; cargo's target lock serializes their builds. Across checkouts, and between `pc` and `push`, the crate and toolchain volumes are shared but cargo's download lock (`/opt/cargo/.package-cache`) is in each container's own layer, so two builds fetching the same new crates at once can leave a half-extracted crate, and two toolchain installs after a `rust-toolchain.toml` bump can leave a broken toolchain. Rerun the build; for the toolchain, `pc host podman volume rm atos-dev-push-rustup`. A checkout on an older `Containerfile` also swaps the builder back and forth with newer ones (40–143 s per switch).
 
 Nothing runs between calls: no long-lived container, no user service, no lingering. A "persistent container" is not needed; persistence is the image, the volumes and the target directory, and a container lives for one command.
 
@@ -69,14 +71,15 @@ Today's key is `restrict`ed: any command runs as `atos`, with no terminal and no
 
 | Option | Owner runs (at the PC, once) | Gives | Exposes |
 | --- | --- | --- | --- |
-| **A. Keep the restricted key** (recommended) | nothing | C2, C3, tests, rootless image builds, QEMU/KVM | the `atos` account: its files (including the owner's own in `/var/home/atos`), its screen (`push screenshot`), the network as `atos` |
-| B. Unrestricted key | in `~/.ssh/authorized_keys`, delete `restrict,` before the key | an interactive shell; port forwarding. `restrict,pty` instead gives only the shell and keeps forwarding off | as A, plus forwarding: the PC becomes a relay from the Mac to anything it reaches |
+| **A. Keep the restricted key** (recommended) | nothing | C2, C3, tests, rootless image builds, QEMU/KVM | the `atos` account: its files (including the owner's own in `/var/home/atos`), its screen (`push screenshot`), the network as `atos`. **And the owner's admin password:** the owner types it as `atos` at the PC (`sudo bootc usr-overlay`, D-015), so anything that runs as `atos`, a hostile crate build script included, can change `~/.bashrc` or `PATH` and catch it at the next `sudo`. A protects against agent mistakes and unattended root, not against a determined attacker: against one, A is one owner `sudo` away from D |
+| B. Unrestricted key | in `~/.ssh/authorized_keys`, delete `restrict,` before the key | an interactive shell; port forwarding. `restrict,pty` instead gives only the shell and keeps forwarding off | as A, plus forwarding: the PC becomes a relay from the Mac to anything it reaches. `pc` turns agent, X11 and port forwarding off on its own side (`-a -x -o ClearAllForwardings=yes`), so the Mac's agent does not reach the PC under B either |
 | C. Root for the boot tests, in a VM on the PC | nothing on the host: a follow-up card builds a rootless x86_64 VM (Fedora Cloud under QEMU/KVM, like `tools/dev-vm`) with nested KVM, where the tests run with `sudo` | shell boot test and installer test locally, with root only inside a throwaway VM | as A; the VM's root cannot touch the PC's disk or trust |
-| D. Passwordless root for `atos` | `echo 'atos ALL=(ALL) NOPASSWD: ALL' \| sudo tee /etc/sudoers.d/90-atos-agents && sudo chmod 440 /etc/sudoers.d/90-atos-agents && sudo visudo -c` | the tests as written; `bootc usr-overlay` without the owner at the PC | everything: any process as `atos` (crate build scripts included) becomes root; it can `bootc switch` to any image, change the trust policy, unseal the disk key from the TPM and read every file. Undo: `sudo rm /etc/sudoers.d/90-atos-agents` |
+| D. Passwordless root for `atos` | `echo 'atos ALL=(ALL) NOPASSWD: ALL' >/tmp/90-atos-agents && sudo visudo -cf /tmp/90-atos-agents && sudo install -m 440 -o root -g root /tmp/90-atos-agents /etc/sudoers.d/ && rm /tmp/90-atos-agents` (checked before it is installed) | the tests as written; `bootc usr-overlay` without the owner at the PC | everything: any process as `atos` (crate build scripts included) becomes root; it can `bootc switch` to any image, change the trust policy, unseal the disk key from the TPM and read every file. Undo: `sudo rm /etc/sudoers.d/90-atos-agents` |
+| E. A separate unprivileged account for `pc` (Proposed, for the owner to decide) | `sudo useradd -m atos-build` (Fedora's `useradd` also gives it subuids, so rootless podman works; `/dev/kvm` is 0666), then put a new key, made on the Mac for `pc` only, in `/var/home/atos-build/.ssh/authorized_keys` with `restrict,` in front, owned by `atos-build`, mode 600; add `atos-build` to `AllowUsers` in `/etc/ssh/sshd_config.d/10-atos-dev.conf` (same network) and `sudo systemctl restart sshd` with the local terminal open, as in #201. On the Mac: a second `Host` alias (for example `atos-build`) with that key, and `ATOS_PC=atos-build` | everything `pc` does today (it writes only in its own home); `push` stays on `atos` | only `atos-build`'s own home, the network as `atos-build`, `/dev/kvm`. No owner files, no session, no screen, no way to catch the owner's password. The only option that makes guard rails 5 and 7 enforced instead of convention. Cost: a second key and account to look after; builder images and crate volumes are no longer shared with `push` (a second copy, about 10 GB) |
 
 A narrow sudoers rule (only `podman`, only `bootc usr-overlay`) is no real limit: `sudo podman run --privileged -v /:/host` is root. So D is all or nothing.
 
-**Recommendation: A now, C as the next card, not D.** A covers the daily work. C gets the KVM tests onto the PC without root on the host, and keeps the disk-wiping steps inside a VM (guard rail 3). D would also skip D-015's "admin password every time" for `usr-overlay` on this machine; that is the owner's call for a test PC, but it turns every crate build script into root. Agents never see or type a password in any option.
+**Recommendation: A now, C as the next card, not D; E is the owner's call.** A covers the daily work, but because of the admin password above it is not a security boundary against a hostile build. E is: if the owner wants agents kept apart from their own account and password, E costs one account and one key, and buys more than keeping or giving root does. C gets the KVM tests onto the PC without root on the host, and keeps the disk-wiping steps inside a VM (guard rail 3). D would also skip D-015's "admin password every time" for `usr-overlay` on this machine; that is the owner's call for a test PC, but it turns every crate build script into root. Agents never see or type a password in any option.
 
 ## When Atos on the PC changes
 
@@ -105,13 +108,15 @@ Added:
 7. **Stay out of the owner's files.** Agents write only under `~/atos-build`, `~/.cache/atos-dev-push` and podman objects named `atos-build-*` or `atos-dev-push-*`; `pc` resets `PATH` so the owner's Homebrew and `~/.cargo` are not used.
 8. **CI and the NUC stay the gate.** The PC's results are for fast feedback; CI decides, and §7 numbers come only from the NUC.
 
+Which of these are enforced and which are convention, under option A: 2 is enforced by `pc` (no credential is sent, no forwarding); 3 by having no root (also under C and E, not D); 5 and 6 for `pc run` (`--rm`, nothing written to `/usr`) but not for `pc host`. 1, 4, 7 and 8 are convention; E would enforce 7 (and 5), and `--network=none` on `pc run` would enforce part of 4 (not done: the Mac dev VM gives the same build scripts the same home network through NAT, so the PC adds no new exposure under A).
+
 ## Clean up
 
 At the PC as `atos`, or from the Mac with `ssh atos-pc '…'`:
 
 ```sh
-rm -rf ~/atos-build                 # all checkouts' copies and targets, nextest
-rm -rf ~/atos-build/<checkout>      # or only one finished checkout
+rm -rf ~/atos-build                 # all checkouts' copies, targets and locks, nextest
+rm -rf ~/atos-build/<checkout> ~/atos-build/<checkout>.lock   # or only one finished checkout
 podman rmi --ignore localhost/atos-build-c1 && podman image prune -f   # an image build and its layer cache
 ```
 

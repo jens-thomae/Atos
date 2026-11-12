@@ -19,4 +19,10 @@ for n in "" .. .x 'a b' 'a;b' 'a/b' '$(id)'; do name_ok "$n" && fail "name '$n' 
 args=(cargo test -- 'a b' "it's" '$HOME' $'x\ny' '*')
 eval "set -- $(printf '%q ' "${args[@]}")"
 [ "$*" = "${args[*]}" ] && [ $# = ${#args[@]} ] || fail "arguments changed on the way"
+# No forwarding of any kind from the client side, whatever ~/.ssh/config says (review of #274).
+# shellcheck disable=SC2154 # ssh_opts: set in pc
+for o in -a -x ClearAllForwardings=yes ForwardAgent=no ForwardX11=no BatchMode=yes PasswordAuthentication=no; do
+  printf '%s\n' "${ssh_opts[@]}" | grep -qx -- "$o" || fail "ssh option $o missing"
+done
+grep -q 'ssh "${ssh_opts\[@\]}" "$host"' "$d/pc" || fail "ssh call does not use ssh_opts"
 echo "dev-pc: all checks pass"

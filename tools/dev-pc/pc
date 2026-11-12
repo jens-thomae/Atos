@@ -24,6 +24,7 @@ on_pc() { # <checkout> <dir relative to the repo root> run|host <cmd...>
   export PATH=/usr/bin:/usr/sbin # not the owner's Homebrew or ~/.cargo
   cache=atos-build/$name # push's sync_in and in_builder work under ~/$cache
   sync_in
+  exec 9>&- # the lock the Mac side took around extract and sync: the command itself runs unlocked
   src=$(realpath ~/"$cache"/src)
   if [ "$mode" = host ]; then cd "$src/$rel" && exec "$@"; fi
   cd "$src"
@@ -39,11 +40,16 @@ on_pc() { # <checkout> <dir relative to the repo root> run|host <cmd...>
     tar -xzf "$nx.tgz" -C ~/atos-build/bin cargo-nextest && rm "$nx.tgz" && echo "$nv" >"$nx.version"
   fi
   mkdir -p ~/"$cache"/target
-  # ponytail: shares dev-push's toolchain and crate volumes; a toolchain install racing a push is possible but rare.
+  # ponytail: shares dev-push's toolchain and crate volumes, but cargo's .package-cache lock is per container, so
+  # concurrent crate downloads or toolchain installs can race (rerun; docs/dev-pc.md). Shared lock if it bites.
   exec podman run --rm -v "$src:/src:z" -v "$HOME/$cache/target:/target:z" -v "$nx:/usr/local/bin/cargo-nextest:ro,z" \
     -v atos-dev-push-rustup:/opt/rustup -v atos-dev-push-registry:/opt/cargo/registry -v atos-dev-push-git:/opt/cargo/git \
     -e CARGO_TARGET_DIR=/target -w "/src/$rel" "$(builder_tag "$stage")" "$@"
 }
+
+# Client-side: no agent, X11 or port forwarding whatever ~/.ssh/config says, so the Mac's agent (GitHub key)
+# never reaches the PC even if the key loses `restrict` (guard rail 2). No password prompts.
+ssh_opts=(-a -x -o ClearAllForwardings=yes -o ForwardAgent=no -o ForwardX11=no -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no)
 
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by test.sh: functions only
 if [ "${1:-}" = --on-pc ]; then shift; on_pc "$@"; fi
@@ -59,7 +65,8 @@ name=$(basename "$root")
 name_ok "$name" || { echo "pc: checkout name '$name' is not [A-Za-z0-9._-]" >&2; exit 2; }
 cd "$root"
 c=atos-build/$name
+# shellcheck disable=SC2029 # $c, $name and the %q words expand here on purpose
 git ls-files -co --exclude-standard | while IFS= read -r f; do [ -e "$f" ] && echo "$f"; done |
   COPYFILE_DISABLE=1 tar -c --no-xattrs --no-mac-metadata -T - -f - |
-  ssh -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no "$host" \
-    "export PATH=/usr/bin:/usr/sbin; rm -rf $c/in && mkdir -p $c/in $c/src && tar -x --warning=no-unknown-keyword -C $c/in -f - && exec bash $c/in/tools/dev-pc/pc --on-pc $name $(printf '%q ' "${rel:-.}" "$mode" "$@")"
+  ssh "${ssh_opts[@]}" "$host" \
+    "export PATH=/usr/bin:/usr/sbin; mkdir -p $c && exec 9>$c.lock && flock 9 && rm -rf $c/in && mkdir -p $c/in $c/src && tar -x --warning=no-unknown-keyword -C $c/in -f - && exec bash $c/in/tools/dev-pc/pc --on-pc $name $(printf '%q ' "${rel:-.}" "$mode" "$@")"
